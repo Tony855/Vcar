@@ -1,4 +1,5 @@
 import asyncio
+from typing import Union
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -22,12 +23,15 @@ async def timeout_task(oid, p_bot, cust_tg, user):
             try: await p_bot.send_message(cust_tg, t("passenger.order_timeout", user))
             except: pass
 
+# 支持点击 Inline 按钮和底部快捷键盘
+@router.message(F.text == "🚗 叫车")
 @router.callback_query(F.data == "menu:passenger")
-async def cb_menu(call: CallbackQuery, state: FSMContext):
-    user = await get_user(call.from_user.id)
+async def cb_menu(event: Union[Message, CallbackQuery], state: FSMContext):
+    user = await get_user(event.from_user.id)
     await state.set_state(PaxStates.pickup)
-    await call.message.answer(t("passenger.prompt_pickup", user))
-    await call.answer()
+    msg = event if isinstance(event, Message) else event.message
+    if isinstance(event, CallbackQuery): await event.answer()
+    await msg.answer(t("passenger.prompt_pickup", user))
 
 @router.message(PaxStates.pickup, F.location)
 async def step1(msg: Message, state: FSMContext):
@@ -45,7 +49,6 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     plat, plng = data['plat'], data['plng']
     dlat, dlng = msg.location.latitude, msg.location.longitude
     
-    # 计算行程距离与一口价
     trip_dist, price_val = await calculate_fixed_price(plat, plng, dlat, dlng)
     price = f"{price_val:.2f}"
     
@@ -53,7 +56,6 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     oid = order['id']
     await db.redis.geoadd("order:pool", (plng, plat, oid))
     
-    # 使用 withdist=True 获取司机与乘客的距离
     drivers = await db.redis.geosearch(
         "driver:online", longitude=plng, latitude=plat, radius=20, unit="km", 
         sort="ASC", withdist=True
@@ -66,12 +68,7 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
         driver_id = int(d_data[0])
         pickup_dist = round(float(d_data[1]), 1)
         
-        txt = t("order.card", user, 
-                order_id=oid, 
-                pickup_distance=pickup_dist, 
-                trip_distance=trip_dist, 
-                price=price)
-        
+        txt = t("order.card", user, order_id=oid, pickup_distance=pickup_dist, trip_distance=trip_dist, price=price)
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.accept_btn", user), callback_data=f"acc:{oid}")]])
         
         try:

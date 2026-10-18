@@ -1,3 +1,4 @@
+from typing import Union
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -14,21 +15,24 @@ class DrvStates(StatesGroup):
     step_license_photo = State()
     step_drv_license_photo = State()
 
+@router.message(F.text == "🧑‍✈️ 司机端")
 @router.callback_query(F.data == "menu:driver")
-async def cb_menu(call: CallbackQuery, state: FSMContext):
-    user = await get_user(call.from_user.id)
+async def cb_menu(event: Union[Message, CallbackQuery], state: FSMContext):
+    user = await get_user(event.from_user.id)
+    msg = event if isinstance(event, Message) else event.message
+    if isinstance(event, CallbackQuery): await event.answer()
+    
     status = user.get('driver_status')
     
     if status == 'PENDING':
-        return await call.message.answer("⏳ 您的资料正在审核中，请耐心等待。")
+        return await msg.answer("⏳ 您的资料正在审核中，请耐心等待。")
     if status == 'APPROVED':
         await state.set_state(DrvStates.location)
-        return await call.message.answer(t("driver.prompt_location", user))
+        return await msg.answer(t("driver.prompt_location", user))
         
-    # 开始收集资料
     await state.set_state(DrvStates.step_phone)
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ 取消", callback_data="cancel_verify")]])
-    await call.message.answer("📝 司机入驻步骤 1/5：\n请输入您的【手机号码】：", reply_markup=kb)
+    await msg.answer("📝 司机入驻步骤 1/5：\n请输入您的【手机号码】：", reply_markup=kb)
 
 @router.callback_query(F.data == "cancel_verify")
 async def cancel_verify(call: CallbackQuery, state: FSMContext):
@@ -62,14 +66,10 @@ async def s4_license(msg: Message, state: FSMContext):
 @router.message(DrvStates.step_drv_license_photo, F.photo)
 async def s5_drv_license(msg: Message, state: FSMContext):
     data = await state.get_data()
-    await update_driver_info(
-        msg.from_user.id, data['phone'], data['plate'], 
-        data['car_pic'], data['lic_pic'], msg.photo[-1].file_id
-    )
+    await update_driver_info(msg.from_user.id, data['phone'], data['plate'], data['car_pic'], data['lic_pic'], msg.photo[-1].file_id)
     await state.clear()
-    await msg.reply("✅ 您的所有资料已提交成功！\n请耐心等待管理员审核。审核结果将通过消息通知您。")
+    await msg.reply("✅ 您的所有资料已提交成功！\n请耐心等待管理员审核。")
 
-# --- 以下是正常接单流程 ---
 @router.message(DrvStates.location, F.location)
 async def go_online(msg: Message, state: FSMContext):
     user = await get_user(msg.from_user.id)
