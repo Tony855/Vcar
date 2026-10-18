@@ -80,11 +80,11 @@ const goToAccount = () => router.push(`/mini/${tgId}/account`)
 // 联系客服 (跳转 TG)
 const contactSupport = () => {
   // ⚠️ 请将下面的 vcar_support 改成你真实的客服 TG 账号
-  const supportUsername = "vcar_support" 
+  const supportUsername = ref("vcar_support") 
   if (window.Telegram?.WebApp) {
-    window.Telegram.WebApp.openTelegramLink(`https://t.me/${supportUsername}`)
+    window.Telegram.WebApp.openTelegramLink(`https://t.me/${supportUsername.value}`)
   } else {
-    window.open(`https://t.me/${supportUsername}`)
+    window.open(`https://t.me/${supportUsername.value}`)
   }
 }
 
@@ -94,6 +94,9 @@ onMounted(async () => {
     window.Telegram.WebApp.expand()
   }
   try {
+    const supportRes = await axios.get('/api/config/support')
+    supportUsername.value = supportRes.data.username
+
     const [res1, res2] = await Promise.all([
       axios.get(`/api/driver/${tgId}/profile`),
       axios.get(`/api/driver/${tgId}/reviews`)

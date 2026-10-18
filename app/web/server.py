@@ -380,11 +380,38 @@ if os.path.exists(os.path.join(static_dir, "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
 app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
+
+# ================= 客服配置 API =================
+@app.get("/api/config/support")
+async def get_support_config():
+    async with db.pool.acquire() as c:
+        # 从 settings 表读取客服账号，如果没有则默认返回 vcar_support
+        val = await c.fetchval("SELECT value FROM settings WHERE key='support_username'")
+        return {"username": val or "vcar_support"}
+
+class SupportUpdate(BaseModel):
+    username: str
+
+@app.post("/api/config/support", dependencies=[Depends(verify_token)])
+async def set_support_config(data: SupportUpdate):
+    async with db.pool.acquire() as c:
+        # 保存或更新
+        await c.execute("""
+            INSERT INTO settings (key, value) VALUES ('support_username', $1)
+            ON CONFLICT (key) DO UPDATE SET value = $1
+        """, data.username)
+    return {"status": "ok"}
+
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+static_dir = os.path.join(BASE_DIR, "app", "web", "static")
+if os.path.exists(os.path.join(static_dir, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
+app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
+
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
-    if full_path.startswith("api/"):
-        return {"error": "API Not Found"}
+    if full_path.startswith("api/"): return {"error": "API Not Found"}
     file_path = os.path.join(static_dir, full_path)
-    if os.path.isfile(file_path):
-        return FileResponse(file_path)
+    if os.path.isfile(file_path): return FileResponse(file_path)
     return FileResponse(os.path.join(static_dir, "index.html"))

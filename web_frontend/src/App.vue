@@ -185,6 +185,23 @@ const fetchDrivers = async (page) => {
 }
 
 const handlePageChange = (page) => fetchDrivers(page)
+
+const supportConfig = ref({ username: '' })
+
+const fetchSupport = async () => {
+  try {
+    const res = await api.get('/config/support')
+    supportConfig.value = res.data
+  } catch (e) { console.error(e) }
+}
+
+const saveSupport = async () => {
+  try {
+    await api.post('/config/support', supportConfig.value)
+    ElMessage.success('客服配置已更新')
+  } catch (e) { ElMessage.error('保存失败') }
+}
+
 const savePricing = async () => { await api.post('/pricing', pricing.value); ElMessage.success('调价成功') }
 const review = async (tg_id, status) => { await api.post('/drivers/review', { tg_id, status }); ElMessage.success('操作成功'); fetchData(); fetchDrivers(currentPage.value) }
 
