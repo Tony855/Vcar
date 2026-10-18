@@ -2,7 +2,6 @@ import asyncio, logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
 from app.config import settings
 from app.db.core import db
 from app.handlers import common, passenger, driver
@@ -13,15 +12,17 @@ async def main():
     p_bot = Bot(token=settings.passenger_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     d_bot = Bot(token=settings.driver_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     
-    # 【核心修复】清空所有指令，只保留一个 /start
-    cmds = [BotCommand(command="start", description="🏠 主菜单")]
-    await p_bot.set_my_commands(cmds)
-    await d_bot.set_my_commands(cmds)
+    # 【终极清除】把左下角菜单彻底删干净，什么都不留
+    try:
+        await p_bot.delete_my_commands()
+        await d_bot.delete_my_commands()
+        logging.info("✅ 左下角系统菜单已彻底清空！")
+    except Exception as e:
+        logging.error(f"清空菜单失败: {e}")
 
     dp_pax = Dispatcher(); dp_pax["driver_bot"] = d_bot; dp_pax.include_routers(common.router, passenger.router)
     dp_drv = Dispatcher(); dp_drv["passenger_bot"] = p_bot; dp_drv.include_routers(common.router, driver.router)
     
-    logging.info("✅ 双端极简内联菜单启动成功！")
     await asyncio.gather(dp_pax.start_polling(p_bot), dp_drv.start_polling(d_bot))
 
 if __name__ == "__main__": asyncio.run(main())
