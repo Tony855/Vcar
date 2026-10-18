@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Vcar 运营后台</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>body { background: #f4f6f9; } .card { box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: none; } .login-wrapper { height: 100vh; display: flex; align-items: center; justify-content: center; }</style>
+</head>
+<body>
+<div id="app">
+    <div v-if="!isLoggedIn" class="login-wrapper">
+        <div class="card p-4" style="width: 380px;">
+            <h3 class="text-center mb-4">🔒 Vcar 登录</h3>
+            <div class="mb-3"><input type="text" v-model="loginForm.username" class="form-control" placeholder="账号 admin"></div>
+            <div class="mb-3"><input type="password" v-model="loginForm.password" class="form-control" placeholder="密码 vcar888" @keyup.enter="doLogin"></div>
+            <button @click="doLogin" class="btn btn-primary w-100">登 录</button>
+        </div>
+    </div>
+    <div v-else class="container mt-4 pb-5">
+        <div class="d-flex justify-content-between mb-4"><h2>🚗 Vcar 后台</h2><button @click="logout" class="btn btn-outline-danger btn-sm">退出</button></div>
+        <div class="row mb-4">
+            <div class="col-md-3" v-for="(val, key) in statsMap" :key="key"><div class="card text-white bg-primary mb-3"><div class="card-body"><h5>{{ val.label }}</h5><h2>{{ val.value }}</h2></div></div></div>
+        </div>
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card"><div class="card-header bg-dark text-white">⚙️ 动态调价</div><div class="card-body">
+                    <div class="mb-3"><label>起步价 ($)</label><input type="number" v-model="pricing.base_fare" class="form-control"></div>
+                    <div class="mb-3"><label>每公里 ($)</label><input type="number" v-model="pricing.per_km" class="form-control"></div>
+                    <button @click="savePricing" class="btn btn-success w-100">保存生效</button>
+                </div></div>
+            </div>
+            <div class="col-md-8">
+                <div class="card"><div class="card-header bg-dark text-white">📋 实时订单</div><div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
+                    <table class="table mb-0"><thead class="table-light"><tr><th>ID</th><th>状态</th><th>距离</th><th>一口价</th><th>乘客</th><th>司机</th></tr></thead>
+                    <tbody><tr v-for="o in orders" :key="o.id"><td>#{{o.id}}</td><td>{{o.status}}</td><td>{{o.distance_km}}km</td><td>${{Number(o.price_estimate).toFixed(2)}}</td><td>{{o.passenger_name||'-'}}</td><td>{{o.driver_name||'-'}}</td></tr></tbody></table>
+                </div></div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+const { createApp, ref, computed, onMounted } = Vue
+createApp({
+    setup() {
+        const isLoggedIn = ref(!!localStorage.getItem('vcar_token'))
+        const loginForm = ref({username: '', password: ''})
+        const stats = ref({total_orders:0, active_orders:0, total_users:0, drivers_online:0})
+        const orders = ref([]); const pricing = ref({base_fare: 1.0, per_km: 0.5}); let timer = null
+        const fetchWithAuth = async (url, options = {}) => {
+            options.headers = { ...options.headers, 'Authorization': `Bearer ${localStorage.getItem('vcar_token')}` }
+            const res = await fetch(url, options)
+            if (res.status === 401) { logout(); throw new Error('Unauthorized') }
+            return res
+        }
+        const doLogin = async () => {
+            const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(loginForm.value) })
+            if (res.ok) { const d = await res.json(); localStorage.setItem('vcar_token', d.token); isLoggedIn.value = true; fetchData(); startTimer() }
+            else alert('登录失败')
+        }
+        const logout = () => { localStorage.removeItem('vcar_token'); isLoggedIn.value = false; if (timer) clearInterval(timer) }
+        const statsMap = computed(() => ({ orders: { label: '总订单', value: stats.value.total_orders }, active: { label: '进行中', value: stats.value.active_orders }, users: { label: '用户', value: stats.value.total_users }, drivers: { label: '在线司机', value: stats.value.drivers_online } }))
+        const fetchData = async () => {
+            if (!isLoggedIn.value) return
+            try {
+                const [s, o, p] = await Promise.all([fetchWithAuth('/api/stats').then(r => r.json()), fetchWithAuth('/api/orders').then(r => r.json()), fetchWithAuth('/api/pricing').then(r => r.json())])
+                stats.value = s; orders.value = o; pricing.value = p
+            } catch(e) {}
+        }
+        const savePricing = async () => { await fetchWithAuth('/api/pricing', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pricing.value) }); alert('调价成功') }
+        const startTimer = () => { if (timer) clearInterval(timer); timer = setInterval(fetchData, 10000) }
+        onMounted(() => { if (isLoggedIn.value) { fetchData(); startTimer() } })
+        return { isLoggedIn, loginForm, doLogin, logout, stats, orders, pricing, statsMap, fetchData, savePricing }
+    }
+}).mount('#app')
+</script>
+</body>
+</html>
