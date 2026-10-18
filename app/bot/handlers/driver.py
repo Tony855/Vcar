@@ -27,7 +27,7 @@ def t(key, user, **vars):
     return translator.t(key, user.get('locale', 'zh'), **vars)
 
 async def send_drv_menu(msg: Message, user):
-    web_app_url = f"https://vcar.v2net.cc/mini/{msg.from_user.id}"
+    web_app_url = f"https://vcar.v2net.cc/mini/{msg.from_user.id}?v={int(time.time())}"
     items = [
         [InlineKeyboardButton(text="👤 我的主页 (小程序)", web_app=WebAppInfo(url=web_app_url))],
         [InlineKeyboardButton(text=t('menu.driver', user), callback_data='menu:driver')],

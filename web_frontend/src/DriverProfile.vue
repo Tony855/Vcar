@@ -1,12 +1,15 @@
 <template>
   <div class="driver-page">
     <div class="header-bg"></div>
+    
+    
+
     <div class="content-container">
       <div class="info-card">
         <div class="avatar">🚗</div>
         <div class="info-text">
           <div class="plate-row">
-            <h2 class="plate">{{ info.plate || '加载中...' }}</h2>
+            <h2 class="plate">{{ info.plate || '加载失败' }}</h2>
             <span class="status-badge">在线</span>
           </div>
           <div class="rating-row">
@@ -68,74 +71,80 @@ import axios from 'axios'
 
 const route = useRoute()
 const router = useRouter()
-const tgId = route.params.tg_id
+
+// 调试数据
+
+
+
+
 const info = ref({})
 const reviews = ref([])
+const supportUsername = ref("Tony855")
+let tgId = null
 
-// 页面跳转
 const goToOrders = () => router.push(`/mini/${tgId}/orders`)
 const goToIncome = () => router.push(`/mini/${tgId}/income`)
 const goToAccount = () => router.push(`/mini/${tgId}/account`)
 
-// 联系客服 (跳转 TG)
 const contactSupport = () => {
-  // 拆分可能有多个的客服号
   const usernames = supportUsername.value.split(',').map(s => s.trim()).filter(s => s)
+  if (usernames.length === 0) return alert("未配置客服")
   
-  if (usernames.length === 0) {
-    showToast("管理员未配置客服账号")
-    return
-  }
-
   if (usernames.length === 1) {
-    // 只有一个客服，直接跳转
-    if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.openTelegramLink(`https://t.me/${usernames[0]}`)
-    } else {
-      window.open(`https://t.me/${usernames[0]}`)
-    }
+    if (window.Telegram?.WebApp) window.Telegram.WebApp.openTelegramLink(`https://t.me/${usernames[0]}`)
+    else window.open(`https://t.me/${usernames[0]}`)
   } else {
-    // 有多个客服，使用 TG 原生弹窗让他选
     if (window.Telegram?.WebApp) {
       const buttons = usernames.map((u, i) => ({ id: String(i), type: 'default', text: `客服: ${u}` }))
       buttons.push({ id: 'cancel', type: 'cancel' })
-      
       window.Telegram.WebApp.showPopup({
-        title: '选择客服',
-        message: '请选择要联系的客服账号：',
-        buttons: buttons
+        title: '选择客服', message: '请选择要联系的客服账号：', buttons: buttons
       }, function(buttonId) {
-        if (buttonId !== 'cancel') {
-          window.Telegram.WebApp.openTelegramLink(`https://t.me/${usernames[parseInt(buttonId)]}`)
-        }
+        if (buttonId !== 'cancel') window.Telegram.WebApp.openTelegramLink(`https://t.me/${usernames[parseInt(buttonId)]}`)
       })
-    } else {
-      const choice = prompt("请选择客服账号 (输入数字):
-" + usernames.map((u, i) => `${i+1}. ${u}`).join('
-'))
-      if (choice && usernames[parseInt(choice)-1]) {
-        window.open(`https://t.me/${usernames[parseInt(choice)-1]}`)
-      }
     }
   }
 }
 
 onMounted(async () => {
-  if (window.Telegram?.WebApp) {
+  
+
+  // 1. 绝杀：优先从 Telegram SDK 获取最真实的用户 ID
+  if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
+    tgId = window.Telegram.WebApp.initDataUnsafe.user.id
     window.Telegram.WebApp.ready()
     window.Telegram.WebApp.expand()
+  } 
+  // 2. 如果拿不到，从路由或 URL 正则拿
+  else if (route.params.tg_id) {
+    tgId = route.params.tg_id
+  } else {
+    const match = window.location.pathname.match(/\/mini\/(\d+)/)
+    if (match) tgId = match[1]
   }
-  try {
-    const supportRes = await axios.get('/api/config/support')
-    supportUsername.value = supportRes.data.username
 
-    const [res1, res2] = await Promise.all([
-      axios.get(`/api/driver/${tgId}/profile`),
-      axios.get(`/api/driver/${tgId}/reviews`)
-    ])
+  
+
+  if (!tgId) {
+    debugErr.value = "致命错误: 无法获取 TG 用户 ID"
+    return
+  }
+
+  // 3. 依次请求，互不影响
+  try {
+    const supRes = await axios.get('/api/config/support')
+    if(supRes.data.username) supportUsername.value = supRes.data.username
+  } catch(e) { console.error(" | 客服拉取失败" }
+
+  try {
+    const res1 = await axios.get(`/api/driver/${tgId}/profile`)
     info.value = res1.data
+  } catch(e) { console.error(" | 资料拉取失败: " + (e.response?.data || e.message) }
+
+  try {
+    const res2 = await axios.get(`/api/driver/${tgId}/reviews`)
     reviews.value = res2.data
-  } catch (e) { console.error(e) }
+  } catch(e) { console.error(" | 评价拉取失败" }
 })
 </script>
 
