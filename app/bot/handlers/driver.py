@@ -232,6 +232,17 @@ async def rate_driver_to_pax(call: CallbackQuery):
     order = await OrderRepository.get(int(oid))
     if order and order.get('c_tg'):
         await UserRepository.update_user_rating(order['c_tg'], int(score))
+        
+        # 👇 新增：将评价写入 reviews 表 (为了数据库完整性，顺便把司机的评分也存一下)
+        async with db.pool.acquire() as c:
+            exists = await c.fetchval("SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2", int(oid), order['driver_id'])
+            if not exists:
+                await c.execute(
+                    "INSERT INTO reviews (order_id, driver_id, passenger_id, rating) VALUES ($1, $2, $3, $4)",
+                    int(oid), order['driver_id'], order['customer_id'], int(score)
+                )
+        # 👆
+        
         await call.message.edit_text(f'✅ 您已对乘客评分：{int(score)} 星。')
     await call.answer()
 
