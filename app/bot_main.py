@@ -4,25 +4,26 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from app.config import settings
 from app.db.core import db
-from app.handlers import common, passenger, driver
+from app.handlers import passenger, driver
 
 async def main():
     logging.basicConfig(level="INFO")
     await db.init()
     p_bot = Bot(token=settings.passenger_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     d_bot = Bot(token=settings.driver_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    
-    # 【终极清除】把左下角菜单彻底删干净，什么都不留
-    try:
-        await p_bot.delete_my_commands()
-        await d_bot.delete_my_commands()
-        logging.info("✅ 左下角系统菜单已彻底清空！")
-    except Exception as e:
-        logging.error(f"清空菜单失败: {e}")
 
-    dp_pax = Dispatcher(); dp_pax["driver_bot"] = d_bot; dp_pax.include_routers(common.router, passenger.router)
-    dp_drv = Dispatcher(); dp_drv["passenger_bot"] = p_bot; dp_drv.include_routers(common.router, driver.router)
-    
+    # 乘客端 Dispatcher，只挂载 passenger.router
+    dp_pax = Dispatcher()
+    dp_pax["driver_bot"] = d_bot
+    dp_pax.include_router(passenger.router)
+
+    # 司机端 Dispatcher，只挂载 driver.router
+    dp_drv = Dispatcher()
+    dp_drv["passenger_bot"] = p_bot
+    dp_drv.include_router(driver.router)
+
+    logging.info("✅ 双端独立路由启动成功！")
     await asyncio.gather(dp_pax.start_polling(p_bot), dp_drv.start_polling(d_bot))
 
-if __name__ == "__main__": asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,38 +1,31 @@
 import asyncio
-from typing import Union
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from app.db.core import db, get_user, create_order, get_order, cancel_order
+from app.db.core import db, get_user, create_order, get_order, cancel_order, get_user_orders
 from app.services.pricing import calculate_fixed_price
-from app.handlers.common import t
+from app.i18n.translator import translator
 
 router = Router()
-bg_tasks = set()
 class PaxStates(StatesGroup): 
     pickup = State()
     dropoff = State()
 
-async def timeout_task(oid, p_bot, cust_tg, user):
-    await asyncio.sleep(300)
-    order = await get_order(oid)
-    if order and order['status'] == 'DISPATCHING':
-        if await cancel_order(oid, order['customer_id']):
-            await db.redis.zrem("order:pool", str(oid))
-            try: await p_bot.send_message(cust_tg, t("passenger.order_timeout", user))
-            except: pass
+def t(key, user, **vars): return translator.t(key, user.get("locale", "zh"), **vars)
 
-# 支持点击 Inline 按钮和底部快捷键盘
-@router.message(F.text.startswith("/ride"))
+@router.message(F.text.startswith("/start"))
+async def cmd_start(msg: Message):
+    user = await get_user(msg.from_user.id, msg.from_user.first_name)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚗 立即叫车", callback_data="menu:passenger")]])
+    await msg.answer("Vcar 叫车系统\n请点击下方按钮：", reply_markup=kb)
+
 @router.callback_query(F.data == "menu:passenger")
-@router.callback_query(F.data == "menu:passenger")
-async def cb_menu(event: CallbackQuery, state: FSMContext):
-    user = await get_user(event.from_user.id)
+async def cb_menu(call: CallbackQuery, state: FSMContext):
+    user = await get_user(call.from_user.id)
     await state.set_state(PaxStates.pickup)
-    msg = event.message
-    await event.answer()
-    await msg.answer(t("passenger.prompt_pickup", user))
+    await call.message.answer(t("passenger.prompt_pickup", user))
+    await call.answer()
 
 @router.message(PaxStates.pickup, F.location)
 async def step1(msg: Message, state: FSMContext):
@@ -57,10 +50,7 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     oid = order['id']
     await db.redis.geoadd("order:pool", (plng, plat, oid))
     
-    drivers = await db.redis.geosearch(
-        "driver:online", longitude=plng, latitude=plat, radius=20, unit="km", 
-        sort="ASC", withdist=True
-    )
+    drivers = await db.redis.geosearch("driver:online", longitude=plng, latitude=plat, radius=20, unit="km", sort="ASC", withdist=True)
     
     if not drivers:
         return await msg.reply(t("passenger.no_driver", user, order_id=oid))
@@ -81,10 +71,6 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     
     p_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.cancel_btn", user), callback_data=f"p_cancel:{oid}")]])
     await msg.reply(t("passenger.order_created", user, order_id=oid, distance=trip_dist, price=price), reply_markup=p_kb)
-    
-    task = asyncio.create_task(timeout_task(oid, msg.bot, msg.from_user.id, user))
-    bg_tasks.add(task)
-    task.add_done_callback(bg_tasks.discard)
 
 @router.callback_query(F.data.startswith("p_cancel:"))
 async def p_cancel(call: CallbackQuery, driver_bot):
