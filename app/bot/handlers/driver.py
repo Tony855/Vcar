@@ -1,6 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
-import io
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from app.db.repositories.user_repo import UserRepository
@@ -11,6 +10,7 @@ from app.core.enums import DriverStatus, OrderStatus
 from app.core.i18n import translator
 from app.db.core import db
 import logging
+import io
 
 router = Router()
 class DrvStates(StatesGroup): 
@@ -44,7 +44,6 @@ async def menu_orders(call: CallbackQuery):
         orders = await OrderRepository.get_driver_orders(user['id'])
         if not orders: 
             return await call.message.answer(t("common.no_orders", user))
-        
         lines = []
         for o in orders:
             lines.append(t("order.list_item", user, id=o["id"], status=t(f"status.{o['status']}", user), price=f"{float(o['price_estimate']):.2f}"))
@@ -52,7 +51,7 @@ async def menu_orders(call: CallbackQuery):
         await call.message.answer(f"📋 <b>历史接单记录</b>\n\n{txt}")
     except Exception as e:
         logging.error(f"查询订单失败: {e}")
-        await call.message.answer("❌ 查询历史订单时发生错误，请稍后再试。")
+        await call.message.answer("❌ 查询历史订单时发生错误。")
 
 @router.callback_query(F.data == "menu:lang")
 async def menu_lang(call: CallbackQuery):
@@ -68,7 +67,7 @@ async def set_lang(call: CallbackQuery):
     loc = call.data.split(":")[1]
     async with db.pool.acquire() as c:
         await c.execute("UPDATE users SET locale=$1 WHERE telegram_id=$2", loc, call.from_user.id)
-    await call.answer() # 静默关闭按钮 loading，无弹窗
+    await call.answer()
     user = await UserRepository.get_or_create(call.from_user.id)
     await call.message.delete()
     await send_drv_menu(call.message, user)
@@ -141,30 +140,35 @@ async def accept(call: CallbackQuery, passenger_bot):
     await DispatchService.remove_order_from_pool(oid)
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t("driver.send_location_btn", user), callback_data=f"loc:{oid}")],
         [InlineKeyboardButton(text=t("driver.arrived_btn", user), callback_data=f"arr:{oid}")]
     ])
+    # 【核心升级】直接下发请求位置的快捷键盘
+    loc_kb = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text=t("driver.send_location_btn", user), request_location=True)]
+    ], resize_keyboard=True, one_time_keyboard=True)
     await call.message.edit_text(t("driver.accept_success", user, order_id=oid), reply_markup=kb)
+    await call.message.answer("请使用下方按钮同步你的位置：", reply_markup=loc_kb)
     
     order = await OrderRepository.get(oid)
     if order and order.get('c_tg'):
         d_pos = await db.redis.geopos("driver:online", str(call.from_user.id))
         d_km = round(PricingService.haversine(order['pickup_lat'], order['pickup_lng'], d_pos[0][1], d_pos[0][0]) * 1.3, 1) if d_pos and d_pos[0] else 0.0
         p_txt = t("passenger.driver_accepted", user, plate=order.get('d_plate') or '无', name=order.get('d_name') or '司机', phone=order.get('d_phone') or '无', dist=d_km)
+        
         try:
             await passenger_bot.send_message(order['c_tg'], p_txt)
-            if order.get('d_car_photo'): 
+            if order.get('d_car_photo'):
+                # 【跨Bot发送文件修复】
                 file_io = io.BytesIO()
-                    await call.bot.download(order['d_car_photo'], destination=file_io)
-                    photo_file = BufferedInputFile(file_io.getvalue(), filename="car.jpg")
-                    await passenger_bot.send_photo(order['c_tg'], photo=photo_file, caption="📸 车辆实拍图")
-        except Exception: 
-            pass
+                await call.bot.download(order['d_car_photo'], destination=file_io)
+                photo_file = BufferedInputFile(file_io.getvalue(), filename="car.jpg")
+                await passenger_bot.send_photo(order['c_tg'], photo=photo_file, caption="📸 车辆实拍图")
+            else:
+                await passenger_bot.send_message(order['c_tg'], t("passenger.no_car_photo", user))
+        except Exception as e: 
+            logging.error(f"发图失败: {e}")
 
-@router.callback_query(F.data.startswith("loc:"))
-async def send_location(call: CallbackQuery, state: FSMContext):
-    user = await UserRepository.get_or_create(call.from_user.id)
-    await call.message.answer(t("driver.ask_send_location", user))
+
 
 @router.message(F.location)
 async def handle_driver_location_update(msg: Message, passenger_bot):
@@ -214,15 +218,22 @@ async def finish(call: CallbackQuery, passenger_bot):
             price_str = f"{float(order['price_estimate']):.2f}"
             try: 
                 await passenger_bot.send_message(order['c_tg'], t("passenger.trip_completed", user, price=price_str))
-                # 给乘客发评价司机的按钮
-                stars = [[InlineKeyboardButton(text="⭐"*i, callback_data=f"rate_pax:{oid}:{i}") for i in range(1, 6)]]
+                stars = [[InlineKeyboardButton(text=f"{'⭐'*i} {i}星", callback_data=f"rate_pax:{oid}:{i}")] for i in range(1, 6)]
                 await passenger_bot.send_message(order['c_tg'], "⭐ <b>请评价本次行程的司机：</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=stars))
             except Exception: 
                 pass
         
-        # 给司机发评价乘客的按钮
-        stars_drv = [[InlineKeyboardButton(text="⭐"*i, callback_data=f"rate_drv:{oid}:{i}") for i in range(1, 6)]]
+        stars_drv = [[InlineKeyboardButton(text=f"{'⭐'*i} {i}星", callback_data=f"rate_drv:{oid}:{i}")] for i in range(1, 6)]
         await call.message.answer("⭐ <b>请评价乘客：</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=stars_drv))
+
+@router.callback_query(F.data.startswith("rate_drv:"))
+async def rate_driver_to_pax(call: CallbackQuery):
+    _, oid, score = call.data.split(":")
+    order = await OrderRepository.get(int(oid))
+    if order and order.get('c_tg'):
+        await UserRepository.update_user_rating(order['c_tg'], int(score))
+        await call.message.edit_text(f"✅ 您已对乘客评分：{int(score)} 星。")
+    await call.answer()
 
 @router.message(F.text | F.voice | F.photo)
 async def drv_chat_proxy(msg: Message, passenger_bot):
