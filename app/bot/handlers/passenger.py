@@ -1,7 +1,13 @@
+import asyncio
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+
+class RatingStates(StatesGroup):
+    waiting_for_comment = State()
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+
 from app.db.core import db
 from app.db.repositories.user_repo import UserRepository
 from app.db.repositories.order_repo import OrderRepository
@@ -131,13 +137,12 @@ async def pax_chat_proxy(msg: Message, driver_bot):
         except: pass
 
 @router.callback_query(F.data.startswith("rate_pax:"))
-async def rate_pax_to_driver(call: CallbackQuery, driver_bot):
+async def rate_pax_to_driver(call: CallbackQuery, state: FSMContext, driver_bot):
     _, oid, score = call.data.split(":")
     order = await OrderRepository.get(int(oid))
     if order and order.get('d_tg'):
         await UserRepository.update_user_rating(order['d_tg'], int(score))
         
-        # 👇 新增：将评价写入 reviews 表
         async with db.pool.acquire() as c:
             exists = await c.fetchval("SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2", int(oid), order['driver_id'])
             if not exists:
@@ -145,10 +150,35 @@ async def rate_pax_to_driver(call: CallbackQuery, driver_bot):
                     "INSERT INTO reviews (order_id, driver_id, passenger_id, rating) VALUES ($1, $2, $3, $4)",
                     int(oid), order['driver_id'], order['customer_id'], int(score)
                 )
-        # 👆
-        
-        await call.message.edit_text(f"✅ 感谢您的评价！您给司机打了 {int(score)} 星。")
+            else:
+                await c.execute("UPDATE reviews SET rating=$1 WHERE order_id=$2 AND driver_id=$3", int(score), int(oid), order['driver_id'])
+                
+        await state.set_state(RatingStates.waiting_for_comment)
+        await state.update_data(oid=int(oid), driver_tg=order['d_tg'])
+        await call.message.edit_text(f"✅ 您给司机打了 {int(score)} 星。\n\n📝 请直接回复文字，留下您的评价（或点 /skip 跳过）：")
         try:
-            await driver_bot.send_message(order['d_tg'], f"⭐ 乘客已为您打分：{int(score)} 星。")
+            asyncio.create_task(driver_bot.send_message(order['d_tg'], f"⭐ 乘客已为您打分：{int(score)} 星。"))
         except: pass
     await call.answer()
+
+
+@router.message(RatingStates.waiting_for_comment)
+async def receive_review_comment(msg: Message, state: FSMContext, driver_bot):
+    data = await state.get_data()
+    oid = data.get('oid')
+    driver_tg = data.get('driver_tg')
+    
+    if msg.text == '/skip':
+        await state.clear()
+        await msg.answer("已跳过文字评价。")
+        return
+        
+    comment = msg.text
+    async with db.pool.acquire() as c:
+        await c.execute("UPDATE reviews SET comment=$1 WHERE order_id=$2", comment, oid)
+    
+    await state.clear()
+    await msg.answer("✅ 您的文字评价已提交！")
+    try:
+        asyncio.create_task(driver_bot.send_message(driver_tg, f"⭐ 您收到了一条新评价：\n\"{comment}\""))
+    except: pass

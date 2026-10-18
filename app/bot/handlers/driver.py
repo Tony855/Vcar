@@ -1,3 +1,4 @@
+import asyncio
 from aiogram.filters import Command
 from aiogram import Router, F
 from aiogram.types import WebAppInfo, Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
@@ -189,13 +190,13 @@ async def handle_driver_location_update(msg: Message, passenger_bot):
         # 如果不是刚变为到达状态，而是普通的发送位置
         import logging
         logging.info(f"🚨 [X光透视] 准备转发位置，当前的 active 数据: {active}")
-        await passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude)
-        await passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user))
+        asyncio.create_task(passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude))
+        asyncio.create_task(passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user)))
         
         import logging
         logging.info(f"🚨 [X光透视] 准备转发位置，当前的 active 数据: {active}")
-        await passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude)
-        await passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user))
+        asyncio.create_task(passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude))
+        asyncio.create_task(passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user)))
 
 @router.callback_query(F.data.startswith('sta:'))
 async def start(call: CallbackQuery, passenger_bot):
@@ -206,7 +207,7 @@ async def start(call: CallbackQuery, passenger_bot):
         await call.message.edit_text(t('driver.start_msg', user), reply_markup=kb)
         order = await OrderRepository.get(oid)
         if order and order.get('c_tg'):
-            try: await passenger_bot.send_message(order['c_tg'], t('passenger.trip_started', user))
+            try: asyncio.create_task(passenger_bot.send_message(order['c_tg'], t('passenger.trip_started', user)))
             except Exception: pass
 
 @router.callback_query(F.data.startswith('fin:'))
@@ -219,7 +220,7 @@ async def finish(call: CallbackQuery, passenger_bot):
         if order and order.get('c_tg'):
             price_str = f"{float(order['price_estimate']):.2f}"
             try: 
-                await passenger_bot.send_message(order['c_tg'], t('passenger.trip_completed', user, price=price_str))
+                asyncio.create_task(passenger_bot.send_message(order['c_tg'], t('passenger.trip_completed', user, price=price_str)))
                 stars = [[InlineKeyboardButton(text=f"{'⭐'*i} {i}星", callback_data=f"rate_pax:{oid}:{i}")] for i in range(1, 6)]
                 await passenger_bot.send_message(order['c_tg'], '⭐ <b>请评价本次行程的司机：</b>', reply_markup=InlineKeyboardMarkup(inline_keyboard=stars))
             except Exception: pass

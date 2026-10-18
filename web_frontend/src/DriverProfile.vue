@@ -37,7 +37,7 @@
           <span class="menu-icon">📋</span>
           <span class="menu-text">我的订单</span>
         </div>
-        <div class="menu-item" @click="showToast('收入明细开发中...')">
+        <div class="menu-item" @click="goToIncome">
           <span class="menu-icon">💰</span>
           <span class="menu-text">收入明细</span>
         </div>

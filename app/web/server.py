@@ -343,12 +343,14 @@ app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
 # ================= 司机订单 API =================
 
+
+
 @app.get("/api/driver/{tg_id}/orders")
 async def get_driver_orders(tg_id: int):
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return []
-        # 移除 created_at，只查存在的字段
+        # 移除 created_at，避免字段不存在报错
         orders = await c.fetch("""
             SELECT id, status, price_estimate as price
             FROM orders 
@@ -362,6 +364,21 @@ async def get_driver_orders(tg_id: int):
             d['time_str'] = f"订单号: #{d['id']}"
             res.append(d)
         return res
+
+@app.get("/api/driver/{tg_id}/income")
+async def get_driver_income(tg_id: int):
+    async with db.pool.acquire() as c:
+        driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
+        if not driver: return []
+        orders = await c.fetch("SELECT id, price_estimate as price, status FROM orders WHERE driver_id=$1 AND status='COMPLETED' ORDER BY id DESC LIMIT 50", driver['id'])
+        return [dict(o) for o in orders]
+
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+static_dir = os.path.join(BASE_DIR, "app", "web", "static")
+if os.path.exists(os.path.join(static_dir, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
+app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
