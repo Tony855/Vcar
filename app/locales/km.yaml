@@ -50,6 +50,8 @@ driver:
   ask_send_location: 👇 សូមចុច [📎 ឯកសារភ្ជាប់] -> [ទីតាំង] ដើម្បីផ្ញើទីតាំងបច្ចុប្បន្ន។
   passenger_cancelled: '⚠️ អ្នកដំណើរបានបោះបង់ការបញ្ជាទិញ #{order_id}'
   passenger_cancelled_fee: '⚠️ អ្នកដំណើរបានបោះបង់ #{order_id} អ្នកទទួលបានសំណង ${fee}'
+  offline_btn: 🔴 ចាកចេញ
+  offline_success: ✅ អ្នកបានចាកចេញហើយ។ អ្នកនឹងមិនទទួលបានការបញ្ជាទិញថ្មីទេ។
 passenger:
   prompt_pickup: 📍 ផ្ញើទីតាំងឡាន
   prompt_dropoff: 🏁 ផ្ញើគោលដៅ

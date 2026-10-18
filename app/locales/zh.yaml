@@ -50,6 +50,8 @@ driver:
   ask_send_location: 👇 请点击输入框左侧的【📎 附件】-> 选择【位置】，将当前位置发给乘客。
   passenger_cancelled: '⚠️ 乘客取消了订单 #{order_id}'
   passenger_cancelled_fee: '⚠️ 乘客取消了订单 #{order_id}，您获得违约金 ${fee}'
+  offline_btn: 🔴 下线休息
+  offline_success: ✅ 您已成功下线，将不再接收新订单。
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点

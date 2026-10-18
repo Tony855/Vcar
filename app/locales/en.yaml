@@ -52,6 +52,8 @@ driver:
   passenger_cancelled: '⚠️ Passenger cancelled order #{order_id}'
   passenger_cancelled_fee: '⚠️ Passenger cancelled order #{order_id}, you got fee
     ${fee}'
+  offline_btn: 🔴 Go Offline
+  offline_success: ✅ You are offline. You will not receive new orders.
 passenger:
   prompt_pickup: 📍 Send Pickup Location
   prompt_dropoff: 🏁 Send Dropoff Location
