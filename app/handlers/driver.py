@@ -8,23 +8,34 @@ from app.handlers.common import t
 router = Router()
 class DrvStates(StatesGroup): 
     location = State()
-    waiting_for_verify = State() # 等待上传证件
+    waiting_for_verify = State()
 
 @router.callback_query(F.data == "menu:driver")
 async def cb_menu(call: CallbackQuery, state: FSMContext):
     user = await get_user(call.from_user.id)
+    status = user.get('driver_status')
     
-    # 如果未通过审核，进入审核流程
-    if user.get('driver_status') != 'APPROVED':
+    # 如果审核中，禁止重复提交
+    if status == 'PENDING':
+        await call.message.answer("⏳ 您的证件正在审核中，请耐心等待管理员审核结果。")
+        await call.answer()
+        return
+        
+    # 如果未通过或未提交，进入上传流程
+    if status != 'APPROVED':
         await state.set_state(DrvStates.waiting_for_verify)
         txt = "⚠️ 您尚未通过司机认证。\n请发送您的【身份证或驾驶证照片】进行审核。"
+        if status == 'REJECTED':
+            txt = "❌ 您的上次审核未通过。\n请重新发送【身份证或驾驶证照片】进行审核。"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ 取消", callback_data="cancel_verify")]])
         await call.message.answer(txt, reply_markup=kb)
         await call.answer()
         return
         
+    # 已通过审核，直接上线
     await state.set_state(DrvStates.location)
-    await call.message.answer(t("driver.prompt_location", user)); await call.answer()
+    await call.message.answer(t("driver.prompt_location", user))
+    await call.answer()
 
 @router.callback_query(F.data == "cancel_verify")
 async def cancel_verify(call: CallbackQuery, state: FSMContext):
@@ -48,12 +59,13 @@ async def go_online(msg: Message, state: FSMContext):
 async def accept(call: CallbackQuery, passenger_bot):
     user = await get_user(call.from_user.id)
     oid = int(call.data.split(":")[1])
-    if not await accept_order(oid, user['id']): return await call.answer("手慢了", show_alert=True)
+    if not await accept_order(oid, user['id']): 
+        return await call.answer("手慢了，已被接走", show_alert=True)
     
     await db.redis.zrem("order:pool", str(oid))
     order = await get_order(oid)
     
-    # 生成联系方式
+    # 司机端显示乘客联系方式
     contact_info = f"\n\n📞 <b>联系乘客：</b>\n姓名：{order['c_name']}\n"
     if order['c_user']:
         contact_info += f"TG：@{order['c_user']}"
@@ -63,15 +75,17 @@ async def accept(call: CallbackQuery, passenger_bot):
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("driver.arrived_btn", user), callback_data=f"arr:{oid}")]])
     await call.message.edit_text(t("driver.accept_success", user, order_id=oid) + contact_info, reply_markup=kb)
     
+    # 通知乘客
     if order and order['c_tg']:
-        # 通知乘客
         p_txt = t("passenger.driver_accepted", user, tg_id=call.from_user.id) + f"\n\n🚗 <b>司机信息：</b>\n姓名：{user['first_name']}\n"
-        if user['username']:
+        if user.get('username'):
             p_txt += f"TG：@{user['username']}"
         else:
             p_txt += f"TG ID：<code>{call.from_user.id}</code>"
-        try: await passenger_bot.send_message(order['c_tg'], p_txt)
-        except: pass
+        try: 
+            await passenger_bot.send_message(order['c_tg'], p_txt)
+        except: 
+            pass
 
 @router.callback_query(F.data.startswith("arr:"))
 async def arrived(call: CallbackQuery, passenger_bot):
