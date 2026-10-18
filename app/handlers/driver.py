@@ -15,12 +15,13 @@ class DrvStates(StatesGroup):
     step_license_photo = State()
     step_drv_license_photo = State()
 
-@router.message(F.text == "🧑‍✈️ 司机端")
+@router.message(F.text.startswith("/online"))
+@router.message(F.text == "🧑‍✈️ 司机端上线")
 @router.callback_query(F.data == "menu:driver")
-async def cb_menu(event: Union[Message, CallbackQuery], state: FSMContext):
+async def cb_menu(event: CallbackQuery, state: FSMContext):
     user = await get_user(event.from_user.id)
-    msg = event if isinstance(event, Message) else event.message
-    if isinstance(event, CallbackQuery): await event.answer()
+    msg = event.message
+    await event.answer()
     
     status = user.get('driver_status')
     
