@@ -79,6 +79,11 @@ async def go_online(msg: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("acc:"))
 async def accept(call: CallbackQuery, passenger_bot):
     user = await get_user(call.from_user.id)
+    
+    # 【核心修复】拦截未审核通过的司机接单
+    if user.get('driver_status') != 'APPROVED':
+        return await call.answer("⚠️ 您的资料尚未审核通过，无法接单！", show_alert=True)
+        
     oid = int(call.data.split(":")[1])
     if not await accept_order(oid, user['id']): return await call.answer("手慢了", show_alert=True)
     await db.redis.zrem("order:pool", str(oid))

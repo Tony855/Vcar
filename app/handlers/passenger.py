@@ -55,7 +55,19 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     if not drivers:
         return await msg.reply(t("passenger.no_driver", user, order_id=oid))
         
-    for d_data in drivers:
+    driver_ids = [int(d[0]) for d in drivers]
+    approved_ids = set()
+    if driver_ids:
+        async with db.pool.acquire() as c:
+            rows = await c.fetch("SELECT telegram_id FROM users WHERE telegram_id = ANY($1) AND driver_status='APPROVED'", driver_ids)
+            approved_ids = {r['telegram_id'] for r in rows}
+
+    valid_drivers = [d for d in drivers if int(d[0]) in approved_ids]
+    
+    if not valid_drivers:
+        return await msg.reply(t("passenger.no_driver", user, order_id=oid))
+
+    for d_data in valid_drivers:
         driver_id = int(d_data[0])
         pickup_dist = round(float(d_data[1]), 1)
         
