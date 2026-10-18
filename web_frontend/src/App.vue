@@ -18,7 +18,7 @@
     
     <el-main>
       <el-row :gutter="20" class="mb-4">
-        <el-col :span="6" v-for="(val, key) in statsMap" :key="key">
+        <el-col :xs="12" :sm="12" :md="6" v-for="(val, key) in statsMap" :key="key">
           <el-card shadow="hover" class="stat-card">
             <div class="stat-title">{{ val.label }}</div>
             <div class="stat-value">{{ val.value }}</div>
@@ -29,7 +29,7 @@
       <el-tabs v-model="currentTab">
         <el-tab-pane label="📋 实时订单 & 调价" name="orders">
           <el-row :gutter="20">
-            <el-col :span="8">
+            <el-col :xs="24" :md="8">
               <el-card>
                 <template #header>⚙️ 动态调价</template>
                 <el-form label-width="80px">
@@ -39,7 +39,7 @@
                 </el-form>
               </el-card>
             </el-col>
-            <el-col :span="16">
+            <el-col :xs="24" :md="16">
               <el-card>
                 <template #header>📋 实时订单</template>
                 <el-table :data="orders" stripe style="width: 100%" height="400">
@@ -184,15 +184,17 @@ const review = async (tg_id, status) => { await api.post('/drivers/review', { tg
 onMounted(() => { if (isLoggedIn.value) { fetchData(); fetchDrivers(1) } })
 </script>
 
-<style>
-body { margin: 0; background-color: #f0f2f5; font-family: sans-serif; }
-.login-wrapper { height: 100vh; display: flex; align-items: center; justify-content: center; }
-.login-card { width: 400px; }
-.admin-layout { min-height: 100vh; }
-.header { background-color: #fff; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 4px rgba(0,21,41,.08); z-index: 10; }
-.logo { font-size: 20px; font-weight: bold; }
-.stat-card { text-align: center; }
-.stat-title { color: #666; font-size: 14px; }
-.stat-value { font-size: 28px; font-weight: bold; color: #409eff; margin-top: 10px; }
-.mb-4 { margin-bottom: 20px; }
+
+<style scoped>
+.stat-card { text-align: center; margin-bottom: 15px; }
+.stat-title { font-size: 14px; color: #666; margin-bottom: 10px; }
+.stat-value { font-size: 24px; font-weight: bold; color: #409EFF; }
+.el-input-number { width: 100% !important; }
+.el-form-item__label { font-size: 13px; }
+.el-table { font-size: 13px; }
+@media (max-width: 768px) {
+  .stat-value { font-size: 20px; }
+  .el-card__body { padding: 10px; }
+}
 </style>
+
