@@ -1,10 +1,10 @@
 from app.db.core import db
-from app.db.repositories.user_repo import UserRepository
+import logging
 
 class DispatchService:
     @staticmethod
     async def get_nearby_drivers(lng, lat, radius_km=20):
-        # 仅从 Redis 的 driver:online 集合中检索（没上线的绝对搜不到）
+        # 暂时放宽到 50km 用于排查，确认是不是坐标太远
         return await db.redis.geosearch("driver:online", longitude=lng, latitude=lat, radius=radius_km, unit="km", sort="ASC", withdist=True)
     
     @staticmethod
@@ -21,36 +21,43 @@ class DispatchService:
 
     @classmethod
     async def smart_dispatch(cls, pickup_lng, pickup_lat, top_n=3):
-        raw_drivers = await cls.get_nearby_drivers(pickup_lng, pickup_lat)
+        # 扩大到 50km 进行测试
+        raw_drivers = await cls.get_nearby_drivers(pickup_lng, pickup_lat, radius_km=50)
+        logging.info(f"🔍 [派单] 乘客坐标({pickup_lng},{pickup_lat})，50km内发现原始司机: {raw_drivers}")
+        
         if not raw_drivers:
+            logging.warning("❌ [派单] 50km 内没有发现任何上线司机！")
             return []
 
-        # 【核心闸门】查出所有正在行程中的司机，直接过滤掉
         async with db.pool.acquire() as c:
             busy_rows = await c.fetch("SELECT DISTINCT driver_id FROM orders WHERE status IN ('ACCEPTED', 'ARRIVED', 'IN_PROGRESS') AND driver_id IS NOT NULL")
-            busy_driver_ids = {r['driver_id'] for r in busy_rows}
-
-        driver_ids = [int(d[0]) for d in raw_drivers]
-        ratings = await UserRepository.get_drivers_info(driver_ids)
+            busy_ids = {r['driver_id'] for r in busy_rows}
+            
+            tg_ids = [int(d[0]) for d in raw_drivers]
+            user_rows = await c.fetch("SELECT id, telegram_id, rating FROM users WHERE telegram_id = ANY($1)", tg_ids)
+            user_map = {r['telegram_id']: {"db_id": r['id'], "rating": float(r['rating'] or 5.0)} for r in user_rows}
+            
+            logging.info(f"🔍 [派单] 忙碌内部ID: {busy_ids}")
+            logging.info(f"🔍 [派单] 数据库中匹配到的司机: {user_map}")
 
         scored_drivers = []
         for d in raw_drivers:
             tg_id = int(d[0])
-            # 如果是忙碌司机，直接跳过
-            # 注意：这里为了简化，我们通过查数据库查出的是系统内部自增ID，而 tg_id 是 TG ID。
-            # 所以换个方式过滤：直接查这个 TG ID 有没有活跃订单
-            async with db.pool.acquire() as c:
-                has_active = await c.fetchval("""
-                    SELECT 1 FROM orders o 
-                    JOIN users u ON o.driver_id = u.id 
-                    WHERE u.telegram_id = $1 AND o.status IN ('ACCEPTED', 'ARRIVED', 'IN_PROGRESS') LIMIT 1
-                """, tg_id)
-                if has_active:
-                    continue # 司机正忙，跳过！
-
             dist = float(d[1])
-            rating = ratings.get(tg_id, 5.0)
-            dist_score = max(0, (20 - dist) / 20) * 60
+            
+            if tg_id not in user_map:
+                logging.warning(f"❌ [派单] 司机 TG:{tg_id} 不在数据库 users 表中，被过滤")
+                continue
+                
+            db_id = user_map[tg_id]["db_id"]
+            rating = user_map[tg_id]["rating"]
+
+            # 如果是忙碌司机，直接跳过
+            if db_id in busy_ids:
+                logging.warning(f"❌ [派单] 司机 TG:{tg_id} (DB_ID:{db_id}) 正在忙碌，被过滤")
+                continue
+
+            dist_score = max(0, (50 - dist) / 50) * 60
             rating_score = (rating / 5.0) * 40
             total_score = dist_score + rating_score
             
@@ -62,4 +69,5 @@ class DispatchService:
             })
 
         scored_drivers.sort(key=lambda x: x["score"], reverse=True)
+        logging.info(f"✅ [派单] 最终筛选出 {len(scored_drivers)} 个司机: {scored_drivers}")
         return scored_drivers[:top_n]

@@ -166,12 +166,22 @@ async def handle_driver_location_update(msg: Message, passenger_bot):
     if active and active.get('c_tg'):
         if active['status'] == 'ACCEPTED':
             if await OrderRepository.update_status(active['id'], OrderStatus.ARRIVED.value, OrderStatus.ACCEPTED.value):
-                await passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude)
+                import logging
+                logging.info(f"🚨 [X光透视] 准备发送到达消息，当前的 active 数据: {active}")
                 await passenger_bot.send_message(active['c_tg'], t('passenger.driver_arrived', user))
                 await msg.answer(t('driver.arrived_msg', user), reply_markup=ReplyKeyboardRemove())
                 kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t('driver.start_btn', user), callback_data=f"sta:{active['id']}")]])
                 await msg.answer(t('driver.trip_ready_prompt', user), reply_markup=kb)
                 return
+        
+        # 如果不是刚变为到达状态，而是普通的发送位置
+        import logging
+        logging.info(f"🚨 [X光透视] 准备转发位置，当前的 active 数据: {active}")
+        await passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude)
+        await passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user))
+        
+        import logging
+        logging.info(f"🚨 [X光透视] 准备转发位置，当前的 active 数据: {active}")
         await passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude)
         await passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user))
 
@@ -222,4 +232,6 @@ async def drv_chat_proxy(msg: Message, passenger_bot):
         try:
             await passenger_bot.send_message(active['c_tg'], t('common.from_driver', user))
             await msg.copy_to(active['c_tg'])
-        except Exception: pass
+        except Exception as e:
+            import logging
+            logging.error(f"❌ [跨Bot转发失败] 乘客TG:{active['c_tg']} 报错: {e}")

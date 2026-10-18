@@ -86,7 +86,11 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     oid = order['id']
     
     drivers = await DispatchService.smart_dispatch(data['plng'], data['plat'], top_n=3)
-    if not drivers: return await msg.reply(t("passenger.no_driver", user, order_id=oid))
+    if not drivers: 
+        # 为了方便测试，把 Redis 里的真实情况告诉乘客
+        raw = await DispatchService.get_nearby_drivers(data['plng'], data['plat'], radius_km=100)
+        await msg.reply(f"⚠️ 派单失败。100km内实际有 {len(raw)} 位司机上线。请查看服务器后台日志排查原因。")
+        return
     
     for d in drivers:
         txt = t("order.card", user, order_id=oid, pickup_distance=round(float(d["dist"])*1.3,1), trip_distance=trip_dist, price=f"{price_val:.2f}")
@@ -98,7 +102,7 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
         except: pass
         
     p_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.cancel_btn", user), callback_data=f"p_cancel:{oid}")]])
-    await msg.reply(t("passenger.order_created", user回调, order_id=oid, distance=trip_dist, price=f"{price_val:.2f}"), reply_markup=p_kb)
+    await msg.reply(t("passenger.order_created", user, order_id=oid, distance=trip_dist, price=f"{price_val:.2f}"), reply_markup=p_kb)
 
 @router.callback_query(F.data.startswith("p_cancel:"))
 async def p_cancel(call: CallbackQuery, driver_bot):

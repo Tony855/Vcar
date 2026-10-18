@@ -18,7 +18,7 @@ class OrderRepository:
     @staticmethod
     async def get_active_order_by_user(uid):
         async with db.pool.acquire() as c:
-            row = await c.fetchrow("SELECT * FROM orders WHERE (customer_id=$1 OR driver_id=$1) AND status IN ('ACCEPTED','ARRIVED','IN_PROGRESS')", uid)
+            row = await c.fetchrow("SELECT o.*, c.telegram_id AS c_tg, d.telegram_id AS d_tg FROM orders o LEFT JOIN users c ON o.customer_id = c.id LEFT JOIN users d ON o.driver_id = d.id WHERE (o.customer_id = $1 OR o.driver_id = $1) AND status IN ('ACCEPTED','ARRIVED','IN_PROGRESS')", uid)
             return dict(row) if row else None
 
     @staticmethod
