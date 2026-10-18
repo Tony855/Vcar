@@ -41,7 +41,7 @@
           <span class="menu-icon">👤</span>
           <span class="menu-text">账户信息</span>
         </div>
-        <div class="menu-item" @click="contactSupport">
+        <div class="menu-item" @click="showSupportModal = true">
           <span class="menu-icon">🎧</span>
           <span class="menu-text">联系客服</span>
         </div>
@@ -59,6 +59,20 @@
         </div>
       </div>
     </div>
+
+    <!-- 自定义的客服选择弹窗 -->
+    <div v-if="showSupportModal" class="modal-overlay" @click.self="showSupportModal = false">
+      <div class="modal-content">
+        <h3 class="modal-title">选择客服</h3>
+        <p class="modal-desc">请选择您要联系的客服账号：</p>
+        <div class="modal-buttons">
+          <button v-for="(u, i) in supportList" :key="i" class="btn-support" @click="openTelegram(u)">
+            👤 {{ u }}
+          </button>
+        </div>
+        <button class="btn-cancel" @click="showSupportModal = false">取消</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -72,30 +86,21 @@ const router = useRouter()
 
 const info = ref({})
 const reviews = ref([])
-const supportUsername = ref("Tony855")
+const supportList = ref([])
+const showSupportModal = ref(false)
 let tgId = null
 
 const goToOrders = () => router.push(`/mini/${tgId}/orders`)
 const goToIncome = () => router.push(`/mini/${tgId}/income`)
 const goToAccount = () => router.push(`/mini/${tgId}/account`)
 
-const contactSupport = () => {
-  const usernames = supportUsername.value.split(',').map(s => s.trim()).filter(s => s)
-  if (usernames.length === 0) return alert("未配置客服")
-  
-  if (usernames.length === 1) {
-    if (window.Telegram?.WebApp) window.Telegram.WebApp.openTelegramLink(`https://t.me/${usernames[0]}`)
-    else window.open(`https://t.me/${usernames[0]}`)
+const openTelegram = (username) => {
+  showSupportModal.value = false
+  const url = `https://t.me/${username}`
+  if (window.Telegram?.WebApp) {
+    window.Telegram.WebApp.openTelegramLink(url)
   } else {
-    if (window.Telegram?.WebApp) {
-      const buttons = usernames.map((u, i) => ({ id: String(i), type: 'default', text: `客服: ${u}` }))
-      buttons.push({ id: 'cancel', type: 'cancel' })
-      window.Telegram.WebApp.showPopup({
-        title: '选择客服', message: '请选择要联系的客服账号：', buttons: buttons
-      }, function(buttonId) {
-        if (buttonId !== 'cancel') window.Telegram.WebApp.openTelegramLink(`https://t.me/${usernames[parseInt(buttonId)]}`)
-      })
-    }
+    window.open(url)
   }
 }
 
@@ -115,7 +120,8 @@ onMounted(async () => {
 
   try {
     const supRes = await axios.get('/api/config/support')
-    if(supRes.data.username) supportUsername.value = supRes.data.username
+    const rawStr = supRes.data.username || "Tony855"
+    supportList.value = rawStr.split(',').map(s => s.trim()).filter(s => s)
   } catch(e) { console.error(e) }
 
   try {
@@ -160,4 +166,15 @@ onMounted(async () => {
 .reviewer-name { font-weight: 700; color: #374151; font-size: 14px; }
 .review-stars { color: #eab308; font-size: 12px; }
 .review-comment { color: #4b5563; font-size: 14px; line-height: 1.5; margin: 0; }
+
+/* 弹窗样式 */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.modal-content { background: #fff; border-radius: 20px; width: 80%; max-width: 320px; padding: 24px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+.modal-title { font-size: 20px; font-weight: 900; color: #1f2937; margin: 0 0 8px; }
+.modal-desc { font-size: 14px; color: #6b7280; margin: 0 0 20px; }
+.modal-buttons { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+.btn-support { background: #eff6ff; color: #3b82f6; border: 1px solid #bfdbfe; padding: 12px; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; }
+.btn-support:active { background: #dbeafe; }
+.btn-cancel { background: #f3f4f6; color: #4b5563; border: none; padding: 12px; border-radius: 12px; font-size: 16px; font-weight: bold; width: 100%; cursor: pointer; }
+.btn-cancel:active { background: #e5e7eb; }
 </style>
