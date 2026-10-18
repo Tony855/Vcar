@@ -35,3 +35,15 @@ class OrderRepository:
     async def cancel_with_fee(oid, uid, role, fee=0.0):
         async with db.pool.acquire() as c:
             return (await c.execute("UPDATE orders SET status='CANCELLED', cancel_by=$1, cancel_fee=$2 WHERE id=$3 AND status IN ('DISPATCHING','ACCEPTED','ARRIVED') AND (customer_id=$4 OR driver_id=$4)", role, fee, oid, uid)).endswith("1")
+
+    @staticmethod
+    async def get_customer_orders(cid):
+        async with db.pool.acquire() as c:
+            rows = await c.fetch("SELECT id, status, price_estimate FROM orders WHERE customer_id=$1 ORDER BY id DESC LIMIT 5", cid)
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    async def get_driver_orders(did):
+        async with db.pool.acquire() as c:
+            rows = await c.fetch("SELECT id, status, price_estimate FROM orders WHERE driver_id=$1 ORDER BY id DESC LIMIT 5", did)
+            return [dict(r) for r in rows]

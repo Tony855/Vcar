@@ -1,60 +1,105 @@
+menu:
+  title: Vcar Menu
+  passenger: 🚗 Ride
+  driver: 🧑‍✈️ Driver
+  orders: 📋 Orders
+  lang: 🌐 Language
+lang:
+  choose: Choose language
+  changed: Changed
+common:
+  send_location_tip: ⚠️ Send location via attachment
+  no_orders: No orders
+  slow_hand: Too slow
+  pickup_venue: 📍 Pickup
+  pickup_desc: Here
+  dropoff_venue: 🏁 Dropoff
+  dropoff_desc: Here
+  from_passenger: '💬 [From Passenger]:'
+  from_driver: '💬 [From Driver]:'
+  driver_location_update: 🚗 Driver updated location.
+driver:
+  prompt_location: 🚗 Send location to go online
+  online_success: ✅ Online successfully
+  arrived_btn: 📍 Arrived
+  arrived_msg: 📍 Waiting for passenger
+  start_btn: 🚗 Start
+  start_msg: 🚗 Go
+  finish_btn: 🏁 Finish
+  accept_success: '🎉 Accepted #{order_id}'
+  finish_msg: '🏁 Completed #{order_id}'
+  status_pending: ⏳ Pending review, please wait.
+  not_approved: ⚠️ Your profile is not approved yet, cannot accept.
+  reg_step1: '📝 Step 1/5:
 
-menu: {title: "Vcar Menu", passenger: "🚗 Ride", driver: "🧑‍✈️ Driver", orders: "📋 Orders"}
-lang: {choose: "Choose language", changed: "Changed"}
-common: 
-  send_location_tip: "⚠️ Send location via attachment"
-  no_orders: "No orders"
-  slow_hand: "Too slow"
-  pickup_venue: "📍 Pickup"
-  pickup_desc: "Here"
-  dropoff_venue: "🏁 Dropoff"
-  dropoff_desc: "Here"
-  from_passenger: "💬 [From Passenger]:"
-  from_driver: "💬 [From Driver]:"
-  driver_location_update: "🚗 Driver updated location."
-driver: 
-  prompt_location: "🚗 Send location to go online"
-  online_success: "✅ Online successfully"
-  arrived_btn: "📍 Arrived"
-  arrived_msg: "📍 Waiting for passenger"
-  start_btn: "🚗 Start"
-  start_msg: "🚗 Go"
-  finish_btn: "🏁 Finish"
-  accept_success: "🎉 Accepted #{order_id}"
-  finish_msg: "🏁 Completed #{order_id}"
-  status_pending: "⏳ Pending review, please wait."
-  not_approved: "⚠️ Your profile is not approved yet, cannot accept."
-  reg_step1: "📝 Step 1/5:\nPlease enter [Phone Number]:"
-  reg_step2: "📝 Step 2/5:\nPlease enter [Plate Number]:"
-  reg_step3: "📸 Step 3/5:\nPlease upload [Car Photo with Plate]:"
-  reg_step4: "📸 Step 4/5:\nPlease upload [Vehicle License]:"
-  reg_step5: "📸 Step 5/5:\nPlease upload [Driving License]:"
-  reg_success: "✅ Profile submitted, waiting for review."
-  send_location_btn: "📍 Send Live Location to Passenger"
-  ask_send_location: "👇 Please click [📎 Attachment] -> [Location] to send your current location."
-  passenger_cancelled: "⚠️ Passenger cancelled order #{order_id}"
-  passenger_cancelled_fee: "⚠️ Passenger cancelled order #{order_id}, you got fee ${fee}"
-passenger: 
-  prompt_pickup: "📍 Send Pickup Location"
-  prompt_dropoff: "🏁 Send Dropoff Location"
-  order_created: "✅ Order #{order_id}\nDist {distance}km\nFixed ${price}"
-  no_driver: "⚠️ No drivers nearby"
-  driver_accepted: "🎉 <b>Driver accepted!</b>\n\n🚗 <b>Vehicle Info:</b>\nPlate: <code>{plate}</code>\nDriver: {name}\nPhone: <code>{phone}</code>\nPickup Dist: {dist} km\n\nPlease look out for the vehicle!"
-  driver_arrived: "📍 Driver arrived"
-  trip_started: "🚗 Trip started"
-  trip_completed: "🏁 Trip ended, pay ${price}"
-  cancel_free: "✅ Order cancelled."
-  cancel_with_fee: "✅ Order cancelled. Cancel fee ${fee} deducted."
-  order_timeout: "⏳ Timeout cancelled"
-order: 
-  card: "🔔 <b>New Order #{order_id}</b>\nPickup Dist: {pickup_distance} km\nTrip Dist: {trip_distance} km\nFixed Fare: ${price}\n\n👆 The 2 locations above are: 📍 Pickup and 🏁 Dropoff"
-  accept_btn: "✅ Accept"
-  cancel_btn: "❌ Cancel"
-  list_item: "#{id} | {status} | ${price}"
-status: 
-  DISPATCHING: "Dispatching"
-  ACCEPTED: "Accepted"
-  ARRIVED: "Arrived"
-  IN_PROGRESS: "In Progress"
-  COMPLETED: "Completed"
-  CANCELLED: "Cancelled"
+    Please enter [Phone Number]:'
+  reg_step2: '📝 Step 2/5:
+
+    Please enter [Plate Number]:'
+  reg_step3: '📸 Step 3/5:
+
+    Please upload [Car Photo with Plate]:'
+  reg_step4: '📸 Step 4/5:
+
+    Please upload [Vehicle License]:'
+  reg_step5: '📸 Step 5/5:
+
+    Please upload [Driving License]:'
+  reg_success: ✅ Profile submitted, waiting for review.
+  send_location_btn: 📍 Send Live Location to Passenger
+  ask_send_location: 👇 Please click [📎 Attachment] -> [Location] to send your current
+    location.
+  passenger_cancelled: '⚠️ Passenger cancelled order #{order_id}'
+  passenger_cancelled_fee: '⚠️ Passenger cancelled order #{order_id}, you got fee
+    ${fee}'
+passenger:
+  prompt_pickup: 📍 Send Pickup Location
+  prompt_dropoff: 🏁 Send Dropoff Location
+  order_created: '✅ Order #{order_id}
+
+    Dist {distance}km
+
+    Fixed ${price}'
+  no_driver: ⚠️ No drivers nearby
+  driver_accepted: '🎉 <b>Driver accepted!</b>
+
+
+    🚗 <b>Vehicle Info:</b>
+
+    Plate: <code>{plate}</code>
+
+    Driver: {name}
+
+    Phone: <code>{phone}</code>
+
+    Pickup Dist: {dist} km
+
+
+    Please look out for the vehicle!'
+  driver_arrived: 📍 Driver arrived
+  trip_started: 🚗 Trip started
+  trip_completed: 🏁 Trip ended, pay ${price}
+  cancel_free: ✅ Order cancelled.
+  cancel_with_fee: ✅ Order cancelled. Cancel fee ${fee} deducted.
+  order_timeout: ⏳ Timeout cancelled
+order:
+  card: '🔔 <b>New Order #{order_id}</b>
+
+    Pickup Dist: {pickup_distance} km
+
+    Trip Dist: {trip_distance} km
+
+    Fixed Fare: ${price}
+
+
+    👆 The 2 locations above are: 📍 Pickup and 🏁 Dropoff'
+  accept_btn: ✅ Accept
+  cancel_btn: ❌ Cancel
+  list_item: '#{id} | {status} | ${price}'
+status:
+  DISPATCHING: Dispatching
+  ACCEPTED: Accepted
+  ARRIVED: Arrived
+  IN_PROGRESS: In Progress
+  COMPLETED: Completed
+  CANCELLED: Cancelled
