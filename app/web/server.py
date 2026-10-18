@@ -1,9 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-import jwt, datetime, sys
+import jwt, datetime, sys, aiohttp
 sys.path.append("/root/vcar")
 from app.config import settings
 from app.db.core import db, get_pending_drivers, update_driver_status
@@ -38,6 +38,17 @@ async def pending_drivers():
 async def review_driver(data: ReviewData):
     await update_driver_status(data.tg_id, data.status)
     return {"status": "ok"}
+
+# 【新增】代理图片接口，利用 Bot Token 请求 TG 图片流
+@app.get("/api/file/{file_id}")
+async def get_tg_file(file_id: str):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://api.telegram.org/bot{settings.driver_bot_token}/getFile?file_id={file_id}") as resp:
+            data = await resp.json()
+            if not data.get("ok"): raise HTTPException(status_code=404)
+            file_path = data["result"]["file_path"]
+        async with session.get(f"https://api.telegram.org/file/bot{settings.driver_bot_token}/{file_path}") as resp:
+            return Response(content=await resp.read(), media_type="image/jpeg")
 
 @app.get("/api/stats", dependencies=[Depends(verify_token)])
 async def get_stats():

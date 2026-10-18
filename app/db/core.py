@@ -1,6 +1,7 @@
 import asyncpg
 import redis.asyncio as redis
 from app.config import settings
+
 class DB:
     def __init__(self): self.pool = None; self.redis = None
     async def init(self):
@@ -20,24 +21,27 @@ async def update_driver_status(tid, status):
     async with db.pool.acquire() as c:
         await c.execute("UPDATE users SET driver_status=$1 WHERE telegram_id=$2", status, tid)
 
+async def update_driver_info(tid, phone, plate, car_pic, lic_pic, drv_pic):
+    async with db.pool.acquire() as c:
+        await c.execute("""
+            UPDATE users SET phone=$1, plate_number=$2, car_photo=$3, license_photo=$4, driving_license_photo=$5, driver_status='PENDING'
+            WHERE telegram_id=$6
+        """, phone, plate, car_pic, lic_pic, drv_pic, tid)
+
 async def get_pending_drivers():
     async with db.pool.acquire() as c:
-        return [dict(r) for r in await c.fetch("SELECT telegram_id, first_name, username FROM users WHERE driver_status='PENDING'")]
+        return [dict(r) for r in await c.fetch("SELECT telegram_id, first_name, username, phone, plate_number, car_photo, license_photo, driving_license_photo FROM users WHERE driver_status='PENDING'")]
 
-# --- 订单相关 ---
+# --- 订单相关（不变） ---
 async def create_order(cid, plng, plat, dlng, dlat, dist, price):
     async with db.pool.acquire() as c:
         return dict(await c.fetchrow("INSERT INTO orders (customer_id, pickup_lng, pickup_lat, dropoff_lng, dropoff_lat, distance_km, price_estimate) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id", cid, plng, plat, dlng, dlat, dist, price))
 async def get_order(oid):
     async with db.pool.acquire() as c:
         row = await c.fetchrow("""
-            SELECT o.*, 
-                   cu.telegram_id AS c_tg, cu.username AS c_user, cu.first_name AS c_name,
+            SELECT o.*, cu.telegram_id AS c_tg, cu.username AS c_user, cu.first_name AS c_name,
                    du.telegram_id AS d_tg, du.username AS d_user, du.first_name AS d_name
-            FROM orders o 
-            LEFT JOIN users cu ON o.customer_id=cu.id 
-            LEFT JOIN users du ON o.driver_id=du.id 
-            WHERE o.id=$1
+            FROM orders o LEFT JOIN users cu ON o.customer_id=cu.id LEFT JOIN users du ON o.driver_id=du.id WHERE o.id=$1
         """, oid)
         return dict(row) if row else None
 async def accept_order(oid, did):
