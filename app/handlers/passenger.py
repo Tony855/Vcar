@@ -24,6 +24,7 @@ async def timeout_task(oid, p_bot, cust_tg, user):
             except: pass
 
 # 支持点击 Inline 按钮和底部快捷键盘
+@router.message(F.text.startswith("/ride"))
 @router.message(F.text == "🚗 叫车")
 @router.callback_query(F.data == "menu:passenger")
 async def cb_menu(event: Union[Message, CallbackQuery], state: FSMContext):
