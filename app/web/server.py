@@ -339,16 +339,35 @@ if os.path.exists(os.path.join(static_dir, "assets")):
 app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
 # 3. 处理小程序路由及所有前端路由回退
+
+
+# ================= 司机订单 API =================
+
+@app.get("/api/driver/{tg_id}/orders")
+async def get_driver_orders(tg_id: int):
+    async with db.pool.acquire() as c:
+        driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
+        if not driver: return []
+        # 移除 created_at，只查存在的字段
+        orders = await c.fetch("""
+            SELECT id, status, price_estimate as price
+            FROM orders 
+            WHERE driver_id=$1 
+            ORDER BY id DESC LIMIT 20
+        """, driver['id'])
+        
+        res = []
+        for o in orders:
+            d = dict(o)
+            d['time_str'] = f"订单号: #{d['id']}"
+            res.append(d)
+        return res
+
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
-    # 忽略 api 接口
     if full_path.startswith("api/"):
-        return {"error": "Not Found"}
-        
-    # 如果是请求静态文件（如 logo 等），直接返回
+        return {"error": "API Not Found"}
     file_path = os.path.join(static_dir, full_path)
     if os.path.isfile(file_path):
         return FileResponse(file_path)
-        
-    # 否则全部返回 index.html，交给 Vue Router 处理
     return FileResponse(os.path.join(static_dir, "index.html"))

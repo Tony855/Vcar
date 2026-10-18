@@ -33,7 +33,7 @@
 
       <!-- 快捷菜单 -->
       <div class="menu-grid">
-        <div class="menu-item" @click="showToast('我的订单页面开发中...')">
+        <div class="menu-item" @click="goToOrders">
           <span class="menu-icon">📋</span>
           <span class="menu-text">我的订单</span>
         </div>
@@ -69,10 +69,12 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 
 const route = useRoute()
+const router = useRouter()
+const goToOrders = () => router.push(`/mini/${route.params.tg_id}/orders`)
 const tgId = route.params.tg_id
 const info = ref({})
 const reviews = ref([])
