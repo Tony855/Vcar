@@ -1,8 +1,6 @@
 <template>
   <div class="driver-page">
     <div class="header-bg"></div>
-    
-    
 
     <div class="content-container">
       <div class="info-card">
@@ -72,11 +70,6 @@ import axios from 'axios'
 const route = useRoute()
 const router = useRouter()
 
-// 调试数据
-
-
-
-
 const info = ref({})
 const reviews = ref([])
 const supportUsername = ref("Tony855")
@@ -107,44 +100,33 @@ const contactSupport = () => {
 }
 
 onMounted(async () => {
-  
-
-  // 1. 绝杀：优先从 Telegram SDK 获取最真实的用户 ID
   if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
     tgId = window.Telegram.WebApp.initDataUnsafe.user.id
     window.Telegram.WebApp.ready()
     window.Telegram.WebApp.expand()
-  } 
-  // 2. 如果拿不到，从路由或 URL 正则拿
-  else if (route.params.tg_id) {
+  } else if (route.params.tg_id) {
     tgId = route.params.tg_id
   } else {
     const match = window.location.pathname.match(/\/mini\/(\d+)/)
     if (match) tgId = match[1]
   }
 
-  
+  if (!tgId) return
 
-  if (!tgId) {
-    debugErr.value = "致命错误: 无法获取 TG 用户 ID"
-    return
-  }
-
-  // 3. 依次请求，互不影响
   try {
     const supRes = await axios.get('/api/config/support')
     if(supRes.data.username) supportUsername.value = supRes.data.username
-  } catch(e) { console.error(" | 客服拉取失败" }
+  } catch(e) { console.error(e) }
 
   try {
     const res1 = await axios.get(`/api/driver/${tgId}/profile`)
     info.value = res1.data
-  } catch(e) { console.error(" | 资料拉取失败: " + (e.response?.data || e.message) }
+  } catch(e) { console.error(e) }
 
   try {
     const res2 = await axios.get(`/api/driver/${tgId}/reviews`)
     reviews.value = res2.data
-  } catch(e) { console.error(" | 评价拉取失败" }
+  } catch(e) { console.error(e) }
 })
 </script>
 
