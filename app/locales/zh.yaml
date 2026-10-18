@@ -52,6 +52,7 @@ driver:
   passenger_cancelled_fee: '⚠️ 乘客取消了订单 #{order_id}，您获得违约金 ${fee}'
   offline_btn: 🔴 下线休息
   offline_success: ✅ 您已成功下线，将不再接收新订单。
+  already_online: ✅ 您已在接单中，无需重复上线。如需更新位置请直接发送定位，或点击下线休息。
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点

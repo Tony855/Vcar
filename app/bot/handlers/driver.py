@@ -30,15 +30,7 @@ async def send_drv_menu(msg: Message, user):
         [InlineKeyboardButton(text=t('driver.offline_btn', user), callback_data='menu:offline')],
         [InlineKeyboardButton(text=t('menu.orders', user), callback_data='menu:orders'), InlineKeyboardButton(text=t('menu.lang', user), callback_data='menu:lang')]
     ]
-    # 发送隐形字符清空底部键盘
-    msg_obj = await msg.answer('\u00A0', reply_markup=ReplyKeyboardRemove())
-    try:
-        await msg_obj.delete()
-    except:
-        pass
-    # 使用 chr(10) 代表换行，绝对安全
-    text = '<b>' + t('menu.title', user) + '</b>'
-    await msg.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=items))
+    await msg.answer(f"<b>{t('menu.title', user)}</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=items))
 
 @router.message(F.text.startswith('/start'))
 async def cmd_start(msg: Message):
@@ -53,10 +45,8 @@ async def menu_orders(call: CallbackQuery):
         orders = await OrderRepository.get_driver_orders(user['id'])
         if not orders: return await call.message.answer(t('common.no_orders', user))
         lines_txt = [t('order.list_item', user, id=o['id'], status=t(f"status.{o['status']}", user), price=f"{float(o['price_estimate']):.2f}") for o in orders]
-        txt = chr(10).join(lines_txt)
-        await call.message.answer('📋 <b>历史接单</b>' + chr(10)*2 + txt)
-    except Exception as e:
-        logging.error(e)
+        await call.message.answer('📋 <b>历史接单</b>' + chr(10)*2 + chr(10).join(lines_txt))
+    except Exception as e: logging.error(e)
 
 @router.callback_query(F.data == 'menu:lang')
 async def menu_lang(call: CallbackQuery):
@@ -80,9 +70,9 @@ async def set_lang(call: CallbackQuery):
 @router.callback_query(F.data == 'menu:offline')
 async def cb_offline(call: CallbackQuery):
     user = await UserRepository.get_or_create(call.from_user.id)
-    await DispatchService.go_offline(user['telegram_id'])
+    await DispatchService.go_offline(str(call.from_user.id))
     await call.answer(t('driver.offline_success', user), show_alert=True)
-    await call.message.edit_text('<b>' + t('driver.offline_success', user) + '</b>')
+    await call.message.edit_text(f"<b>{t('driver.offline_success', user)}</b>")
 
 @router.callback_query(F.data == 'menu:driver')
 async def cb_menu(call: CallbackQuery, state: FSMContext):
@@ -91,6 +81,9 @@ async def cb_menu(call: CallbackQuery, state: FSMContext):
     status = user.get('driver_status')
     if status == DriverStatus.PENDING.value: return await call.message.answer(t('driver.status_pending', user))
     if status == DriverStatus.APPROVED.value:
+        is_online = await db.redis.geopos('driver:online', str(call.from_user.id))
+        if is_online and len(is_online) > 0 and is_online[0] and is_online[0][0] is not None:
+            return await call.message.answer(t('driver.already_online', user))
         await state.set_state(DrvStates.location)
         return await call.message.answer(t('driver.prompt_location', user))
     await state.set_state(DrvStates.reg_phone)
@@ -136,7 +129,7 @@ async def s5(msg: Message, state: FSMContext):
 async def go_online(msg: Message, state: FSMContext):
     user = await UserRepository.get_or_create(msg.from_user.id)
     await state.clear()
-    await DispatchService.go_online(msg.from_user.id, msg.location.longitude, msg.location.latitude)
+    await DispatchService.go_online(str(msg.from_user.id), msg.location.longitude, msg.location.latitude)
     await msg.reply(t('driver.online_success', user))
 
 @router.callback_query(F.data.startswith('acc:'))

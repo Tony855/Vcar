@@ -13,7 +13,7 @@ class DispatchService:
         
     @staticmethod
     async def go_online(driver_tid, lng, lat):
-        await db.redis.geoadd("driver:online", (lng, lat, driver_tid))
+        await db.redis.geoadd("driver:online", (float(lng), float(lat), str(driver_tid)))
 
     @staticmethod
     async def go_offline(driver_tid):
