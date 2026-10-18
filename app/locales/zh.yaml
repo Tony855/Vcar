@@ -3,5 +3,5 @@ lang: {choose: "选择语言", changed: "已切换"}
 common: {send_location_tip: "⚠️ 请点附件发位置", no_orders: "无订单", slow_hand: "手慢了", pickup_venue: "📍 上车点", pickup_desc: "接客", dropoff_venue: "🏁 目的地", dropoff_desc: "送达"}
 driver: {prompt_location: "🚗 发送位置上线", online_success: "✅ 上线成功", arrived_btn: "📍 已到达", arrived_msg: "📍 等待上车", start_btn: "🚗 开始", start_msg: "🚗 出发", finish_btn: "🏁 结单", accept_success: "🎉 接单 #{order_id}", finish_msg: "🏁 完成 #{order_id}"}
 passenger: {prompt_pickup: "📍 发送上车点", prompt_dropoff: "🏁 发送终点", order_created: "✅ 订单 #{order_id}\n距离 {distance}km\n一口价 ${price}", no_driver: "⚠️ 无司机", driver_accepted: "🎉 司机接单", driver_arrived: "📍 司机到达", trip_started: "🚗 行程开始", trip_completed: "🏁 结束，支付 ${price}", cancel_success: "✅ 已取消", cancel_notice: "⚠️ 乘客取消 #{order_id}", order_timeout: "⏳ 超时取消"}
-order: {card: "🔔 新订单 #{order_id}\n距离: {distance}km\n一口价: ${price}", accept_btn: "✅ 接单", cancel_btn: "❌ 取消", list_item: "#{id} | {status} | ${price}"}
+order: {card: "🔔 <b>新订单 #{order_id}</b>\n接驾距离: {pickup_distance}km\n行程距离: {trip_distance}km\n一口价: ${price}\n\n👆 上方两条定位分别是：📍 上车点 和 🏁 目的地", accept_btn: "✅ 接单", cancel_btn: "❌ 取消", list_item: "#{id} | {status} | ${price}"}
 status: {DISPATCHING: "派单中", ACCEPTED: "已接单", ARRIVED: "已到达", IN_PROGRESS: "行程中", COMPLETED: "已完成", CANCELLED: "已取消"}
