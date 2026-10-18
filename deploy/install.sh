@@ -1,15 +1,17 @@
 #!/bin/bash
 set -e
 
+# 必须 root 权限
 if [ "$EUID" -ne 0 ]; then
-  echo "请使用 root 权限运行此脚本"
-  exit
+  echo "❌ 请使用 root 权限运行此脚本"
+  exit 1
 fi
 
 echo "========================================="
-echo "🚀 开始全新安装 Vcar V2 DDD商业版系统"
+echo "🚀 开始全新安装 Vcar V2 终极商业版系统"
 echo "========================================="
 
+# 1. 安装系统依赖
 export DEBIAN_FRONTEND=noninteractive
 echo "📦 安装系统依赖 (PostgreSQL, Redis, Python, Node.js)..."
 apt-get update -qq
@@ -19,7 +21,8 @@ apt-get install -y -qq postgresql redis-server python3 python3-venv python3-pip 
 
 systemctl enable --now postgresql redis-server
 
-echo "🗄️ 配置数据库..."
+# 2. 配置数据库
+echo "🗄️ 配置 PostgreSQL 数据库..."
 su - postgres -c "psql -c \"CREATE USER vcar WITH PASSWORD 'vcar';\"" > /dev/null 2>&1 || true
 su - postgres -c "createdb -O vcar vcar" > /dev/null 2>&1 || true
 
@@ -27,28 +30,37 @@ su - postgres -c "createdb -O vcar vcar" > /dev/null 2>&1 || true
 PROJECT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 cd $PROJECT_DIR
 
-echo "🐍 初始化 Python 环境..."
+# 3. 初始化 Python 环境
+echo "🐍 初始化 Python 虚拟环境..."
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -q -r requirements.txt
 
+# 4. 生成环境变量配置文件
 if [ ! -f .env ]; then
     cp .env.example .env
     echo "⚠️ 请先修改 $PROJECT_DIR/.env 填入真实的 Token！"
 fi
 
+# 5. 初始化数据库表结构
 echo "⚙️ 初始化数据表..."
 PGPASSWORD=vcar psql -h 127.0.0.1 -U vcar -d vcar -f app/db/schema.sql > /dev/null
 
+# 6. 编译前端 Vue3 后台 (增加内存限制，防止低配服务器 OOM)
 echo "🎨 编译 Vue3 前端后台..."
 cd web_frontend
-# 如果已经有打包好的可以直接复制，没有则重新编译
-npm install --silent
+# 检查是否有 node_modules，没有则安装
+if [ ! -d "node_modules" ]; then
+    npm install --silent
+fi
+# 限制 Node 内存，防止服务器卡死
+export NODE_OPTIONS="--max-old-space-size=1024"
 npm run build > /dev/null 2>&1
 cd $PROJECT_DIR
 rm -rf app/web/static
 cp -r web_frontend/dist app/web/static
 
+# 7. 配置 Systemd 守护服务 (带优雅退出超时保护，不卡死)
 echo "🚀 配置 Systemd 守护服务..."
 cat > /etc/systemd/system/vcar-bot.service << EOS
 [Unit]
