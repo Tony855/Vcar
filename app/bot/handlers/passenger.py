@@ -85,16 +85,16 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     order = await OrderRepository.create(user['id'], data['plng'], data['plat'], msg.location.longitude, msg.location.latitude, trip_dist, price_val)
     oid = order['id']
     
-    drivers = await DispatchService.get_nearby_drivers(data['plng'], data['plat'])
+    drivers = await DispatchService.smart_dispatch(data['plng'], data['plat'], top_n=3)
     if not drivers: return await msg.reply(t("passenger.no_driver", user, order_id=oid))
     
     for d in drivers:
-        txt = t("order.card", user, order_id=oid, pickup_distance=round(float(d[1])*1.3,1), trip_distance=trip_dist, price=f"{price_val:.2f}")
+        txt = t("order.card", user, order_id=oid, pickup_distance=round(float(d["dist"])*1.3,1), trip_distance=trip_dist, price=f"{price_val:.2f}")
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.accept_btn", user), callback_data=f"acc:{oid}")]])
         try:
-            await driver_bot.send_venue(int(d[0]), latitude=data['plat'], longitude=data['plng'], title=t("common.pickup_venue", user), address=t("common.pickup_desc", user))
-            await driver_bot.send_venue(int(d[0]), latitude=msg.location.latitude, longitude=msg.location.longitude, title=t("common.dropoff_venue", user), address=t("common.dropoff_desc", user))
-            await driver_bot.send_message(int(d[0]), txt, reply_markup=kb, parse_mode="HTML")
+            await driver_bot.send_venue(d["tg_id"], latitude=data['plat'], longitude=data['plng'], title=t("common.pickup_venue", user), address=t("common.pickup_desc", user))
+            await driver_bot.send_venue(d["tg_id"], latitude=msg.location.latitude, longitude=msg.location.longitude, title=t("common.dropoff_venue", user), address=t("common.dropoff_desc", user))
+            await driver_bot.send_message(d["tg_id"], txt, reply_markup=kb, parse_mode="HTML")
         except: pass
         
     p_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.cancel_btn", user), callback_data=f"p_cancel:{oid}")]])
@@ -125,3 +125,15 @@ async def pax_chat_proxy(msg: Message, driver_bot):
             await driver_bot.send_message(active_order['d_tg'], t("common.from_passenger", user))
             await msg.copy_to(active_order['d_tg'])
         except: pass
+
+@router.callback_query(F.data.startswith("rate_pax:"))
+async def rate_pax_to_driver(call: CallbackQuery, driver_bot):
+    _, oid, score = call.data.split(":")
+    order = await OrderRepository.get(int(oid))
+    if order and order.get('d_tg'):
+        await UserRepository.update_user_rating(order['d_tg'], int(score))
+        await call.message.edit_text(f"✅ 感谢您的评价！您给司机打了 {int(score)} 星。")
+        try:
+            await driver_bot.send_message(order['d_tg'], f"⭐ 乘客已为您打分：{int(score)} 星。")
+        except: pass
+    await call.answer()

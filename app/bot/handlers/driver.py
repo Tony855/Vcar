@@ -1,5 +1,6 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
+import io
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from app.db.repositories.user_repo import UserRepository
@@ -153,7 +154,10 @@ async def accept(call: CallbackQuery, passenger_bot):
         try:
             await passenger_bot.send_message(order['c_tg'], p_txt)
             if order.get('d_car_photo'): 
-                await passenger_bot.send_photo(order['c_tg'], photo=order['d_car_photo'], caption="📸 车辆实拍图")
+                file_io = io.BytesIO()
+                    await call.bot.download(order['d_car_photo'], destination=file_io)
+                    photo_file = BufferedInputFile(file_io.getvalue(), filename="car.jpg")
+                    await passenger_bot.send_photo(order['c_tg'], photo=photo_file, caption="📸 车辆实拍图")
         except Exception: 
             pass
 
@@ -210,8 +214,15 @@ async def finish(call: CallbackQuery, passenger_bot):
             price_str = f"{float(order['price_estimate']):.2f}"
             try: 
                 await passenger_bot.send_message(order['c_tg'], t("passenger.trip_completed", user, price=price_str))
+                # 给乘客发评价司机的按钮
+                stars = [[InlineKeyboardButton(text="⭐"*i, callback_data=f"rate_pax:{oid}:{i}") for i in range(1, 6)]]
+                await passenger_bot.send_message(order['c_tg'], "⭐ <b>请评价本次行程的司机：</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=stars))
             except Exception: 
                 pass
+        
+        # 给司机发评价乘客的按钮
+        stars_drv = [[InlineKeyboardButton(text="⭐"*i, callback_data=f"rate_drv:{oid}:{i}") for i in range(1, 6)]]
+        await call.message.answer("⭐ <b>请评价乘客：</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=stars_drv))
 
 @router.message(F.text | F.voice | F.photo)
 async def drv_chat_proxy(msg: Message, passenger_bot):
