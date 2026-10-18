@@ -1,9 +1,0 @@
-.env
-.venv/
-__pycache__/
-*.pyc
-*.log
-.DS_Store
-web_frontend/node_modules/
-web_frontend/dist/
-app/web/static/
