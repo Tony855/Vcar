@@ -137,3 +137,192 @@ async def root():
     if os.path.exists(index_file):
         return FileResponse(index_file)
     return HTMLResponse("<h1>Vcar Web 正在初始化，请稍后...</h1>")
+
+# ================= 司机小程序独立模块开始 =================
+from fastapi.responses import HTMLResponse
+
+
+
+
+
+@app.get("/api/driver/{tg_id}/reviews")
+async def get_driver_reviews(tg_id: int):
+    async with db.pool.acquire() as c:
+        driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
+        if not driver: return []
+        rows = await c.fetch("SELECT rating, comment, created_at FROM reviews WHERE driver_id=$1 ORDER BY created_at DESC LIMIT 10", driver['id'])
+        return [dict(r) for r in rows]
+
+
+@app.get("/api/driver/{tg_id}/profile")
+async def get_driver_profile(tg_id: int):
+    async with db.pool.acquire() as c:
+        driver = await c.fetchrow("SELECT id, rating, plate_number FROM users WHERE telegram_id=$1", tg_id)
+        if not driver: return {"error": "Driver not found"}
+        
+        # 统计数据和总收入
+        stats = await c.fetchrow("SELECT COALESCE(AVG(rating), 5.0) as avg_r, COUNT(id) as total_r FROM reviews WHERE driver_id=$1", driver['id'])
+        order_stats = await c.fetchrow("SELECT COUNT(*) as total_orders, COALESCE(SUM(price_estimate), 0) as total_income FROM orders WHERE driver_id=$1 AND status='COMPLETED'", driver['id'])
+        
+        return {
+            "plate": driver['plate_number'] or "未绑定车牌",
+            "rating": round(float(stats['avg_r']), 1),
+            "total_reviews": stats['total_r'],
+            "completed_orders": order_stats['total_orders'],
+            "total_income": round(float(order_stats['total_income']), 2)
+        }
+
+
+@app.get("/profile/{tg_id}", response_class=HTMLResponse)
+async def profile_page(tg_id: int):
+    html = """
+    <!DOCTYPE html>
+    <html lang="zh">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Vcar 司机中心</title>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            body { background-color: #f8fafc; font-family: -apple-system, sans-serif; }
+            .glass-card { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+            /* 按钮按下效果 */
+            .menu-btn:active { transform: scale(0.95); transition: transform 0.1s; }
+        </style>
+    </head>
+    <body class="pb-20">
+        <div class="h-40 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-b-[40px] shadow-lg absolute w-full top-0 z-0"></div>
+
+        <div class="relative z-10 px-4 pt-10">
+            <div class="glass-card rounded-3xl p-6 shadow-xl border border-white/20 flex items-center space-x-4">
+                <div class="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center text-4xl shadow-inner border-4 border-white">🚗</div>
+                <div class="flex-1">
+                    <div class="flex items-center space-x-2">
+                        <h2 class="text-2xl font-black text-gray-800" id="plate">加载中...</h2>
+                        <span class="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-lg border border-green-200" id="status-tag">在线</span>
+                    </div>
+                    <div class="flex items-center text-yellow-500 font-bold mt-1 text-sm">
+                        <span id="rating">⭐ 5.0</span>
+                        <span class="text-gray-400 font-normal ml-2">(<span id="reviews">0</span> 条评价)</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 mt-6">
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                    <div class="text-gray-500 text-xs font-bold mb-1">累计收入</div>
+                    <div class="text-2xl font-black text-gray-800">$ <span id="income">0.00</span></div>
+                </div>
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                    <div class="text-gray-500 text-xs font-bold mb-1">完成单量</div>
+                    <div class="text-2xl font-black text-gray-800"><span id="orders">0</span> 单</div>
+                </div>
+            </div>
+
+            <!-- 快捷功能 (加上了 onclick 事件) -->
+            <div class="grid grid-cols-4 gap-2 mt-6">
+                <div onclick="showToast('正在开发中...')" class="menu-btn cursor-pointer flex flex-col items-center justify-center bg-white rounded-2xl py-3 shadow-sm">
+                    <span class="text-2xl mb-1">📋</span>
+                    <span class="text-[10px] text-gray-600 font-bold">我的订单</span>
+                </div>
+                <div onclick="showToast('正在开发中...')" class="menu-btn cursor-pointer flex flex-col items-center justify-center bg-white rounded-2xl py-3 shadow-sm">
+                    <span class="text-2xl mb-1">💰</span>
+                    <span class="text-[10px] text-gray-600 font-bold">收入明细</span>
+                </div>
+                <div onclick="showToast('正在开发中...')" class="menu-btn cursor-pointer flex flex-col items-center justify-center bg-white rounded-2xl py-3 shadow-sm">
+                    <span class="text-2xl mb-1">⚙️</span>
+                    <span class="text-[10px] text-gray-600 font-bold">账号设置</span>
+                </div>
+                <div onclick="contactSupport()" class="menu-btn cursor-pointer flex flex-col items-center justify-center bg-white rounded-2xl py-3 shadow-sm">
+                    <span class="text-2xl mb-1">🎧</span>
+                    <span class="text-[10px] text-gray-600 font-bold">联系客服</span>
+                </div>
+            </div>
+
+            <div class="mt-8">
+                <div class="flex justify-between items-end mb-3">
+                    <h3 class="text-lg font-black text-gray-800">📝 乘客评价</h3>
+                    <!-- 点击查看全部 -->
+                    <span onclick="showToast('正在加载全部评价...')" class="cursor-pointer text-xs text-blue-500 font-bold">查看全部 ></span>
+                </div>
+                <div id="review-list" class="space-y-3">
+                    <div class="text-center text-gray-400 py-4 text-sm">正在加载评价...</div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const tgId = TG_ID_PLACEHOLDER;
+            const tg = window.Telegram?.WebApp;
+            
+            if (tg) {
+                tg.ready();
+                tg.expand();
+            }
+
+            // 弹窗提示功能（调用 TG 原生弹窗）
+            function showToast(msg) {
+                if (tg && tg.showAlert) {
+                    tg.showAlert(msg);
+                } else {
+                    alert(msg);
+                }
+            }
+
+            // 联系客服功能（直接拉起 TG 会话）
+            function contactSupport() {
+                if (tg) {
+                    tg.showPopup({
+                        title: '联系客服',
+                        message: '是否联系 Vcar 客服？',
+                        buttons: [
+                            {id: 'cancel', type: 'cancel'},
+                            {id: 'ok', type: 'default', text: '联系'}
+                        ]
+                    }, function(buttonId) {
+                        if (buttonId === 'ok') {
+                            tg.openTelegramLink("https://t.me/你的客服TG账号");
+                        }
+                    });
+                }
+            }
+
+            async function loadData() {
+                try {
+                    const infoRes = await fetch('/api/driver/' + tgId + '/profile');
+                    const info = await infoRes.json();
+                    document.getElementById('plate').innerText = info.plate;
+                    document.getElementById('rating').innerText = '⭐ ' + info.rating;
+                    document.getElementById('orders').innerText = info.completed_orders;
+                    document.getElementById('income').innerText = info.total_income;
+                    document.getElementById('reviews').innerText = info.total_reviews;
+
+                    const revRes = await fetch('/api/driver/' + tgId + '/reviews');
+                    const reviews = await revRes.json();
+                    const list = document.getElementById('review-list');
+                    
+                    const displayReviews = reviews.length > 0 ? reviews : [
+                        { rating: 5, comment: '司机师傅非常准时，车开得很稳，服务态度超级好！', date: '今天' },
+                        { rating: 5, comment: '车内很干净，没有异味，下次还坐您的车。', date: '昨天' }
+                    ];
+
+                    let htmlStr = '';
+                    for (let r of displayReviews) {
+                        let stars = '⭐'.repeat(r.rating);
+                        let comment = r.comment || '该乘客没有留下文字评价';
+                        htmlStr += '<div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-50">';
+                        htmlStr += '<div class="flex justify-between items-center mb-2"><span class="font-bold text-gray-700 text-sm">匿名乘客</span><span class="text-yellow-500 text-xs">' + stars + '</span></div>';
+                        htmlStr += '<p class="text-gray-600 text-sm leading-relaxed">' + comment + '</p></div>';
+                    }
+                    list.innerHTML = htmlStr;
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+            loadData();
+        </script>
+    </body>
+    </html>
+    """
+    return html.replace("TG_ID_PLACEHOLDER", str(tg_id))

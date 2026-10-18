@@ -1,5 +1,6 @@
+from aiogram.filters import Command
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import WebAppInfo, Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from app.db.repositories.user_repo import UserRepository
@@ -25,12 +26,23 @@ def t(key, user, **vars):
     return translator.t(key, user.get('locale', 'zh'), **vars)
 
 async def send_drv_menu(msg: Message, user):
+    web_app_url = f"https://vcar.v2net.cc/profile/{msg.from_user.id}"
     items = [
+        [InlineKeyboardButton(text="👤 我的主页 (小程序)", web_app=WebAppInfo(url=web_app_url))],
         [InlineKeyboardButton(text=t('menu.driver', user), callback_data='menu:driver')],
         [InlineKeyboardButton(text=t('driver.offline_btn', user), callback_data='menu:offline')],
         [InlineKeyboardButton(text=t('menu.orders', user), callback_data='menu:orders'), InlineKeyboardButton(text=t('menu.lang', user), callback_data='menu:lang')]
     ]
     await msg.answer(f"<b>{t('menu.title', user)}</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=items))
+
+
+@router.message(Command("profile"))
+async def cmd_profile(msg: Message):
+    url = f"https://vcar.v2net.cc/profile/{msg.from_user.id}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 打开我的主页", web_app=WebAppInfo(url=url))]
+    ])
+    await msg.answer("👇 点击下方按钮查看您的评分与评价：", reply_markup=kb)
 
 @router.message(F.text.startswith('/start'))
 async def cmd_start(msg: Message):
@@ -235,3 +247,5 @@ async def drv_chat_proxy(msg: Message, passenger_bot):
         except Exception as e:
             import logging
             logging.error(f"❌ [跨Bot转发失败] 乘客TG:{active['c_tg']} 报错: {e}")
+# ================= 独立的司机主页入口 =================
+
