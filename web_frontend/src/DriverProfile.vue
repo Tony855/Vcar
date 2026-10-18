@@ -79,12 +79,44 @@ const goToAccount = () => router.push(`/mini/${tgId}/account`)
 
 // 联系客服 (跳转 TG)
 const contactSupport = () => {
-  // ⚠️ 请将下面的 vcar_support 改成你真实的客服 TG 账号
-  const supportUsername = ref("vcar_support") 
-  if (window.Telegram?.WebApp) {
-    window.Telegram.WebApp.openTelegramLink(`https://t.me/${supportUsername.value}`)
+  // 拆分可能有多个的客服号
+  const usernames = supportUsername.value.split(',').map(s => s.trim()).filter(s => s)
+  
+  if (usernames.length === 0) {
+    showToast("管理员未配置客服账号")
+    return
+  }
+
+  if (usernames.length === 1) {
+    // 只有一个客服，直接跳转
+    if (window.Telegram?.WebApp) {
+      window.Telegram.WebApp.openTelegramLink(`https://t.me/${usernames[0]}`)
+    } else {
+      window.open(`https://t.me/${usernames[0]}`)
+    }
   } else {
-    window.open(`https://t.me/${supportUsername.value}`)
+    // 有多个客服，使用 TG 原生弹窗让他选
+    if (window.Telegram?.WebApp) {
+      const buttons = usernames.map((u, i) => ({ id: String(i), type: 'default', text: `客服: ${u}` }))
+      buttons.push({ id: 'cancel', type: 'cancel' })
+      
+      window.Telegram.WebApp.showPopup({
+        title: '选择客服',
+        message: '请选择要联系的客服账号：',
+        buttons: buttons
+      }, function(buttonId) {
+        if (buttonId !== 'cancel') {
+          window.Telegram.WebApp.openTelegramLink(`https://t.me/${usernames[parseInt(buttonId)]}`)
+        }
+      })
+    } else {
+      const choice = prompt("请选择客服账号 (输入数字):
+" + usernames.map((u, i) => `${i+1}. ${u}`).join('
+'))
+      if (choice && usernames[parseInt(choice)-1]) {
+        window.open(`https://t.me/${usernames[parseInt(choice)-1]}`)
+      }
+    }
   }
 }
 

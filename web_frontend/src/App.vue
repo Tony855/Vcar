@@ -46,7 +46,7 @@
                 <template #header>🎧 系统客服配置</template>
                 <el-form label-width="80px">
                   <el-form-item label="客服TG号">
-                    <el-input v-model="supportConfig.username" placeholder="例如: Tony855" />
+                    <el-input v-model="supportConfig.username" placeholder="例如: Tony855,Kefu2 (多个用英文逗号隔开)" />
                   </el-form-item>
                   <el-button type="primary" @click="saveSupport" style="width: 100%">保存客服设置</el-button>
                 </el-form>
@@ -139,8 +139,13 @@ const savePricing = async () => {
 }
 
 const saveSupport = async () => {
-  await api.post('/config/support', supportConfig.value)
-  ElMessage.success('客服配置已保存并生效')
+  try {
+    await api.post('/config/support', supportConfig.value)
+    ElMessage.success('🎉 客服配置已保存并生效！')
+  } catch (err) {
+    console.error(err)
+    ElMessage.error('❌ 保存失败，请查看服务器后台日志！')
+  }
 }
 
 onMounted(() => {

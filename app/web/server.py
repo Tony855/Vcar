@@ -381,7 +381,7 @@ if os.path.exists(os.path.join(static_dir, "assets")):
 app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
 
-# ================= 客服配置 API =================
+
 @app.get("/api/config/support")
 async def get_support_config():
     async with db.pool.acquire() as c:
@@ -400,6 +400,35 @@ async def set_support_config(data: SupportUpdate):
             INSERT INTO settings (key, value) VALUES ('support_username', $1)
             ON CONFLICT (key) DO UPDATE SET value = $1
         """, data.username)
+    return {"status": "ok"}
+
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+static_dir = os.path.join(BASE_DIR, "app", "web", "static")
+if os.path.exists(os.path.join(static_dir, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
+app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
+
+
+# ================= 客服配置 API =================
+@app.get("/api/config/support")
+async def get_support_config():
+    async with db.pool.acquire() as c:
+        val = await c.fetchval("SELECT value FROM settings WHERE key='support_username'")
+        return {"username": val or "vcar_support"}
+
+class SupportUpdate(BaseModel):
+    username: str
+
+@app.post("/api/config/support", dependencies=[Depends(verify_token)])
+async def set_support_config(data: SupportUpdate):
+    async with db.pool.acquire() as c:
+        # 使用最安全的先查后改逻辑，绝对不会报错
+        exists = await c.fetchval("SELECT 1 FROM settings WHERE key='support_username'")
+        if exists:
+            await c.execute("UPDATE settings SET value=$1 WHERE key='support_username'", data.username)
+        else:
+            await c.execute("INSERT INTO settings (key, value) VALUES ('support_username', $1)", data.username)
     return {"status": "ok"}
 
 
