@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.log
+web_frontend/node_modules/
+web_frontend/dist/
+app/web/static/

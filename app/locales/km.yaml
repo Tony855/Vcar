@@ -1,7 +1,8 @@
+
 menu: {title: "Vcar ម៉ឺនុយ", passenger: "🚗 ហៅឡាន", driver: "🧑‍✈️ អ្នកបើកបរ", orders: "📋 ការបញ្ជាទិញ"}
 lang: {choose: "ភាសា", changed: "ប្តូរ"}
 common: {send_location_tip: "⚠️ ផ្ញើទីតាំង", no_orders: "គ្មាន", slow_hand: "យឺត", pickup_venue: "📍 ចំណុចចេញ", pickup_desc: "ទីនេះ", dropoff_venue: "🏁 គោលដៅ", dropoff_desc: "ទីនេះ"}
 driver: {prompt_location: "🚗 ផ្ញើទីតាំង", online_success: "✅ ចូលធ្វើការ", arrived_btn: "📍 មកដល់", arrived_msg: "📍 រង់ចាំ", start_btn: "🚗 ចេញ", start_msg: "🚗 ធ្វើដំណើរ", finish_btn: "🏁 បញ្ចប់", accept_success: "🎉 ទទួល #{order_id}", finish_msg: "🏁 បញ្ចប់ #{order_id}"}
-passenger: {prompt_pickup: "📍 ទីតាំងឡាន", prompt_dropoff: "🏁 គោលដៅ", order_created: "✅ #{order_id}\n{distance}km\n${price}", no_driver: "⚠️ គ្មាន", driver_accepted: "🎉 ទទួលយក", driver_arrived: "📍 មកដល់", trip_started: "🚗 ចាប់ផ្តើម", trip_completed: "🏁 បញ្ចប់ ${price}", cancel_success: "✅ បោះបង់", cancel_notice: "⚠️ អ្នកដំណើរបោះបង់ #{order_id}", order_timeout: "⏳ ផុតកំណត់"}
+passenger: {prompt_pickup: "📍 ទីតាំងឡាន", prompt_dropoff: "🏁 គោលដៅ", order_created: "✅ #{order_id}\n{distance}km\n${price}", no_driver: "⚠️ គ្មាន", driver_accepted: "🎉 <b>អ្នកបើកបរទទួលយក!</b>\n\n🚗 <b>ព័ត៌មានយានយន្ត៖</b>\nស្លាកលេខ៖ <code>{plate}</code>\nអ្នកបើកបរ៖ {name}\nទូរស័ព្ទ៖ <code>{phone}</code>\nចម្ងាយ៖ {dist} km", driver_arrived: "📍 មកដល់", trip_started: "🚗 ចាប់ផ្តើម", trip_completed: "🏁 បញ្ចប់ ${price}", cancel_success: "✅ បោះបង់", cancel_notice: "⚠️ អ្នកដំណើរបោះបង់ #{order_id}", order_timeout: "⏳ ផុតកំណត់"}
 order: {card: "🔔 <b>ការបញ្ជាទិញថ្មី #{order_id}</b>\nចម្ងាយទៅអ្នកដំណើរ: {pickup_distance} km\nចម្ងាយធ្វើដំណើរ: {trip_distance} km\nតម្លៃថេរ: ${price}\n\n👆 ទីតាំង 2 ខាងលើគឺ៖ 📍 ចំណុចចេញដំណើរ និង 🏁 គោលដៅ", accept_btn: "✅ ទទួល", cancel_btn: "❌ បោះបង់", list_item: "#{id} | {status} | ${price}"}
 status: {DISPATCHING: "កំពុងស្វែងរក", ACCEPTED: "បានទទួល", ARRIVED: "បានមកដល់", IN_PROGRESS: "កំពុងធ្វើដំណើរ", COMPLETED: "បានបញ្ចប់", CANCELLED: "បានបោះបង់"}
