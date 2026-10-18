@@ -56,6 +56,7 @@ driver:
   offline_success: ✅ You are offline. You will not receive new orders.
   already_online: ✅ You are already online. No need to go online again. Send a location
     to update, or go offline.
+  trip_ready_prompt: '✅ Passenger notified. Click below to start the trip:'
 passenger:
   prompt_pickup: 📍 Send Pickup Location
   prompt_dropoff: 🏁 Send Dropoff Location

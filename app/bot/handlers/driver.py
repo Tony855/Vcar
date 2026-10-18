@@ -170,7 +170,7 @@ async def handle_driver_location_update(msg: Message, passenger_bot):
                 await passenger_bot.send_message(active['c_tg'], t('passenger.driver_arrived', user))
                 await msg.answer(t('driver.arrived_msg', user), reply_markup=ReplyKeyboardRemove())
                 kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t('driver.start_btn', user), callback_data=f"sta:{active['id']}")]])
-                await msg.answer('✅ 已通知乘客。请点击下方按钮开始行程：', reply_markup=kb)
+                await msg.answer(t('driver.trip_ready_prompt', user), reply_markup=kb)
                 return
         await passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude)
         await passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user))

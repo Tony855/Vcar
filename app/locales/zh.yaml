@@ -53,6 +53,7 @@ driver:
   offline_btn: 🔴 下线休息
   offline_success: ✅ 您已成功下线，将不再接收新订单。
   already_online: ✅ 您已在接单中，无需重复上线。如需更新位置请直接发送定位，或点击下线休息。
+  trip_ready_prompt: ✅ 已通知乘客。请点击下方按钮开始行程：
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点
