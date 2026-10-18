@@ -7,15 +7,19 @@ import jwt, datetime, sys
 sys.path.append("/root/vcar")
 from app.config import settings
 from app.db.core import db, get_pending_drivers, update_driver_status
+
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
 security = HTTPBearer()
+
 class LoginData(BaseModel): username: str; password: str
 class PriceUpdate(BaseModel): base_fare: float; per_km: float
 class ReviewData(BaseModel): tg_id: int; status: str
 
 @app.on_event("startup")
-async def startup(): await db.init()
+async def startup(): 
+    await db.init()
+
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try: return jwt.decode(credentials.credentials, settings.secret_key, algorithms=["HS256"])
     except: raise HTTPException(status_code=401)
@@ -27,12 +31,11 @@ async def login(data: LoginData):
     raise HTTPException(status_code=401, detail="密码错误")
 
 @app.get("/api/drivers/pending", dependencies=[Depends(verify_token)])
-)])
 async def pending_drivers():
-    return awaitasync get_pending_dr defivers()
+    return await get_pending_drivers()
 
-@app.post("/api/dr getivers/review", dependencies=[Depends_(verify_token)])
-async def review_driverorders(data: ReviewData):
+@app.post("/api/drivers/review", dependencies=[Depends(verify_token)])
+async def review_driver(data: ReviewData):
     await update_driver_status(data.tg_id, data.status)
     return {"status": "ok"}
 
@@ -41,7 +44,8 @@ async def get_stats():
     async with db.pool.acquire() as c:
         return {"total_orders": await c.fetchval("SELECT COUNT(*) FROM orders"), "active_orders": await c.fetchval("SELECT COUNT(*) FROM orders WHERE status IN ('DISPATCHING','ACCEPTED','IN_PROGRESS')"), "total_users": await c.fetchval("SELECT COUNT(*) FROM users"), "drivers_online": await db.redis.zcard("driver:online")}
 
-@app.get("/api/orders", dependencies=[Depends(verify_token():
+@app.get("/api/orders", dependencies=[Depends(verify_token)])
+async def get_orders():
     async with db.pool.acquire() as c:
         return [dict(r) for r in await c.fetch("SELECT o.id, o.status, o.distance_km, o.price_estimate, cu.first_name as passenger_name, du.first_name as driver_name FROM orders o LEFT JOIN users cu ON o.customer_id=cu.id LEFT JOIN users du ON o.driver_id=du.id ORDER BY o.id DESC LIMIT 50")]
 
@@ -59,4 +63,5 @@ async def set_pricing(price: PriceUpdate):
     return {"status": "ok"}
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(): return open("/root/vcar/app/web/templates/index.html", "r", encoding="utf-8").read()
+async def dashboard(): 
+    return open("/root/vcar/app/web/templates/index.html", "r", encoding="utf-8").read()
