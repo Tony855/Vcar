@@ -1,8 +1,60 @@
 
 menu: {title: "Vcar ម៉ឺនុយ", passenger: "🚗 ហៅឡាន", driver: "🧑‍✈️ អ្នកបើកបរ", orders: "📋 ការបញ្ជាទិញ"}
-lang: {choose: "ភាសា", changed: "ប្តូរ"}
-common: {send_location_tip: "⚠️ ផ្ញើទីតាំង", no_orders: "គ្មាន", slow_hand: "យឺត", pickup_venue: "📍 ចំណុចចេញ", pickup_desc: "ទីនេះ", dropoff_venue: "🏁 គោលដៅ", dropoff_desc: "ទីនេះ"}
-driver: {prompt_location: "🚗 ផ្ញើទីតាំង", online_success: "✅ ចូលធ្វើការ", arrived_btn: "📍 មកដល់", arrived_msg: "📍 រង់ចាំ", start_btn: "🚗 ចេញ", start_msg: "🚗 ធ្វើដំណើរ", finish_btn: "🏁 បញ្ចប់", accept_success: "🎉 ទទួល #{order_id}", finish_msg: "🏁 បញ្ចប់ #{order_id}"}
-passenger: {prompt_pickup: "📍 ទីតាំងឡាន", prompt_dropoff: "🏁 គោលដៅ", order_created: "✅ #{order_id}\n{distance}km\n${price}", no_driver: "⚠️ គ្មាន", driver_accepted: "🎉 <b>អ្នកបើកបរទទួលយក!</b>\n\n🚗 <b>ព័ត៌មានយានយន្ត៖</b>\nស្លាកលេខ៖ <code>{plate}</code>\nអ្នកបើកបរ៖ {name}\nទូរស័ព្ទ៖ <code>{phone}</code>\nចម្ងាយ៖ {dist} km", driver_arrived: "📍 មកដល់", trip_started: "🚗 ចាប់ផ្តើម", trip_completed: "🏁 បញ្ចប់ ${price}", cancel_success: "✅ បោះបង់", cancel_notice: "⚠️ អ្នកដំណើរបោះបង់ #{order_id}", order_timeout: "⏳ ផុតកំណត់"}
-order: {card: "🔔 <b>ការបញ្ជាទិញថ្មី #{order_id}</b>\nចម្ងាយទៅអ្នកដំណើរ: {pickup_distance} km\nចម្ងាយធ្វើដំណើរ: {trip_distance} km\nតម្លៃថេរ: ${price}\n\n👆 ទីតាំង 2 ខាងលើគឺ៖ 📍 ចំណុចចេញដំណើរ និង 🏁 គោលដៅ", accept_btn: "✅ ទទួល", cancel_btn: "❌ បោះបង់", list_item: "#{id} | {status} | ${price}"}
-status: {DISPATCHING: "កំពុងស្វែងរក", ACCEPTED: "បានទទួល", ARRIVED: "បានមកដល់", IN_PROGRESS: "កំពុងធ្វើដំណើរ", COMPLETED: "បានបញ្ចប់", CANCELLED: "បានបោះបង់"}
+lang: {choose: "ជ្រើសរើសភាសា", changed: "ប្តូររួចរាល់"}
+common: 
+  send_location_tip: "⚠️ ផ្ញើទីតាំង"
+  no_orders: "គ្មាន"
+  slow_hand: "យឺតពេល"
+  pickup_venue: "📍 ចំណុចចេញដំណើរ"
+  pickup_desc: "ទីនេះ"
+  dropoff_venue: "🏁 គោលដៅ"
+  dropoff_desc: "ទីនេះ"
+  from_passenger: "💬 [ពីអ្នកដំណើរ]:"
+  from_driver: "💬 [ពីអ្នកបើកបរ]:"
+  driver_location_update: "🚗 អ្នកបើកបរបានធ្វើបច្ចុប្បន្នភាពទីតាំង។"
+driver: 
+  prompt_location: "🚗 ផ្ញើទីតាំងដើម្បីចូលធ្វើការ"
+  online_success: "✅ ចូលធ្វើការជោគជ័យ"
+  arrived_btn: "📍 មកដល់"
+  arrived_msg: "📍 រង់ចាំអ្នកដំណើរ"
+  start_btn: "🚗 ចេញដំណើរ"
+  start_msg: "🚗 ធ្វើដំណើរ"
+  finish_btn: "🏁 បញ្ចប់"
+  accept_success: "🎉 ទទួលជោគជ័យ #{order_id}"
+  finish_msg: "🏁 បញ្ចប់ #{order_id}"
+  status_pending: "⏳ កំពុងរង់ចាំការពិនិត្យ។"
+  not_approved: "⚠️ គណនីរបស់អ្នកមិនទាន់ត្រូវបានអនុម័តទេ។"
+  reg_step1: "📝 ជំហាន 1/5៖\nសូមបញ្ចូលលេខទូរស័ព្ទ៖"
+  reg_step2: "📝 ជំហាន 2/5៖\nសូមបញ្ចូលស្លាកលេខ៖"
+  reg_step3: "📸 ជំហាន 3/5៖\nសូមផ្ញើរូបថតឡានដែលមានស្លាកលេខ៖"
+  reg_step4: "📸 ជំហាន 4/5៖\nសូមផ្ញើកាតចុះបញ្ជីយានយន្ត៖"
+  reg_step5: "📸 ជំហាន 5/5៖\nសូមផ្ញើបណ្ណបើកបរ៖"
+  reg_success: "✅ បានដាក់ពាក្យសុំ សូមរង់ចាំការពិនិត្យ។"
+  send_location_btn: "📍 ផ្ញើទីតាំងបច្ចុប្បន្នទៅអ្នកដំណើរ"
+  ask_send_location: "👇 សូមចុច [📎 ឯកសារភ្ជាប់] -> [ទីតាំង] ដើម្បីផ្ញើទីតាំងបច្ចុប្បន្ន។"
+  passenger_cancelled: "⚠️ អ្នកដំណើរបានបោះបង់ការបញ្ជាទិញ #{order_id}"
+  passenger_cancelled_fee: "⚠️ អ្នកដំណើរបានបោះបង់ #{order_id} អ្នកទទួលបានសំណង ${fee}"
+passenger: 
+  prompt_pickup: "📍 ផ្ញើទីតាំងឡាន"
+  prompt_dropoff: "🏁 ផ្ញើគោលដៅ"
+  order_created: "✅ បញ្ជាទិញ #{order_id}\nចម្ងាយ {distance}km\nតម្លៃ ${price}"
+  no_driver: "⚠️ គ្មានអ្នកបើកបរ"
+  driver_accepted: "🎉 <b>អ្នកបើកបរទទួលយក!</b>\n\n🚗 <b>ព័ត៌មានយានយន្ត៖</b>\nស្លាកលេខ៖ <code>{plate}</code>\nឈ្មោះ៖ {name}\nទូរស័ព្ទ៖ <code>{phone}</code>\nចម្ងាយ៖ {dist} km"
+  driver_arrived: "📍 អ្នកបើកបរមកដល់"
+  trip_started: "🚗 ចាប់ផ្តើមដំណើរ"
+  trip_completed: "🏁 បញ្ចប់ សូមបង់ ${price}"
+  cancel_free: "✅ ការបញ្ជាទិញត្រូវបានបោះបង់។"
+  cancel_with_fee: "✅ បានបោះបង់។ កាត់ប្រាក់ពិន័យ ${fee}"
+  order_timeout: "⏳ ផុតកំណត់បោះបង់"
+order: 
+  card: "🔔 <b>ការបញ្ជាទិញថ្មី #{order_id}</b>\nចម្ងាយទៅអ្នកដំណើរ: {pickup_distance} km\nចម្ងាយធ្វើដំណើរ: {trip_distance} km\nតម្លៃថេរ: ${price}\n\n👆 ទីតាំង 2 ខាងលើគឺ៖ 📍 ចំណុចចេញដំណើរ និង 🏁 គោលដៅ"
+  accept_btn: "✅ ទទួល"
+  cancel_btn: "❌ បោះបង់"
+  list_item: "#{id} | {status} | ${price}"
+status: 
+  DISPATCHING: "កំពុងស្វែងរក"
+  ACCEPTED: "បានទទួល"
+  ARRIVED: "បានមកដល់"
+  IN_PROGRESS: "កំពុងធ្វើដំណើរ"
+  COMPLETED: "បានបញ្ចប់"
+  CANCELLED: "បានបោះបង់"

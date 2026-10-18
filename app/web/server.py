@@ -62,8 +62,30 @@ async def pending_drivers():
 
 @app.post("/api/drivers/review", dependencies=[Depends(verify_token)])
 async def review_driver(data: ReviewData):
+    # 1. 更新状态
     async with db.pool.acquire() as c:
         await c.execute("UPDATE users SET driver_status=$1, updated_at=now() WHERE telegram_id=$2", data.status, data.tg_id)
+        # 查一下司机的语言偏好
+        user_locale = await c.fetchval("SELECT locale FROM users WHERE telegram_id=$1", data.tg_id)
+    
+    # 2. 发送多语言通知
+    if data.status in ("APPROVED", "REJECTED"):
+        if data.status == "APPROVED":
+            msg = "🎉 <b>恭喜！您的司机入驻资料已审核通过。</b>\n\n您现在可以点击 /start，选择『司机上线接单』开始赚钱了！"
+            if user_locale == 'en': msg = "🎉 <b>Congratulations! Your driver profile has been approved.</b>\n\nYou can now click /start and select 'Driver Go Online' to start earning!"
+            if user_locale == 'km': msg = "🎉 <b>សូមអបអរសាទរ! គណនីអ្នកបើកបររបស់អ្នកត្រូវបានអនុម័ត។</b>\n\nឥឡូវអ្នកអាចចុច /start ហើយជ្រើសរើស 'ចូលធ្វើការ' ដើម្បីចាប់ផ្តើមរកប្រាក់។"
+        else:
+            msg = "❌ <b>抱歉，您的司机资料未通过审核。</b>\n\n请点击 /start 重新提交。"
+            if user_locale == 'en': msg = "❌ <b>Sorry, your driver profile was rejected.</b>\n\nPlease click /start to resubmit."
+            if user_locale == 'km': msg = "❌ <b>សូមអភ័យទោស ពាក្យសុំរបស់អ្នកត្រូវបានបដិសេធ។</b>\n\nសូមចុច /start ដើម្បីដាក់ពាក្យម្តងទៀត។"
+            
+        url = f"https://api.telegram.org/bot{settings.driver_bot_token}/sendMessage"
+        payload = {"chat_id": data.tg_id, "text": msg, "parse_mode": "HTML"}
+        
+        async with aiohttp.ClientSession() as session:
+            try: await session.post(url, json=payload)
+            except: pass
+                
     return {"status": "ok"}
 
 @app.get("/api/file/{file_id}")
