@@ -99,6 +99,13 @@
                   <el-tag :type="scope.row.driver_status === 'APPROVED' ? 'success' : (scope.row.driver_status === 'REJECTED' ? 'danger' : 'warning')">{{ scope.row.driver_status }}</el-tag>
                 </template>
               </el-table-column>
+              <el-table-column label="证件照片" width="250">
+                <template #default="scope">
+                  <el-image v-if="scope.row.car_photo" style="width: 60px; height: 60px; margin-right: 5px;" :src="'/api/file/' + scope.row.car_photo" :preview-src-list="['/api/file/' + scope.row.car_photo]" fit="cover" title="车辆实拍" />
+                  <el-image v-if="scope.row.license_photo" style="width: 60px; height: 60px; margin-right: 5px;" :src="'/api/file/' + scope.row.license_photo" :preview-src-list="['/api/file/' + scope.row.license_photo]" fit="cover" title="行驶证" />
+                  <el-image v-if="scope.row.driving_license_photo" style="width: 60px; height: 60px;" :src="'/api/file/' + scope.row.driving_license_photo" :preview-src-list="['/api/file/' + scope.row.driving_license_photo]" fit="cover" title="驾驶证" />
+                </template>
+              </el-table-column>
             </el-table>
             <div style="margin-top: 20px; display: flex; justify-content: center;">
               <el-pagination background layout="prev, pager, next, total" :total="totalDrivers" :page-size="pageSize" :current-page="currentPage" @current-change="handlePageChange" />
