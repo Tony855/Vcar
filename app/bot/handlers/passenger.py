@@ -20,7 +20,7 @@ async def send_main_menu(msg: Message, user):
         [InlineKeyboardButton(text=t("menu.orders", user), callback_data="menu:orders"), InlineKeyboardButton(text=t("menu.lang", user), callback_data="menu:lang")]
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=items)
-    await msg.answer(f"<b>{t('menu.title', user)}</b>\n请点击下方按钮：", reply_markup=kb)
+    await msg.answer(f"<b>{t('menu.title', user)}</b>", reply_markup=kb)
 
 @router.message(F.text.startswith("/start"))
 async def cmd_start(msg: Message):

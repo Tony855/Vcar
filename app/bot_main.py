@@ -16,7 +16,11 @@ async def main():
     dp_drv = Dispatcher(); dp_drv["passenger_bot"] = p_bot; dp_drv.include_router(driver.router)
 
     logging.info("✅ Vcar V2 DDD架构启动成功！")
-    await asyncio.gather(dp_pax.start_polling(p_bot), dp_drv.start_polling(d_bot))
+    try:
+        await asyncio.gather(dp_pax.start_polling(p_bot), dp_drv.start_polling(d_bot))
+    finally:
+        await p_bot.session.close()
+        await d_bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
