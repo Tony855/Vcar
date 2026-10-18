@@ -111,7 +111,7 @@ async def get_stats():
 @app.get("/api/orders", dependencies=[Depends(verify_token)])
 async def get_orders():
     async with db.pool.acquire() as c:
-        return [dict(r) for r in await c.fetch("SELECT o.id, o.status, o.distance_km, o.price_estimate, cu.first_name as passenger_name, du.first_name as driver_name FROM orders o LEFT JOIN users cu ON o.customer_id=cu.id LEFT JOIN users du ON o.driver_id=du.id ORDER BY o.id DESC LIMIT 50")]
+        return [dict(r) for r in await c.fetch("SELECT o.id, o.status, o.distance_km, o.price_estimate, COALESCE(cu.username, cu.telegram_id::text) as passenger_name, COALESCE(du.username, du.telegram_id::text) as driver_name, du.plate_number as driver_plate FROM orders o LEFT JOIN users cu ON o.customer_id=cu.id LEFT JOIN users du ON o.driver_id=du.id ORDER BY o.id DESC LIMIT 50")]
 
 @app.get("/api/pricing", dependencies=[Depends(verify_token)])
 async def get_pricing():

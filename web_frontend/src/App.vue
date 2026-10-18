@@ -63,6 +63,13 @@
               <el-table-column prop="first_name" label="姓名 / TG" width="150">
                 <template #default="scope">{{ scope.row.first_name }} <br><small>@{{ scope.row.username || scope.row.telegram_id }}</small></template>
               </el-table-column>
+          <el-table-column prop="driver_plate" label="车牌" show-overflow-tooltip>
+            <template #default="scope">
+              <el-tag v-if="scope.row.driver_plate" type="info" size="small">{{ scope.row.driver_plate }}</el-tag>
+              <span v-else style="color: #999; font-size: 12px;">待接单</span>
+            </template>
+          </el-table-column>
+
               <el-table-column prop="phone" label="手机号" width="120" />
               <el-table-column prop="plate_number" label="车牌号" width="120" />
               <el-table-column label="证件照片">
