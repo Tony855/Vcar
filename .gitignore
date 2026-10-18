@@ -6,3 +6,4 @@ __pycache__/
 web_frontend/node_modules/
 web_frontend/dist/
 app/web/static/
+.DS_Store

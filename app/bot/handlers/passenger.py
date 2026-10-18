@@ -44,16 +44,19 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     oid = order['id']
     
     drivers = await DispatchService.get_nearby_drivers(plng, plat)
-    if not drivers: return await msg.reply(t("passenger.no_driver", user, order_id=oid))
+    if not drivers: 
+        return await msg.reply(t("passenger.no_driver", user, order_id=oid))
     
     for d_data in drivers:
         driver_id = int(d_data[0])
-        txt = t("order.card", user, order_id=oid, pickup_distance=round(float(d_data[1]),1), trip_distance=trip_dist, price=f"{price_val:.2f}")
+        txt = t("order.card", user, order_id=oid, pickup_distance=round(float(d_data[1]) * 1.3, 1), trip_distance=trip_dist, price=f"{price_val:.2f}")
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.accept_btn", user), callback_data=f"acc:{oid}")]])
         try:
             await driver_bot.send_venue(driver_id, latitude=plat, longitude=plng, title=t("common.pickup_venue", user), address=t("common.pickup_desc", user))
             await driver_bot.send_venue(driver_id, latitude=dlat, longitude=dlng, title=t("common.dropoff_venue", user), address=t("common.dropoff_desc", user))
             await driver_bot.send_message(driver_id, txt, reply_markup=kb, parse_mode="HTML")
         except Exception: pass
-    
-    await msg.reply(t("passenger.order_created", user, order_id=oid, distance=trip_dist, price=f"{price_val:.2f}"))
+        
+    # 【修复】补上乘客端的取消订单按钮
+    p_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.cancel_btn", user), callback_data=f"p_cancel:{oid}")]])
+    await msg.reply(t("passenger.order_created", user, order_id=oid, distance=trip_dist, price=f"{price_val:.2f}"), reply_markup=p_kb)
