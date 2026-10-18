@@ -36,9 +36,9 @@
           <span class="menu-icon">💰</span>
           <span class="menu-text">收入明细</span>
         </div>
-        <div class="menu-item" @click="showToast('设置开发中...')">
-          <span class="menu-icon">⚙️</span>
-          <span class="menu-text">账号设置</span>
+        <div class="menu-item" @click="goToAccount">
+          <span class="menu-icon">👤</span>
+          <span class="menu-text">账户信息</span>
         </div>
         <div class="menu-item" @click="contactSupport">
           <span class="menu-icon">🎧</span>
@@ -72,16 +72,20 @@ const tgId = route.params.tg_id
 const info = ref({})
 const reviews = ref([])
 
-// 点击跳转函数
+// 页面跳转
 const goToOrders = () => router.push(`/mini/${tgId}/orders`)
 const goToIncome = () => router.push(`/mini/${tgId}/income`)
+const goToAccount = () => router.push(`/mini/${tgId}/account`)
 
-const showToast = (msg) => {
-  if (window.Telegram?.WebApp) window.Telegram.WebApp.showAlert(msg)
-  else alert(msg)
-}
+// 联系客服 (跳转 TG)
 const contactSupport = () => {
-  if (window.Telegram?.WebApp) window.Telegram.WebApp.openTelegramLink("https://t.me/你的客服TG账号")
+  // ⚠️ 请将下面的 vcar_support 改成你真实的客服 TG 账号
+  const supportUsername = "vcar_support" 
+  if (window.Telegram?.WebApp) {
+    window.Telegram.WebApp.openTelegramLink(`https://t.me/${supportUsername}`)
+  } else {
+    window.open(`https://t.me/${supportUsername}`)
+  }
 }
 
 onMounted(async () => {

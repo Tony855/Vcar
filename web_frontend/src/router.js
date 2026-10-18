@@ -3,12 +3,14 @@ import App from './App.vue'
 import DriverProfile from './DriverProfile.vue'
 import OrderList from './OrderList.vue'
 import IncomeList from './IncomeList.vue'
+import AccountInfo from './AccountInfo.vue'
 
 const routes = [
   { path: '/admin/', component: App },
   { path: '/mini/:tg_id', component: DriverProfile },
   { path: '/mini/:tg_id/orders', component: OrderList },
   { path: '/mini/:tg_id/income', component: IncomeList },
+  { path: '/mini/:tg_id/account', component: AccountInfo },
   { path: '/:pathMatch(.*)*', redirect: '/admin/' }
 ]
 
