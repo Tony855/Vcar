@@ -26,7 +26,7 @@ def t(key, user, **vars):
     return translator.t(key, user.get('locale', 'zh'), **vars)
 
 async def send_drv_menu(msg: Message, user):
-    web_app_url = f"https://vcar.v2net.cc/profile/{msg.from_user.id}"
+    web_app_url = f"https://vcar.v2net.cc/mini/{msg.from_user.id}"
     items = [
         [InlineKeyboardButton(text="👤 我的主页 (小程序)", web_app=WebAppInfo(url=web_app_url))],
         [InlineKeyboardButton(text=t('menu.driver', user), callback_data='menu:driver')],
@@ -38,7 +38,7 @@ async def send_drv_menu(msg: Message, user):
 
 @router.message(Command("profile"))
 async def cmd_profile(msg: Message):
-    url = f"https://vcar.v2net.cc/profile/{msg.from_user.id}"
+    url = f"https://vcar.v2net.cc/mini/{msg.from_user.id}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 打开我的主页", web_app=WebAppInfo(url=url))]
     ])

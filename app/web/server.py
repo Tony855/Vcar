@@ -326,3 +326,29 @@ async def profile_page(tg_id: int):
     </html>
     """
     return html.replace("TG_ID_PLACEHOLDER", str(tg_id))
+
+# ================= 前端 SPA 路由配置 =================
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+static_dir = os.path.join(BASE_DIR, "app", "web", "static")
+
+# 1. 挂载静态资源目录
+if os.path.exists(os.path.join(static_dir, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
+
+# 2. 挂载后台管理页面
+app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
+
+# 3. 处理小程序路由及所有前端路由回退
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    # 忽略 api 接口
+    if full_path.startswith("api/"):
+        return {"error": "Not Found"}
+        
+    # 如果是请求静态文件（如 logo 等），直接返回
+    file_path = os.path.join(static_dir, full_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+        
+    # 否则全部返回 index.html，交给 Vue Router 处理
+    return FileResponse(os.path.join(static_dir, "index.html"))
