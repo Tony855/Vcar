@@ -138,7 +138,7 @@ async def rate_pax_to_driver(call: CallbackQuery, state: FSMContext, driver_bot)
                 
         await state.set_state(RatingStates.waiting_for_comment)
         await state.update_data(oid=int(oid), driver_tg=order['d_tg'])
-        await call.message.edit_text(f"✅ 您给司机打了 {int(score)} 星。\n\n📝 请直接回复文字，留下您的评价（或点 /skip 跳过）：")
+        await call.message.edit_text(t("passenger.rated_5_stars", user, score=int(score)))
         try:
             asyncio.create_task(driver_bot.send_message(order['d_tg'], t("driver.rider_rated", order.get("d_locale", "en"), score=int(score))))
         except: pass
@@ -153,7 +153,7 @@ async def receive_review_comment(msg: Message, state: FSMContext, driver_bot):
     
     if msg.text == '/skip':
         await state.clear()
-        await msg.answer("已跳过文字评价。")
+        await msg.answer(t("passenger.skipped_comment", user))
         return
         
     comment = msg.text

@@ -65,6 +65,7 @@ driver:
   restore_msg: 🔄 检测到您有进行中的订单，已为您恢复操作按钮：
   arrive_btn: 📍 确认到达接客点
   rider_rated: ⭐ 乘客已为您打分：{score} 星。
+  star_btn: ⭐⭐⭐⭐⭐ 5星
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点
@@ -115,6 +116,13 @@ passenger:
   searching_driver: ⏳ 正在为您呼叫附近的司机...
   cancel_btn: ❌ 取消
   calling_msg: ⏳ 正在为您呼叫司机...
+  star_btn: ⭐⭐⭐⭐⭐ 5星
+  rated_5_stars: '✅ 您给司机打了 {score} 星。
+
+
+    📝 请直接回复文字，留下您的评价（或点 /skip 跳过）：'
+  leave_comment_prompt: 📝 请直接回复文字，留下您的评价（或 /skip 跳过）：
+  skipped_comment: 已跳过文字评价。
 order:
   card: '🔔 <b>新订单 #{order_id}</b>
 
@@ -129,6 +137,9 @@ order:
   accept_btn: ✅ 接单
   cancel_btn: ❌ 取消
   list_item: '#{id} | {status} | ${price}'
+  trip_started: 🚗 行程已开始，祝您旅途愉快！
+  driver_arrived: 🚖 司机已到达乘车点。
+  arrived_dest: 🏁 已到达目的地。总费用：${price}。感谢您的乘坐！
 status:
   DISPATCHING: 派单中
   ACCEPTED: 已接单

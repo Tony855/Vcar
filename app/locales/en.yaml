@@ -68,6 +68,7 @@ driver:
   restore_msg: '🔄 Active order detected, operation buttons restored:'
   arrive_btn: 📍 Arrived at pickup
   rider_rated: '⭐ Passenger rated you: {score} stars.'
+  star_btn: ⭐⭐⭐⭐⭐ 5 Stars
 passenger:
   prompt_pickup: 📍 Send Pickup Location
   prompt_dropoff: 🏁 Send Dropoff Location
@@ -119,6 +120,13 @@ passenger:
   searching_driver: ⏳ Calling nearby drivers for you...
   cancel_btn: ❌ Cancel
   calling_msg: ⏳ Calling driver for you...
+  star_btn: ⭐⭐⭐⭐⭐ 5 Stars
+  rated_5_stars: '✅ You rated the driver {score} stars.
+
+
+    📝 Please reply with text to leave a comment (or /skip):'
+  leave_comment_prompt: '📝 Please reply with text to leave a comment (or /skip):'
+  skipped_comment: Comment skipped.
 order:
   card: '🔔 <b>New Order #{order_id}</b>
 
@@ -133,6 +141,9 @@ order:
   accept_btn: ✅ Accept
   cancel_btn: ❌ Cancel
   list_item: '#{id} | {status} | ${price}'
+  trip_started: 🚗 Trip started. Have a safe journey!
+  driver_arrived: 🚖 Driver arrived at pickup point.
+  arrived_dest: '🏁 Arrived at destination. Total fare: ${price}. Thank you!'
 status:
   DISPATCHING: Dispatching
   ACCEPTED: Accepted
