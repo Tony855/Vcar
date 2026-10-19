@@ -135,12 +135,18 @@ async def get_driver_profile(tg_id: int):
         if not driver: return {"error": "Driver not found"}
         stats = await c.fetchrow("SELECT COALESCE(AVG(rating), 5.0) as avg_r, COUNT(id) as total_r FROM reviews WHERE driver_id=$1", driver['id'])
         order_stats = await c.fetchrow("SELECT COUNT(*) as total_orders, COALESCE(SUM(price_estimate), 0) as total_income FROM orders WHERE driver_id=$1 AND status='COMPLETED'", driver['id'])
+        
+        # 🌟 新增：去 Redis 里查他是不是真的在线
+        is_online = await db.redis.zscore("driver:online", str(tg_id))
+        real_status = "在线" if is_online is not None else "离线"
+        
         return {
-            "plate": driver['plate_number'] or "未绑定车牌",
+            "plate": driver['plate_number'] or "未绑定",
             "rating": round(float(stats['avg_r']), 1),
             "total_reviews": stats['total_r'],
             "completed_orders": order_stats['total_orders'],
-            "total_income": round(float(order_stats['total_income']), 2)
+            "total_income": round(float(order_stats['total_income']), 2),
+            "is_online": real_status
         }
 
 @app.get("/api/driver/{tg_id}/reviews")

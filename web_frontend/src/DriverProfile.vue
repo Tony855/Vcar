@@ -7,8 +7,8 @@
         <div class="avatar">🚗</div>
         <div class="info-text">
           <div class="plate-row">
-            <h2 class="plate">{{ info.plate || '加载失败' }}</h2>
-            <span class="status-badge">在线</span>
+            <h2 class="plate">{{ info.plate || '加载中...' }}</h2>
+            <span :class="['status-badge', info.is_online === '在线' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200']">{{ info.is_online || '离线' }}</span>
           </div>
           <div class="rating-row">
             <span class="stars">⭐ {{ info.rating || '5.0' }}</span>
