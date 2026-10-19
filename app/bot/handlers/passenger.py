@@ -17,7 +17,7 @@ from app.core.i18n import translator
 import logging
 
 router = Router()
-class PaxStates(StatesGroup): pickup = State(); dropoff = State()
+class PaxStates(StatesGroup): pickup = State(); dropoff = State(); confirm = State()
 def t(key, user, **vars):
     if isinstance(user, dict):
         loc = user.get('locale', 'zh')
@@ -90,31 +90,8 @@ async def step1(msg: Message, state: FSMContext):
     await state.set_state(PaxStates.dropoff)
     await msg.reply(t("passenger.prompt_dropoff", user))
 
-@router.message(PaxStates.dropoff, F.location)
-async def step2(msg: Message, state: FSMContext, driver_bot):
-    user = await UserRepository.get_or_create(msg.from_user.id)
-    data = await state.get_data(); await state.clear()
-    trip_dist, price_val = await PricingService.estimate(data['plat'], data['plng'], msg.location.latitude, msg.location.longitude)
-    order = await OrderRepository.create(user['id'], data['plng'], data['plat'], msg.location.longitude, msg.location.latitude, trip_dist, price_val)
-    oid = order['id']
-    
-    drivers = await DispatchService.smart_dispatch(data['plng'], data['plat'], top_n=3)
-    if not drivers: 
-        # 优雅的业务提示，不再暴露服务器细节
-        await msg.reply(t('passenger.no_driver', user, order_id=oid))
-        return
-    
-    for d in drivers:
-        txt = t("order.card", {"locale": d.get("locale", "en")}, order_id=oid, pickup_distance=round(float(d["dist"])*1.3,1), trip_distance=trip_dist, price=f"{price_val:.2f}")
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.accept_btn", {"locale": d.get("locale", "en")}), callback_data=f"acc:{oid}")]])
-        try:
-            await driver_bot.send_venue(d["tg_id"], latitude=data['plat'], longitude=data['plng'], title=t("common.pickup_venue", user), address=t("common.pickup_desc", user))
-            await driver_bot.send_venue(d["tg_id"], latitude=msg.location.latitude, longitude=msg.location.longitude, title=t("common.dropoff_venue", user), address=t("common.dropoff_desc", user))
-            await driver_bot.send_message(d["tg_id"], txt, reply_markup=kb, parse_mode="HTML")
-        except: pass
-        
-    p_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.cancel_btn", user), callback_data=f"p_cancel:{oid}")]])
-    await msg.reply(t("passenger.order_created", user, order_id=oid, distance=trip_dist, price=f"{price_val:.2f}"), reply_markup=p_kb)
+
+
 
 @router.callback_query(F.data.startswith("p_cancel:"))
 async def p_cancel(call: CallbackQuery, driver_bot):
@@ -188,3 +165,58 @@ async def receive_review_comment(msg: Message, state: FSMContext, driver_bot):
     try:
         asyncio.create_task(driver_bot.send_message(driver_tg, f"⭐ 您收到了一条新评价：\n\"{comment}\""))
     except: pass
+
+@router.message(PaxStates.dropoff, F.location)
+async def step2(msg: Message, state: FSMContext, driver_bot):
+    user = await UserRepository.get_or_create(msg.from_user.id)
+    data = await state.get_data()
+    
+    trip_dist, price_val = await PricingService.estimate(data['plat'], data['plng'], msg.location.latitude, msg.location.longitude)
+    
+    await state.update_data(dlat=msg.location.latitude, dlng=msg.location.longitude, trip_dist=trip_dist, price_val=price_val)
+    await state.set_state(PaxStates.confirm)
+
+    preview_text = (
+        f"📋 <b>订单确认</b>\n\n"
+        f"📍 距离：{trip_dist} km\n"
+        f"💰 一口价：${price_val:.2f}\n\n"
+        f"请确认无误后点击下方按钮呼叫司机："
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ 确认下单", callback_data="cfm_confirm")],
+        [InlineKeyboardButton(text="❌ 取消", callback_data="menu:passenger")]
+    ])
+    await msg.answer(preview_text, reply_markup=kb)
+
+@router.callback_query(F.data == "cfm_confirm")
+async def confirm_order(call: CallbackQuery, state: FSMContext, driver_bot):
+    await call.answer()
+    data = await state.get_data()
+    user = await UserRepository.get_or_create(call.from_user.id)
+    
+    plat, plng = data['plat'], data['plng']
+    dlat, dlng = data['dlat'], data['dlng']
+    trip_dist, price_val = data['trip_dist'], data['price_val']
+    
+    await state.clear()
+    await call.message.edit_text("⏳ 正在为您呼叫司机...")
+
+    order = await OrderRepository.create(user['id'], plng, plat, dlng, dlat, trip_dist, price_val)
+    oid = order['id']
+
+    drivers = await DispatchService.smart_dispatch(plng, plat, top_n=3)
+    if not drivers:
+        await call.message.edit_text(t('passenger.no_driver', user, order_id=oid))
+        return
+
+    for d in drivers:
+        txt = t("order.card", {"locale": d.get("locale", "en")}, order_id=oid, pickup_distance=round(float(d["dist"])*1.3,1), trip_distance=trip_dist, price=f"{price_val:.2f}")
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.accept_btn", {"locale": d.get("locale", "en")}), callback_data=f"acc:{oid}")]])
+        try:
+            await driver_bot.send_venue(d["tg_id"], latitude=plat, longitude=plng, title=t("common.pickup_venue", user), address=t("common.pickup_desc", user))
+            await driver_bot.send_venue(d["tg_id"], latitude=dlat, longitude=dlng, title=t("common.dropoff_venue", user), address=t("common.dropoff_desc", user))
+            await driver_bot.send_message(d["tg_id"], txt, reply_markup=kb, parse_mode="HTML")
+        except: pass
+
+    p_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.cancel_btn", user), callback_data=f"p_cancel:{oid}")]])
+    await call.message.edit_text(t('passenger.order_created', user, order_id=oid, distance=trip_dist, price=f"{price_val:.2f}"), reply_markup=p_kb)
