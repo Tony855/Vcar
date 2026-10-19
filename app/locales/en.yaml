@@ -73,24 +73,10 @@ passenger:
 
     Fixed ${price}'
   no_driver: ⚠️ No drivers nearby
-  driver_accepted: '🎉 <b>Driver accepted!</b>
-
-
-    🚗 <b>Vehicle Info:</b>
-
-    Plate: <code>{plate}</code>
-
-    Driver: {name}
-
-    Phone: <code>{phone}</code>
-
-    Pickup Dist: {dist} km
-
-
-    Please look out for the vehicle!'
+  driver_accepted: ✅ Driver accepted your order and is on the way!
   driver_arrived: 📍 Driver arrived
-  trip_started: 🚗 Trip started
-  trip_completed: 🏁 Trip ended, pay ${price}
+  trip_started: 🚗 Trip started. Have a safe journey!
+  trip_completed: '🏁 Arrived at destination. Total fare: ${price}. Thank you!'
   cancel_free: ✅ Order cancelled.
   cancel_with_fee: ✅ Order cancelled. Cancel fee ${fee} deducted.
   order_timeout: ⏳ Timeout cancelled

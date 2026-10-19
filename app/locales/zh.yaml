@@ -70,24 +70,10 @@ passenger:
 
     一口价 ${price}'
   no_driver: ⚠️ 无司机
-  driver_accepted: '🎉 <b>司机已接单！</b>
-
-
-    🚗 <b>车辆信息：</b>
-
-    车牌号：<code>{plate}</code>
-
-    司机姓名：{name}
-
-    联系电话：<code>{phone}</code>
-
-    接驾距离：{dist} km
-
-
-    请留意车辆到来，祝您旅途愉快！'
+  driver_accepted: ✅ 司机已接单，正在赶来！
   driver_arrived: 📍 司机到达
-  trip_started: 🚗 行程开始
-  trip_completed: 🏁 结束，支付 ${price}
+  trip_started: 🚗 行程已开始，祝您旅途愉快！
+  trip_completed: 🏁 已到达目的地，本次费用：${price}。感谢您的乘坐！
   cancel_free: ✅ 订单已取消。
   cancel_with_fee: ✅ 订单已取消。扣除违约金 ${fee}
   order_timeout: ⏳ 超时取消

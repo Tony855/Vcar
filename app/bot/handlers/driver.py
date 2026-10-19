@@ -235,7 +235,7 @@ async def start(call: CallbackQuery, passenger_bot):
         await call.message.edit_text(t('driver.start_msg', user), reply_markup=kb)
         order = await OrderRepository.get(oid)
         if order and order.get('c_tg'):
-            try: asyncio.create_task(passenger_bot.send_message(order['c_tg'], t('passenger.trip_started', user)))
+            try: asyncio.create_task(passenger_bot.send_message(order['c_tg'], t("passenger.trip_started", {"locale": order.get("c_locale")})))
             except Exception: pass
 
 @router.callback_query(F.data.startswith('fin:'))
