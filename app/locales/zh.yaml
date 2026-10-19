@@ -62,6 +62,7 @@ driver:
   rate_pax_prompt: ⭐ <b>请评价乘客：</b>
   restore_msg: 🔄 检测到您有进行中的订单，已为您恢复操作按钮：
   arrive_btn: 📍 确认到达接客点
+  rider_rated: ⭐ 乘客已为您打分：{score} 星。
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点
@@ -78,6 +79,8 @@ passenger:
   cancel_free: ✅ 订单已取消。
   cancel_with_fee: ✅ 订单已取消。扣除违约金 ${fee}
   order_timeout: ⏳ 超时取消
+  rate_success: ✅ 感谢您的评价！您给司机打了 {score} 星。
+  rate_drv_prompt: ⭐ <b>请评价本次行程的司机：</b>
 order:
   card: '🔔 <b>新订单 #{order_id}</b>
 

@@ -250,7 +250,7 @@ async def finish(call: CallbackQuery, passenger_bot):
             try: 
                 asyncio.create_task(passenger_bot.send_message(order['c_tg'], t("passenger.trip_completed", {"locale": order.get("c_locale")}, price=price_str)))
                 stars = [[InlineKeyboardButton(text=f"{'⭐'*i} {i}星", callback_data=f"rate_pax:{oid}:{i}")] for i in range(1, 6)]
-                await passenger_bot.send_message(order['c_tg'], '⭐ <b>请评价本次行程的司机：</b>', reply_markup=InlineKeyboardMarkup(inline_keyboard=stars))
+                await passenger_bot.send_message(order["c_tg"], t("passenger.rate_drv_prompt", {"locale": order.get("c_locale", "en")}), reply_markup=InlineKeyboardMarkup(inline_keyboard=stars))
             except Exception: pass
         stars_drv = [[InlineKeyboardButton(text=f"{'⭐'*i} {i}星", callback_data=f"rate_drv:{oid}:{i}")] for i in range(1, 6)]
         await call.message.answer(t("driver.rate_pax_prompt", user), reply_markup=InlineKeyboardMarkup(inline_keyboard=stars_drv))

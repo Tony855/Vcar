@@ -65,6 +65,7 @@ driver:
   rate_pax_prompt: ⭐ <b>Please rate the passenger:</b>
   restore_msg: '🔄 Active order detected, operation buttons restored:'
   arrive_btn: 📍 Arrived at pickup
+  rider_rated: '⭐ Passenger rated you: {score} stars.'
 passenger:
   prompt_pickup: 📍 Send Pickup Location
   prompt_dropoff: 🏁 Send Dropoff Location
@@ -81,6 +82,8 @@ passenger:
   cancel_free: ✅ Order cancelled.
   cancel_with_fee: ✅ Order cancelled. Cancel fee ${fee} deducted.
   order_timeout: ⏳ Timeout cancelled
+  rate_success: ✅ Thank you for your rating! You rated the driver {score} stars.
+  rate_drv_prompt: ⭐ <b>Please rate the driver for this trip:</b>
 order:
   card: '🔔 <b>New Order #{order_id}</b>
 
