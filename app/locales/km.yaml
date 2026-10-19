@@ -17,13 +17,13 @@ common:
   dropoff_desc: ទីនេះ
   from_passenger: '💬 [ពីអ្នកដំណើរ]:'
   from_driver: '💬 [ពីអ្នកបើកបរ]:'
-  driver_location_update: 🚗 អ្នកបើកបរបានធ្វើបច្ចុប្បន្នភាពទីតាំង។
+  driver_location_update: '🚖 អ្នកបើកបរបានមកដល់ចំណុចដឹកអ្នកដំណើរហើយ។'
 driver:
   prompt_location: 🚗 ផ្ញើទីតាំងដើម្បីចូលធ្វើការ
   online_success: ✅ ចូលធ្វើការជោគជ័យ
   arrived_btn: 📍 មកដល់
   arrived_msg: 📍 រង់ចាំអ្នកដំណើរ
-  start_btn: 🚗 ចេញដំណើរ
+  start_btn: '🚙 អ្នកដំណើរឡើងរថយន្តហើយ - ចាប់ផ្តើមធ្វើដំណើរ'
   start_msg: 🚗 ធ្វើដំណើរ
   finish_btn: 🏁 បញ្ចប់
   accept_success: '🎉 ទទួលជោគជ័យ #{order_id}'
@@ -54,7 +54,7 @@ driver:
   offline_success: ✅ អ្នកបានចាកចេញហើយ។ អ្នកនឹងមិនទទួលបានការបញ្ជាទិញថ្មីទេ។
   already_online: ✅ អ្នកកំពុងធ្វើការហើយ។ មិនចាំបាច់ចូលធ្វើការម្តងទៀតទេ។ សូមផ្ញើទីតាំងដើម្បីធ្វើបច្ចុប្បន្នភាព
     ឬចាកចេញ។
-  trip_ready_prompt: ✅ បានជូនដំណឹងដល់អ្នកដំណើរ។ សូមចុចខាងក្រោមដើម្បីចាប់ផ្តើម៖
+  trip_ready_prompt: '👇 សូមចុចប៊ូតុងខាងក្រោមដើម្បីចាប់ផ្តើមការធ្វើដំណើរ៖'
 passenger:
   prompt_pickup: 📍 ផ្ញើទីតាំងឡាន
   prompt_dropoff: 🏁 ផ្ញើគោលដៅ
