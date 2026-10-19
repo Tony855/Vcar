@@ -95,6 +95,16 @@ passenger:
   order_timeout: ⏳ 超时取消
   rate_success: ✅ 感谢您的评价！您给司机打了 {score} 星。
   rate_drv_prompt: ⭐ <b>请评价本次行程的司机：</b>
+  confirm_order_prompt: '📋 <b>订单确认</b>
+
+
+    📍 距离：{dist} km
+
+    💰 一口价：${price}
+
+
+    请确认无误后点击下方按钮呼叫司机：'
+  confirm_btn: ✅ 确认下单
 order:
   card: '🔔 <b>新订单 #{order_id}</b>
 

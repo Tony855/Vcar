@@ -176,14 +176,9 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     await state.update_data(dlat=msg.location.latitude, dlng=msg.location.longitude, trip_dist=trip_dist, price_val=price_val)
     await state.set_state(PaxStates.confirm)
 
-    preview_text = (
-        f"📋 <b>订单确认</b>\n\n"
-        f"📍 距离：{trip_dist} km\n"
-        f"💰 一口价：${price_val:.2f}\n\n"
-        f"请确认无误后点击下方按钮呼叫司机："
-    )
+    preview_text = t('passenger.confirm_order_prompt', user, dist=trip_dist, price=f"{price_val:.2f}")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ 确认下单", callback_data="cfm_confirm")],
+        [InlineKeyboardButton(text=t("passenger.confirm_btn", user), callback_data="cfm_confirm")],
         [InlineKeyboardButton(text="❌ 取消", callback_data="menu:passenger")]
     ])
     await msg.answer(preview_text, reply_markup=kb)
