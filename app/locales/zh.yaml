@@ -111,6 +111,8 @@ passenger:
     请确认无误后点击下方按钮呼叫司机：'
   confirm_btn: ✅ 确认下单
   searching_driver: ⏳ 正在为您呼叫附近的司机...
+  cancel_btn: ❌ 取消
+  calling_msg: ⏳ 正在为您呼叫司机...
 order:
   card: '🔔 <b>新订单 #{order_id}</b>
 

@@ -179,7 +179,7 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     preview_text = t('passenger.confirm_order_prompt', user, dist=trip_dist, price=f"{price_val:.2f}")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t("passenger.confirm_btn", user), callback_data="cfm_confirm")],
-        [InlineKeyboardButton(text="❌ 取消", callback_data="menu:passenger")]
+        [InlineKeyboardButton(text=t("passenger.cancel_btn", user), callback_data="menu:passenger")]
     ])
     await msg.answer(preview_text, reply_markup=kb)
 
@@ -194,7 +194,7 @@ async def confirm_order(call: CallbackQuery, state: FSMContext, driver_bot):
     trip_dist, price_val = data['trip_dist'], data['price_val']
     
     await state.clear()
-    await call.message.edit_text("⏳ 正在为您呼叫司机...")
+    await call.message.edit_text(t("passenger.calling_msg", user))
 
     order = await OrderRepository.create(user['id'], plng, plat, dlng, dlat, trip_dist, price_val)
     oid = order['id']

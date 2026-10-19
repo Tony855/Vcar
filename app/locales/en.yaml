@@ -115,6 +115,8 @@ passenger:
     Please confirm and click the button below to call a driver:'
   confirm_btn: ✅ Confirm Order
   searching_driver: ⏳ Calling nearby drivers for you...
+  cancel_btn: ❌ Cancel
+  calling_msg: ⏳ Calling driver for you...
 order:
   card: '🔔 <b>New Order #{order_id}</b>
 
