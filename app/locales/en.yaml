@@ -75,7 +75,21 @@ passenger:
 
     Fixed ${price}'
   no_driver: ⚠️ No drivers nearby
-  driver_accepted: ✅ Driver accepted your order and is on the way!
+  driver_accepted: '🎉 Driver accepted your order!
+
+
+    🚗 Vehicle Info:
+
+    Plate: {plate}
+
+    Driver: {name}
+
+    Phone: {phone}
+
+    Distance: {dist} km
+
+
+    Please watch for the vehicle. Have a safe trip!'
   driver_arrived: 📍 Driver arrived
   trip_started: 🚗 Trip started. Have a safe journey!
   trip_completed: '🏁 Arrived at destination. Total fare: ${price}. Thank you!'

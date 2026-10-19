@@ -18,7 +18,14 @@ import logging
 
 router = Router()
 class PaxStates(StatesGroup): pickup = State(); dropoff = State()
-def t(key, user, **vars): return translator.t(key, user.get("locale", "zh"), **vars)
+def t(key, user, **vars):
+    if isinstance(user, dict):
+        loc = user.get('locale', 'zh')
+    elif isinstance(user, str):
+        loc = user
+    else:
+        loc = 'zh'
+    return translator.t(key, loc, **vars)
 
 async def send_main_menu(msg: Message, user):
     items = [
