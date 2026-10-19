@@ -47,7 +47,9 @@ async def cmd_profile(msg: Message):
     await msg.answer("👇 点击下方按钮查看您的评分与评价：", reply_markup=kb)
 
 @router.message(F.text.startswith('/start'))
-async def cmd_start(msg: Message):
+async def cmd_start(msg: Message, state: FSMContext):
+    # 🚨 强制清空状态：防止处于“等待输入手机号”时发 /start 导致界面卡死
+    await state.clear()
     user = await UserRepository.get_or_create(msg.from_user.id, msg.from_user.first_name)
     await send_drv_menu(msg, user)
 
@@ -84,6 +86,10 @@ async def set_lang(call: CallbackQuery):
 @router.callback_query(F.data == 'menu:offline')
 async def cb_offline(call: CallbackQuery):
     user = await UserRepository.get_or_create(call.from_user.id)
+    # 🚨 强制身份校验：没认证通过绝不允许下线
+    if user.get('driver_status') != 'APPROVED':
+        await call.answer("⚠️ 您还未完成司机认证，无法下线！", show_alert=True)
+        return
     await DispatchService.go_offline(str(call.from_user.id))
     await call.answer(t('driver.offline_success', user), show_alert=True)
     await call.message.edit_text(f"<b>{t('driver.offline_success', user)}</b>")

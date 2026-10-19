@@ -15,7 +15,7 @@ class PricingService:
     @classmethod
     async def estimate(cls, plat, plng, dlat, dlng):
         async with db.pool.acquire() as c:
-            rows = await c.fetch("SELECT key, value FROM settings")
+            rows = await c.fetch("SELECT key, value FROM settings WHERE key IN ('base_fare', 'per_km_rate')")
             data = {r['key']: float(r['value']) for r in rows}
             base, per_km = data.get('base_fare', 1.0), data.get('per_km_rate', 0.5)
         
