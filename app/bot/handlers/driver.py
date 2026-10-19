@@ -24,8 +24,14 @@ class DrvStates(StatesGroup):
     reg_license_photo = State()
     reg_drv_license_photo = State()
 
-def t(key, user, **vars): 
-    return translator.t(key, user.get('locale', 'zh'), **vars)
+def t(key, user, **vars):
+    if isinstance(user, dict):
+        loc = user.get('locale', 'zh')
+    elif isinstance(user, str):
+        loc = user
+    else:
+        loc = 'zh'
+    return translator.t(key, loc, **vars)
 
 async def send_drv_menu(msg: Message, user):
     web_app_url = f"https://vcar.v2net.cc/mini/{msg.from_user.id}?v={int(time.time())}"
