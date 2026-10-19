@@ -53,6 +53,24 @@ async def cmd_start(msg: Message, state: FSMContext):
     user = await UserRepository.get_or_create(msg.from_user.id, msg.from_user.first_name)
     await send_drv_menu(msg, user)
 
+    # 🌟 新增：自动恢复进行中的订单
+    active = await OrderRepository.get_active_order_by_user(user['id'])
+    if active:
+        await msg.answer(t("driver.restore_msg", user))
+        status = active.get('status')
+        
+        if status == 'ACCEPTED':
+            loc_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=t('driver.arrive_btn', user), request_location=True)]], resize_keyboard=True, one_time_keyboard=True)
+            await msg.answer(t("driver.accept_prompt", user), reply_markup=loc_kb)
+            
+        elif status == 'ARRIVED':
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t('driver.start_btn', user), callback_data=f"sta:{active['id']}")]])
+            await msg.answer(t('driver.trip_ready_prompt', user), reply_markup=kb)
+            
+        elif status == 'IN_PROGRESS':
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t('driver.finish_btn', user), callback_data=f"fin:{active['id']}")]])
+            await msg.answer(t('driver.start_msg', user), reply_markup=kb)
+
 @router.callback_query(F.data == 'menu:orders')
 async def menu_orders(call: CallbackQuery):
     user = await UserRepository.get_or_create(call.from_user.id)

@@ -25,7 +25,7 @@ driver:
   arrived_btn: 📍 已到达
   arrived_msg: 📍 等待上车
   start_btn: 🚙乘客已上车-开始出发
-  start_msg: 🚗 出发
+  start_msg: 🚗 行程进行中，请将乘客送至目的地：
   finish_btn: 🏁 结单
   accept_success: '🎉 接单成功 #{order_id}'
   finish_msg: '🏁 完成 #{order_id}'
@@ -59,6 +59,8 @@ driver:
   arrived_success: ✅ 已到达接客点，已通知乘客。
   rated_pax: ✅ 您已对乘客评分：{score} 星。
   rate_pax_prompt: ⭐ <b>请评价乘客：</b>
+  restore_msg: 🔄 检测到您有进行中的订单，已为您恢复操作按钮：
+  arrive_btn: 📍 确认到达接客点
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点

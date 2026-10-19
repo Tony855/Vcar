@@ -25,7 +25,7 @@ driver:
   arrived_btn: 📍 Arrived
   arrived_msg: 📍 Waiting for passenger
   start_btn: 🚙 Passenger boarded - Start Trip
-  start_msg: 🚗 Go
+  start_msg: '🚗 Trip in progress, please drive to the destination:'
   finish_btn: 🏁 Finish
   accept_success: '🎉 Accepted #{order_id}'
   finish_msg: '🏁 Completed #{order_id}'
@@ -62,6 +62,8 @@ driver:
   arrived_success: ✅ Arrived at pickup, passenger notified.
   rated_pax: '✅ You rated the passenger: {score} stars.'
   rate_pax_prompt: ⭐ <b>Please rate the passenger:</b>
+  restore_msg: '🔄 Active order detected, operation buttons restored:'
+  arrive_btn: 📍 Arrived at pickup
 passenger:
   prompt_pickup: 📍 Send Pickup Location
   prompt_dropoff: 🏁 Send Dropoff Location

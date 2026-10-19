@@ -99,7 +99,7 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     
     for d in drivers:
         txt = t("order.card", {"locale": d.get("locale", "en")}, order_id=oid, pickup_distance=round(float(d["dist"])*1.3,1), trip_distance=trip_dist, price=f"{price_val:.2f}")
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.accept_btn", user), callback_data=f"acc:{oid}")]])
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.accept_btn", {"locale": d.get("locale", "en")}), callback_data=f"acc:{oid}")]])
         try:
             await driver_bot.send_venue(d["tg_id"], latitude=data['plat'], longitude=data['plng'], title=t("common.pickup_venue", user), address=t("common.pickup_desc", user))
             await driver_bot.send_venue(d["tg_id"], latitude=msg.location.latitude, longitude=msg.location.longitude, title=t("common.dropoff_venue", user), address=t("common.dropoff_desc", user))

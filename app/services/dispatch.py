@@ -65,7 +65,7 @@ class DispatchService:
                 "tg_id": tg_id,
                 "dist": dist,
                 "rating": rating,
-                "score": total_score
+                "score": total_score, "locale": user_map[tg_id].get("locale", "en")
             })
 
         scored_drivers.sort(key=lambda x: x["score"], reverse=True)

@@ -25,7 +25,7 @@ driver:
   arrived_btn: 📍 មកដល់
   arrived_msg: 📍 រង់ចាំអ្នកដំណើរ
   start_btn: 🚙 អ្នកដំណើរឡើងរថយន្តហើយ - ចាប់ផ្តើមធ្វើដំណើរ
-  start_msg: 🚗 ធ្វើដំណើរ
+  start_msg: 🚗 កំពុងធ្វើដំណើរ សូមបញ្ជូនអ្នកដំណើរទៅគោលដៅ៖
   finish_btn: 🏁 បញ្ចប់
   accept_success: '🎉 ទទួលជោគជ័យ #{order_id}'
   finish_msg: '🏁 បញ្ចប់ #{order_id}'
@@ -60,6 +60,8 @@ driver:
   arrived_success: ✅ បានមកដល់ចំណុចដឹកអ្នកដំណើរ បានជូនដំណឹងដល់អ្នកដំណើរ។
   rated_pax: ✅ អ្នកបានផ្តល់ពិន្ទុដល់អ្នកដំណើរ៖ {score} ផ្កាយ។
   rate_pax_prompt: ⭐ <b>សូមផ្តល់ពិន្ទុដល់អ្នកដំណើរ៖</b>
+  restore_msg: 🔄 រកឃើញការកម្ម៉ង់ដែលកំពុងដំណើរការ ប៊ូតុងត្រូវបានស្តារឡើងវិញ៖
+  arrive_btn: 📍 មកដល់ចំណុចដឹកអ្នកដំណើរ
 passenger:
   prompt_pickup: 📍 ផ្ញើទីតាំងឡាន
   prompt_dropoff: 🏁 ផ្ញើគោលដៅ
