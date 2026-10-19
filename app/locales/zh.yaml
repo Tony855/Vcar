@@ -20,6 +20,8 @@ common:
   from_driver: '💬 [来自司机]:'
   driver_location_update: 🚖司机已到达乘车点。
   car_photo: 📸 车辆实拍图
+  pickup_title: 📍 上车点
+  dropoff_title: 🏁 目的地
 driver:
   prompt_location: 🚗 发送位置上线
   online_success: ✅ 上线成功

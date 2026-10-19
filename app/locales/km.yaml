@@ -20,6 +20,8 @@ common:
   from_driver: '💬 [ពីអ្នកបើកបរ]:'
   driver_location_update: 🚖 អ្នកបើកបរបានមកដល់ចំណុចដឹកអ្នកដំណើរហើយ។
   car_photo: 📸 រូបថតរថយន្តពិតប្រាកដ
+  pickup_title: 📍 ចំណុចដឹក
+  dropoff_title: 🏁 គោលដៅ
 driver:
   prompt_location: 🚗 ផ្ញើទីតាំងដើម្បីចូលធ្វើការ
   online_success: ✅ ចូលធ្វើការជោគជ័យ

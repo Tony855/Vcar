@@ -209,7 +209,7 @@ async def confirm_order(call: CallbackQuery, state: FSMContext, driver_bot):
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.accept_btn", {"locale": d.get("locale", "en")}), callback_data=f"acc:{oid}")]])
         try:
             await driver_bot.send_venue(d["tg_id"], latitude=plat, longitude=plng, title=t("common.pickup_venue", user), address=t("common.pickup_desc", user))
-            await driver_bot.send_venue(d["tg_id"], latitude=dlat, longitude=dlng, title=t("common.dropoff_venue", user), address=t("common.dropoff_desc", user))
+            await driver_bot.send_venue(d["tg_id"], latitude=dlat if 'dlat' in locals() else msg.location.latitude, longitude=dlng if 'dlng' in locals() else msg.location.longitude, title=t("common.dropoff_title", {"locale": d.get("locale", "en")}), address="Here")
             await driver_bot.send_message(d["tg_id"], txt, reply_markup=kb, parse_mode="HTML")
         except: pass
 

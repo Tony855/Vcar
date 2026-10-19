@@ -20,6 +20,8 @@ common:
   from_driver: '💬 [From Driver]:'
   driver_location_update: 🚖 Driver arrived at pickup point.
   car_photo: 📸 Actual Vehicle Photo
+  pickup_title: 📍 Pickup
+  dropoff_title: 🏁 Dropoff
 driver:
   prompt_location: 🚗 Send location to go online
   online_success: ✅ Online successfully
