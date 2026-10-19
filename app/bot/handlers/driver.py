@@ -178,7 +178,7 @@ async def accept(call: CallbackQuery, state: FSMContext, passenger_bot):
     if not await OrderRepository.accept(oid, user['id']): return await call.answer(t('common.slow_hand', user), show_alert=True)
     await DispatchService.remove_order_from_pool(oid)
     await state.clear()
-    loc_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text='📍 确认到达接客点', request_location=True)]], resize_keyboard=True, one_time_keyboard=True)
+    loc_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=t('driver.arrive_btn', user), request_location=True)]], resize_keyboard=True, one_time_keyboard=True)
     await call.message.edit_text(t('driver.accept_success', user, order_id=oid))
     await call.message.answer('👇 请前往接客点。到达后，请点击下方的【确认到达】按钮：', reply_markup=loc_kb)
     order = await OrderRepository.get(oid)
