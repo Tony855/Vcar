@@ -93,9 +93,8 @@ async def step2(msg: Message, state: FSMContext, driver_bot):
     
     drivers = await DispatchService.smart_dispatch(data['plng'], data['plat'], top_n=3)
     if not drivers: 
-        # 为了方便测试，把 Redis 里的真实情况告诉乘客
-        raw = await DispatchService.get_nearby_drivers(data['plng'], data['plat'], radius_km=100)
-        await msg.reply(f"⚠️ 派单失败。100km内实际有 {len(raw)} 位司机上线。请查看服务器后台日志排查原因。")
+        # 优雅的业务提示，不再暴露服务器细节
+        await msg.reply(t('passenger.no_driver', user, order_id=oid))
         return
     
     for d in drivers:
