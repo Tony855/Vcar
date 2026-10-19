@@ -16,7 +16,7 @@
       </div>
       <div class="info-item">
         <span class="label">司机状态</span>
-        <span class="value status-val">已认证 (在线)</span>
+        <span :class="['value', info.is_online === '在线' ? 'status-online' : 'status-offline']">{{ info.is_online || '离线' }}</span>
       </div>
     </div>
 
@@ -57,6 +57,9 @@ onMounted(async () => {
 .label { color: #6b7280; }
 .value { color: #1f2937; font-weight: bold; }
 .plate-val { color: #3b82f6; background: #eff6ff; padding: 4px 8px; border-radius: 6px; }
-.status-val { color: #059669; }
+
 .tips { margin-top: 24px; font-size: 13px; color: #9ca3af; line-height: 1.6; padding: 0 8px; text-align: center; }
+
+.status-online { color: #059669; font-weight: bold; }
+.status-offline { color: #6b7280; font-weight: bold; }
 </style>
