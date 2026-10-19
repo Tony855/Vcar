@@ -214,7 +214,7 @@ async def handle_driver_location(msg: Message, passenger_bot):
     # 1. 把司机当前的位置实时转发给乘客
     try:
         asyncio.create_task(passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude))
-        asyncio.create_task(passenger_bot.send_message(active['c_tg'], t("common.driver_location_update", {"locale": active.get("c_locale")})))
+        asyncio.create_task(passenger_bot.send_message(active["c_tg"], t("common.driver_location_update", active.get("c_locale", "en"))))
     except Exception as e:
         import logging
         logging.error(f"发送位置给乘客失败: {e}")
