@@ -180,21 +180,21 @@ async def accept(call: CallbackQuery, state: FSMContext, passenger_bot):
     await state.clear()
     loc_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=t('driver.arrive_btn', user), request_location=True)]], resize_keyboard=True, one_time_keyboard=True)
     await call.message.edit_text(t('driver.accept_success', user, order_id=oid))
-    await call.message.answer('👇 请前往接客点。到达后，请点击下方的【确认到达】按钮：', reply_markup=loc_kb)
+    await call.message.answer(t('driver.accept_prompt', user), reply_markup=loc_kb)
     order = await OrderRepository.get(oid)
     if order and order.get('c_tg'):
         d_pos = await db.redis.geopos('driver:online', str(call.from_user.id))
         d_km = round(PricingService.haversine(order['pickup_lat'], order['pickup_lng'], d_pos[0][1], d_pos[0][0]) * 1.3, 1) if d_pos and d_pos[0] else 0.0
-        p_txt = t('passenger.driver_accepted', user, plate=order.get('d_plate') or '无', name=order.get('d_name') or '司机', phone=order.get('d_phone') or '无', dist=d_km)
+        p_txt = t('passenger.driver_accepted', order.get('c_locale', 'en'), plate=order.get('d_plate') or '无', name=order.get('d_name') or '司机', phone=order.get('d_phone') or '无', dist=d_km)
         try:
             await passenger_bot.send_message(order['c_tg'], p_txt)
             if order.get('d_car_photo'):
                 file_io = io.BytesIO()
                 await call.bot.download(order['d_car_photo'], destination=file_io)
                 photo_file = BufferedInputFile(file_io.getvalue(), filename='car.jpg')
-                await passenger_bot.send_photo(order['c_tg'], photo=photo_file, caption=t("common.car_photo", {"locale": order.get("c_locale", "en")}))
+                await passenger_bot.send_photo(order['c_tg'], photo=photo_file, caption=t("common.car_photo", order.get("c_locale", "en")))
             else:
-                await passenger_bot.send_message(order['c_tg'], t('passenger.no_car_photo', user))
+                await passenger_bot.send_message(order['c_tg'], t('passenger.no_car_photo', order.get('c_locale', 'en')))
         except Exception as e: logging.error(e)
 
 @router.message(F.location)

@@ -156,7 +156,7 @@ async def rate_pax_to_driver(call: CallbackQuery, state: FSMContext, driver_bot)
         await state.update_data(oid=int(oid), driver_tg=order['d_tg'])
         await call.message.edit_text(f"✅ 您给司机打了 {int(score)} 星。\n\n📝 请直接回复文字，留下您的评价（或点 /skip 跳过）：")
         try:
-            asyncio.create_task(driver_bot.send_message(order['d_tg'], t("driver.rider_rated", {"locale": order.get("d_locale")}, score=int(score))))
+            asyncio.create_task(driver_bot.send_message(order['d_tg'], t("driver.rider_rated", order.get("d_locale", "en"), score=int(score))))
         except: pass
     await call.answer()
 
