@@ -34,8 +34,8 @@ class DispatchService:
             busy_ids = {r['driver_id'] for r in busy_rows}
             
             tg_ids = [int(d[0]) for d in raw_drivers]
-            user_rows = await c.fetch("SELECT id, telegram_id, rating FROM users WHERE telegram_id = ANY($1)", tg_ids)
-            user_map = {r['telegram_id']: {"db_id": r['id'], "rating": float(r['rating'] or 5.0)} for r in user_rows}
+            user_rows = await c.fetch("SELECT id, telegram_id, rating, locale FROM users WHERE telegram_id = ANY($1)", tg_ids)
+            user_map = {r['telegram_id']: {"db_id": r['id'], "rating": float(r['rating'] or 5.0), "locale": r['locale'] or "en"} for r in user_rows}
             
             logging.info(f"🔍 [派单] 忙碌内部ID: {busy_ids}")
             logging.info(f"🔍 [派单] 数据库中匹配到的司机: {user_map}")

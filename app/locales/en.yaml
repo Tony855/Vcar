@@ -4,6 +4,7 @@ menu:
   driver: 🚗 Go Online
   orders: 📋 Orders
   lang: 🌐 Language
+  webapp: 👤 My WebApp
 lang:
   choose: Choose language
   changed: Changed
@@ -17,13 +18,13 @@ common:
   dropoff_desc: Here
   from_passenger: '💬 [From Passenger]:'
   from_driver: '💬 [From Driver]:'
-  driver_location_update: '🚖 Driver arrived at pickup.'
+  driver_location_update: 🚖 Driver arrived at pickup.
 driver:
   prompt_location: 🚗 Send location to go online
   online_success: ✅ Online successfully
   arrived_btn: 📍 Arrived
   arrived_msg: 📍 Waiting for passenger
-  start_btn: '🚙 Passenger boarded - Start Trip'
+  start_btn: 🚙 Passenger boarded - Start Trip
   start_msg: 🚗 Go
   finish_btn: 🏁 Finish
   accept_success: '🎉 Accepted #{order_id}'
@@ -57,6 +58,10 @@ driver:
   already_online: ✅ You are already online. No need to go online again. Send a location
     to update, or go offline.
   trip_ready_prompt: '👇 Click below to start trip:'
+  accept_prompt: '👆 Please go to the pickup point. Click the button below upon arrival:'
+  arrived_success: ✅ Arrived at pickup, passenger notified.
+  rated_pax: '✅ You rated the passenger: {score} stars.'
+  rate_pax_prompt: ⭐ <b>Please rate the passenger:</b>
 passenger:
   prompt_pickup: 📍 Send Pickup Location
   prompt_dropoff: 🏁 Send Dropoff Location
@@ -108,5 +113,4 @@ status:
   IN_PROGRESS: In Progress
   COMPLETED: Completed
   CANCELLED: Cancelled
-
   rider_rated: '⭐ Passenger rated you: {score} stars.'

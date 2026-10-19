@@ -30,7 +30,7 @@ def t(key, user, **vars):
 async def send_drv_menu(msg: Message, user):
     web_app_url = f"https://vcar.v2net.cc/mini/{msg.from_user.id}?v={int(time.time())}"
     items = [
-        [InlineKeyboardButton(text="👤 我的主页 (小程序)", web_app=WebAppInfo(url=web_app_url))],
+        [InlineKeyboardButton(text=t("menu.webapp", user), web_app=WebAppInfo(url=web_app_url))],
         [InlineKeyboardButton(text=t('menu.driver', user), callback_data='menu:driver')],
         [InlineKeyboardButton(text=t('driver.offline_btn', user), callback_data='menu:offline')],
         [InlineKeyboardButton(text=t('menu.orders', user), callback_data='menu:orders'), InlineKeyboardButton(text=t('menu.lang', user), callback_data='menu:lang')]
@@ -199,7 +199,7 @@ async def handle_driver_location(msg: Message, passenger_bot):
     if active['status'] == 'ACCEPTED':
         if await OrderRepository.update_status(active['id'], OrderStatus.ARRIVED.value, OrderStatus.ACCEPTED.value):
             # 强制清理底部长条键盘
-            await msg.answer("✅ 已到达接客点，已通知乘客。", reply_markup=ReplyKeyboardRemove())
+            await msg.answer(t("driver.arrived_success", user), reply_markup=ReplyKeyboardRemove())
             
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t('driver.start_btn', user), callback_data=f"sta:{active['id']}")]])
             await msg.answer(t('driver.trip_ready_prompt', user), reply_markup=kb)
@@ -235,7 +235,7 @@ async def finish(call: CallbackQuery, passenger_bot):
                 await passenger_bot.send_message(order['c_tg'], '⭐ <b>请评价本次行程的司机：</b>', reply_markup=InlineKeyboardMarkup(inline_keyboard=stars))
             except Exception: pass
         stars_drv = [[InlineKeyboardButton(text=f"{'⭐'*i} {i}星", callback_data=f"rate_drv:{oid}:{i}")] for i in range(1, 6)]
-        await call.message.answer('⭐ <b>请评价乘客：</b>', reply_markup=InlineKeyboardMarkup(inline_keyboard=stars_drv))
+        await call.message.answer(t("driver.rate_pax_prompt", user), reply_markup=InlineKeyboardMarkup(inline_keyboard=stars_drv))
 
 @router.callback_query(F.data.startswith('rate_drv:'))
 async def rate_driver_to_pax(call: CallbackQuery):
@@ -254,7 +254,7 @@ async def rate_driver_to_pax(call: CallbackQuery):
                 )
         # 👆
         
-        await call.message.edit_text(f'✅ 您已对乘客评分：{int(score)} 星。')
+        await call.message.edit_text(t("driver.rated_pax", user, score=int(score)))
     await call.answer()
 
 @router.message(F.text | F.voice | F.photo)

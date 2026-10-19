@@ -4,6 +4,7 @@ menu:
   driver: 🚗 上线接单
   orders: 📋 订单
   lang: 🌐 语言
+  webapp: 👤 我的主页 (小程序)
 lang:
   choose: 选择语言
   changed: 已切换
@@ -17,13 +18,13 @@ common:
   dropoff_desc: 请将乘客送至此处
   from_passenger: '💬 [来自乘客]:'
   from_driver: '💬 [来自司机]:'
-  driver_location_update: '🚖司机已到达乘车点。'
+  driver_location_update: 🚖司机已到达乘车点。
 driver:
   prompt_location: 🚗 发送位置上线
   online_success: ✅ 上线成功
   arrived_btn: 📍 已到达
   arrived_msg: 📍 等待上车
-  start_btn: '🚙乘客已上车-开始出发'
+  start_btn: 🚙乘客已上车-开始出发
   start_msg: 🚗 出发
   finish_btn: 🏁 结单
   accept_success: '🎉 接单成功 #{order_id}'
@@ -53,7 +54,11 @@ driver:
   offline_btn: 🔴 下线休息
   offline_success: ✅ 您已成功下线，将不再接收新订单。
   already_online: ✅ 您已在接单中，无需重复上线。如需更新位置请直接发送定位，或点击下线休息。
-  trip_ready_prompt: '👇请点击下方按钮开始行程：'
+  trip_ready_prompt: 👇请点击下方按钮开始行程：
+  accept_prompt: 👆 请前往接客点。到达后，请点击下方的【确认到达】按钮：
+  arrived_success: ✅ 已到达接客点，已通知乘客。
+  rated_pax: ✅ 您已对乘客评分：{score} 星。
+  rate_pax_prompt: ⭐ <b>请评价乘客：</b>
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点
@@ -87,14 +92,14 @@ passenger:
 order:
   card: '🔔 <b>新订单 #{order_id}</b>
 
-    接驾距离: {pickup_distance} km
+    上车距离: {pickup_distance} km
 
     行程距离: {trip_distance} km
 
     一口价: ${price}
 
 
-    👆 上方两条定位分别是：📍 上车点 和 🏁 目的地'
+    👆 上方的 2 个位置分别是: 📍 上车点 和 🏁 目的地'
   accept_btn: ✅ 接单
   cancel_btn: ❌ 取消
   list_item: '#{id} | {status} | ${price}'
@@ -105,5 +110,4 @@ status:
   IN_PROGRESS: 行程中
   COMPLETED: 已完成
   CANCELLED: 已取消
-
-  rider_rated: '⭐ 乘客已为您打分：{score} 星。'
+  rider_rated: ⭐ 乘客已为您打分：{score} 星。
