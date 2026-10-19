@@ -66,12 +66,17 @@ driver:
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点
-  order_created: '✅ 订单 #{order_id}
+  order_created: '✅ 订单已创建！
 
-    距离 {distance}km
+    订单号: #{order_id}
 
-    一口价 ${price}'
-  no_driver: ⚠️ 无司机
+    距离: {distance} km
+
+    一口价: ${price}
+
+
+    请耐心等待司机接单。'
+  no_driver: '⚠️ 抱歉，附近暂时没有可用司机，请稍后再试。(订单号: #{order_id})'
   driver_accepted: '🎉 司机已接单！
 
 
@@ -105,6 +110,7 @@ passenger:
 
     请确认无误后点击下方按钮呼叫司机：'
   confirm_btn: ✅ 确认下单
+  searching_driver: ⏳ 正在为您呼叫附近的司机...
 order:
   card: '🔔 <b>新订单 #{order_id}</b>
 
