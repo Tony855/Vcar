@@ -190,7 +190,7 @@ async def handle_driver_location(msg: Message, passenger_bot):
     # 1. 把司机当前的位置实时转发给乘客
     try:
         asyncio.create_task(passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude))
-        asyncio.create_task(passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user)))
+        asyncio.create_task(passenger_bot.send_message(active['c_tg'], t("common.driver_location_update", {"locale": active.get("c_locale")})))
     except Exception as e:
         import logging
         logging.error(f"发送位置给乘客失败: {e}")
@@ -230,7 +230,7 @@ async def finish(call: CallbackQuery, passenger_bot):
         if order and order.get('c_tg'):
             price_str = f"{float(order['price_estimate']):.2f}"
             try: 
-                asyncio.create_task(passenger_bot.send_message(order['c_tg'], t('passenger.trip_completed', user, price=price_str)))
+                asyncio.create_task(passenger_bot.send_message(order['c_tg'], t("passenger.trip_completed", {"locale": order.get("c_locale")}, price=price_str)))
                 stars = [[InlineKeyboardButton(text=f"{'⭐'*i} {i}星", callback_data=f"rate_pax:{oid}:{i}")] for i in range(1, 6)]
                 await passenger_bot.send_message(order['c_tg'], '⭐ <b>请评价本次行程的司机：</b>', reply_markup=InlineKeyboardMarkup(inline_keyboard=stars))
             except Exception: pass
@@ -264,7 +264,7 @@ async def drv_chat_proxy(msg: Message, passenger_bot):
     active = await OrderRepository.get_active_order_by_user(user['id'])
     if active and active.get('c_tg'):
         try:
-            await passenger_bot.send_message(active['c_tg'], t('common.from_driver', user))
+            await passenger_bot.send_message(active['c_tg'], t("common.from_driver", {"locale": active.get("c_locale")}))
             await msg.copy_to(active['c_tg'])
         except Exception as e:
             import logging

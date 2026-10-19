@@ -108,3 +108,5 @@ status:
   IN_PROGRESS: In Progress
   COMPLETED: Completed
   CANCELLED: Cancelled
+
+  rider_rated: '⭐ Passenger rated you: {score} stars.'

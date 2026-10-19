@@ -105,3 +105,5 @@ status:
   IN_PROGRESS: 行程中
   COMPLETED: 已完成
   CANCELLED: 已取消
+
+  rider_rated: '⭐ 乘客已为您打分：{score} 星。'

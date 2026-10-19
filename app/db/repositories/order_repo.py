@@ -9,8 +9,8 @@ class OrderRepository:
     async def get(oid):
         async with db.pool.acquire() as c:
             row = await c.fetchrow("""
-                SELECT o.*, cu.telegram_id AS c_tg, cu.first_name AS c_name, 
-                       du.telegram_id AS d_tg, du.first_name AS d_name, du.phone AS d_phone, du.plate_number AS d_plate, du.car_photo AS d_car_photo
+                SELECT o.*, cu.telegram_id AS c_tg, cu.locale AS c_locale, cu.first_name AS c_name, cu.locale AS c_locale, 
+                       du.telegram_id AS d_tg, du.locale AS d_locale, du.first_name AS d_name, du.locale AS d_locale, du.phone AS d_phone, du.plate_number AS d_plate, du.car_photo AS d_car_photo
                 FROM orders o LEFT JOIN users cu ON o.customer_id=cu.id LEFT JOIN users du ON o.driver_id=du.id WHERE o.id=$1
             """, oid)
             return dict(row) if row else None

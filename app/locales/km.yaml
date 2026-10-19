@@ -103,3 +103,5 @@ status:
   IN_PROGRESS: កំពុងធ្វើដំណើរ
   COMPLETED: បានបញ្ចប់
   CANCELLED: បានបោះបង់
+
+  rider_rated: '⭐ អ្នកដំណើរបានផ្តល់ពិន្ទុឱ្យអ្នក៖ {score} ផ្កាយ។'
