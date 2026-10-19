@@ -19,6 +19,7 @@ common:
   from_passenger: '💬 [来自乘客]:'
   from_driver: '💬 [来自司机]:'
   driver_location_update: 🚖司机已到达乘车点。
+  car_photo: 📸 车辆实拍图
 driver:
   prompt_location: 🚗 发送位置上线
   online_success: ✅ 上线成功

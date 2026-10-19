@@ -192,7 +192,7 @@ async def accept(call: CallbackQuery, state: FSMContext, passenger_bot):
                 file_io = io.BytesIO()
                 await call.bot.download(order['d_car_photo'], destination=file_io)
                 photo_file = BufferedInputFile(file_io.getvalue(), filename='car.jpg')
-                await passenger_bot.send_photo(order['c_tg'], photo=photo_file, caption='📸 车辆实拍图')
+                await passenger_bot.send_photo(order['c_tg'], photo=photo_file, caption=t("common.car_photo", {"locale": order.get("c_locale", "en")}))
             else:
                 await passenger_bot.send_message(order['c_tg'], t('passenger.no_car_photo', user))
         except Exception as e: logging.error(e)
