@@ -17,13 +17,13 @@ common:
   dropoff_desc: 请将乘客送至此处
   from_passenger: '💬 [来自乘客]:'
   from_driver: '💬 [来自司机]:'
-  driver_location_update: 🚗 司机更新了实时位置。
+  driver_location_update: '🚖司机已到达乘车点。'
 driver:
   prompt_location: 🚗 发送位置上线
   online_success: ✅ 上线成功
   arrived_btn: 📍 已到达
   arrived_msg: 📍 等待上车
-  start_btn: 🚗 开始
+  start_btn: '🚙乘客已上车-开始出发'
   start_msg: 🚗 出发
   finish_btn: 🏁 结单
   accept_success: '🎉 接单成功 #{order_id}'
@@ -53,7 +53,7 @@ driver:
   offline_btn: 🔴 下线休息
   offline_success: ✅ 您已成功下线，将不再接收新订单。
   already_online: ✅ 您已在接单中，无需重复上线。如需更新位置请直接发送定位，或点击下线休息。
-  trip_ready_prompt: ✅ 已通知乘客。请点击下方按钮开始行程：
+  trip_ready_prompt: '👇请点击下方按钮开始行程：'
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点

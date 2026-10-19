@@ -17,13 +17,13 @@ common:
   dropoff_desc: Here
   from_passenger: '💬 [From Passenger]:'
   from_driver: '💬 [From Driver]:'
-  driver_location_update: 🚗 Driver updated location.
+  driver_location_update: '🚖 Driver arrived at pickup.'
 driver:
   prompt_location: 🚗 Send location to go online
   online_success: ✅ Online successfully
   arrived_btn: 📍 Arrived
   arrived_msg: 📍 Waiting for passenger
-  start_btn: 🚗 Start
+  start_btn: '🚙 Passenger boarded - Start Trip'
   start_msg: 🚗 Go
   finish_btn: 🏁 Finish
   accept_success: '🎉 Accepted #{order_id}'
@@ -56,7 +56,7 @@ driver:
   offline_success: ✅ You are offline. You will not receive new orders.
   already_online: ✅ You are already online. No need to go online again. Send a location
     to update, or go offline.
-  trip_ready_prompt: '✅ Passenger notified. Click below to start the trip:'
+  trip_ready_prompt: '👇 Click below to start trip:'
 passenger:
   prompt_pickup: 📍 Send Pickup Location
   prompt_dropoff: 🏁 Send Dropoff Location
