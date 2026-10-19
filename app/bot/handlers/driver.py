@@ -180,27 +180,33 @@ async def accept(call: CallbackQuery, state: FSMContext, passenger_bot):
         except Exception as e: logging.error(e)
 
 @router.message(F.location)
-async def handle_driver_location_update(msg: Message, passenger_bot):
+async def handle_driver_location(msg: Message, passenger_bot):
     user = await UserRepository.get_or_create(msg.from_user.id)
     active = await OrderRepository.get_active_order_by_user(user['id'])
-    if active and active.get('c_tg'):
-        if active['status'] == 'ACCEPTED':
-            if await OrderRepository.update_status(active['id'], OrderStatus.ARRIVED.value, OrderStatus.ACCEPTED.value):
-                import logging
-                await passenger_bot.send_message(active['c_tg'], t('passenger.driver_arrived', user))
-                await msg.answer(" ", reply_markup=ReplyKeyboardRemove())
-                kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t('driver.start_btn', user), callback_data=f"sta:{active['id']}")]])
-                await msg.answer(t('driver.trip_ready_prompt', user), reply_markup=kb)
-                return
-        
-        # 如果不是刚变为到达状态，而是普通的发送位置
-        import logging
+    
+    if not active or not active.get('c_tg'):
+        return await msg.answer("❌ 您当前没有进行中的订单。")
+
+    # 1. 把司机当前的位置实时转发给乘客
+    try:
         asyncio.create_task(passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude))
         asyncio.create_task(passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user)))
-        
+    except Exception as e:
         import logging
-        asyncio.create_task(passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude))
-        asyncio.create_task(passenger_bot.send_message(active['c_tg'], t('common.driver_location_update', user)))
+        logging.error(f"发送位置给乘客失败: {e}")
+
+    # 2. 如果状态是已接单(ACCEPTED)，说明司机刚到，发“开始”按钮
+    if active['status'] == 'ACCEPTED':
+        if await OrderRepository.update_status(active['id'], OrderStatus.ARRIVED.value, OrderStatus.ACCEPTED.value):
+            # 强制清理底部长条键盘
+            await msg.answer("✅ 已到达接客点，已通知乘客。", reply_markup=ReplyKeyboardRemove())
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t('driver.start_btn', user), callback_data=f"sta:{active['id']}")]])
+            await msg.answer(t('driver.trip_ready_prompt', user), reply_markup=kb)
+    else:
+        # 如果已经在上车等待，只是随便发个位置，就只回复已更新
+        await msg.answer("✅ 位置已更新，已同步给乘客。")
+
 
 @router.callback_query(F.data.startswith('sta:'))
 async def start(call: CallbackQuery, passenger_bot):
