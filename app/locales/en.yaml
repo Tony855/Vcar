@@ -57,7 +57,7 @@ driver:
   passenger_cancelled_fee: '⚠️ Passenger cancelled order #{order_id}, you got fee
     ${fee}'
   offline_btn: 🔴 Go Offline
-  offline_success: ✅ You are offline. You will not receive new orders.
+  offline_success: 🛑 You are now offline and will no longer receive new orders.
   already_online: ✅ You are already online. No need to go online again. Send a location
     to update, or go offline.
   trip_ready_prompt: '👇 Click below to start trip:'
