@@ -67,6 +67,8 @@ driver:
   arrive_btn: 📍 មកដល់ចំណុចដឹកអ្នកដំណើរ
   rider_rated: ⭐ អ្នកដំណើរបានផ្តល់ពិន្ទុឱ្យអ្នក៖ {score} ផ្កាយ។
   star_btn: ⭐⭐⭐⭐⭐ 5 ផ្កាយ
+  status_online: 🟢 ស្ថានភាព៖ កំពុងអនឡាញ (កំពុងទទួលការកម្ម៉ង់)
+  status_offline: 🔴 ស្ថានភាព៖ អុហ្វឡាញ (សម្រាក)
 passenger:
   prompt_pickup: 📍 ផ្ញើទីតាំងឡាន
   prompt_dropoff: 🏁 ផ្ញើគោលដៅ

@@ -41,7 +41,15 @@ async def send_drv_menu(msg: Message, user):
         [InlineKeyboardButton(text=t('driver.offline_btn', user), callback_data='menu:offline')],
         [InlineKeyboardButton(text=t('menu.orders', user), callback_data='menu:orders'), InlineKeyboardButton(text=t('menu.lang', user), callback_data='menu:lang')]
     ]
-    await msg.answer(f"<b>{t('menu.title', user)}</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=items))
+    # 获取司机当前的真实在线状态
+    is_online = await db.redis.geopos('driver:online', str(msg.from_user.id))
+    if is_online and len(is_online) > 0 and is_online[0] and is_online[0][0] is not None:
+        status_str = t('driver.status_online', user)
+    else:
+        status_str = t('driver.status_offline', user)
+        
+    # 发送带状态的主菜单
+    await msg.answer(f"<b>{t('menu.title', user)}</b>\n\n{status_str}", reply_markup=InlineKeyboardMarkup(inline_keyboard=items))
 
 
 @router.message(Command("profile"))

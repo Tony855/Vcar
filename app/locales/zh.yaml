@@ -66,6 +66,8 @@ driver:
   arrive_btn: 📍 确认到达接客点
   rider_rated: ⭐ 乘客已为您打分：{score} 星。
   star_btn: ⭐⭐⭐⭐⭐ 5星
+  status_online: 🟢 当前状态：接单中
+  status_offline: 🔴 当前状态：休息中
 passenger:
   prompt_pickup: 📍 发送上车点
   prompt_dropoff: 🏁 发送终点

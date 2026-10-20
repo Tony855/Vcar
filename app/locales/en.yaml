@@ -69,6 +69,8 @@ driver:
   arrive_btn: 📍 Arrived at pickup
   rider_rated: '⭐ Passenger rated you: {score} stars.'
   star_btn: ⭐⭐⭐⭐⭐ 5 Stars
+  status_online: '🟢 Status: Online (Accepting Orders)'
+  status_offline: '🔴 Status: Offline (Resting)'
 passenger:
   prompt_pickup: 📍 Send Pickup Location
   prompt_dropoff: 🏁 Send Dropoff Location
