@@ -9,7 +9,7 @@ CHECK = ROOT / "scripts" / "check_supported_os.sh"
 def _check(tmp_path, *, distro, version, pretty_name):
     release = tmp_path / "os-release"
     release.write_text(
-        f'ID="{distro}"\\nVERSION_ID="{version}"\\nPRETTY_NAME="{pretty_name}"\\n',
+        f'ID="{distro}"\nVERSION_ID="{version}"\nPRETTY_NAME="{pretty_name}"\n',
         encoding="utf-8",
     )
     return subprocess.run(
