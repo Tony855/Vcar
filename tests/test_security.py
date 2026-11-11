@@ -43,3 +43,44 @@ async def test_verify_token_accepts_valid_admin_token(monkeypatch):
     payload = await verify_token(credentials)
     assert payload["sub"] == "admin"
     assert payload["role"] == "admin"
+
+import hashlib
+import hmac
+import json
+import time
+from urllib.parse import urlencode
+
+from app.core.security import verify_telegram_webapp_init_data
+
+
+def _telegram_init_data(bot_token: str, user_id: int, auth_date: int) -> str:
+    fields = {
+        "auth_date": str(auth_date),
+        "user": json.dumps({"id": user_id, "first_name": "Driver"}, separators=(",", ":")),
+        "query_id": "test-query",
+    }
+    check = "\\n".join(f"{key}={fields[key]}" for key in sorted(fields))
+    secret = hmac.new(bot_token.encode(), b"WebAppData", hashlib.sha256).digest()
+    fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+    return urlencode(fields)
+
+
+def test_telegram_init_data_signature():
+    token = "test-bot-token"
+    data = _telegram_init_data(token, 123456, int(time.time()))
+    verified = verify_telegram_webapp_init_data(data, token)
+    assert verified["user"]["id"] == 123456
+
+
+def test_telegram_init_data_rejects_tampering():
+    token = "test-bot-token"
+    data = _telegram_init_data(token, 123456, int(time.time())).replace("123456", "654321")
+    with pytest.raises(ValueError):
+        verify_telegram_webapp_init_data(data, token)
+
+
+def test_telegram_init_data_rejects_expired_payload():
+    token = "test-bot-token"
+    data = _telegram_init_data(token, 123456, int(time.time()) - 90_000)
+    with pytest.raises(ValueError):
+        verify_telegram_webapp_init_data(data, token)
