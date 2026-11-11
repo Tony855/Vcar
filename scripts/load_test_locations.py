@@ -110,10 +110,10 @@ def build_report(
         "failures": failures,
         "initial_snapshot_attempts": initial_snapshot_attempts,
         "initial_snapshots": initial_snapshots,
-        "initial_snapshot_rate": round(initial_snapshots / initial_snapshot_attempts, 4) if initial_snapshot_attempts else 1.0,
+        "initial_snapshot_rate": round(initial_snapshots / initial_snapshot_attempts, 4) if initial_snapshot_attempts else 0.0,
         "reconnect_attempts": reconnect_attempts,
         "reconnect_snapshots": reconnect_snapshots,
-        "reconnect_snapshot_rate": round(reconnect_snapshots / reconnect_attempts, 4) if reconnect_attempts else 1.0,
+        "reconnect_snapshot_rate": round(reconnect_snapshots / reconnect_attempts, 4) if reconnect_attempts else 0.0,
         "connect_latency_ms": {
             "p50": round(percentile(connect_latencies_ms, 0.50), 2),
             "p95": round(percentile(connect_latencies_ms, 0.95), 2),
