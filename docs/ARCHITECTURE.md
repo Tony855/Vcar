@@ -33,3 +33,10 @@ The first regional extract is Cambodia from Geofabrik. Data download and OSRM pr
 - No changes to existing systemd services.
 - No automatic public map-tile scraping.
 - No claim of live traffic routing; vanilla OSRM uses the prepared road graph and profile speeds.
+
+## GPS durability and realtime degradation
+
+- A driver GPS sample is durably accepted only after the PostgreSQL location/track transaction succeeds.
+- Redis GEO presence, heartbeat, and Pub/Sub are best-effort projections of that durable write.
+- The location API returns `accepted: true` with `realtime_published: false` when PostgreSQL accepted the sample but Redis projection failed. Clients must not retry it as a failed database write; the next newer GPS sample can refresh the realtime projection.
+- This behavior prevents a Redis outage from being misreported as a failed durable write. It does not provide replay of missed Pub/Sub frames; a durable outbox/replay mechanism remains a separate reliability enhancement.

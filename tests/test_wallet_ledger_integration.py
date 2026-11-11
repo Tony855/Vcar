@@ -124,3 +124,52 @@ async def test_idempotency_key_cannot_be_replayed_into_another_wallet(database_p
             await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)", wallet_ids)
             await conn.execute("DELETE FROM wallet_accounts WHERE id = ANY($1)", wallet_ids)
             await conn.execute("DELETE FROM users WHERE id = ANY($1)", user_ids)
+
+@pytest.mark.asyncio
+async def test_concurrent_cross_wallet_idempotency_key_cannot_double_credit(database_pool):
+    async with database_pool.acquire() as conn:
+        user_ids = []
+        wallet_ids = []
+        for _ in range(2):
+            telegram_id = int(uuid.uuid4().int % 8_000_000_000) + 1
+            user_id = await conn.fetchval(
+                "INSERT INTO users (telegram_id, first_name) VALUES ($1, 'wallet-race') RETURNING id",
+                telegram_id,
+            )
+            wallet_id = await conn.fetchval(
+                "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', 0) RETURNING id",
+                user_id,
+            )
+            user_ids.append(user_id)
+            wallet_ids.append(wallet_id)
+
+    key = f"wallet-cross-wallet-race-{uuid.uuid4()}"
+    try:
+        outcomes = await asyncio.gather(
+            *[
+                WalletLedger.post(
+                    user_id=user_id, currency="USD", amount_minor=700,
+                    kind="TOPUP", idempotency_key=key,
+                )
+                for user_id in user_ids
+            ],
+            return_exceptions=True,
+        )
+        assert sum(not isinstance(result, Exception) for result in outcomes) == 1
+        assert sum(isinstance(result, IdempotencyConflict) for result in outcomes) == 1
+        async with database_pool.acquire() as conn:
+            balances = await conn.fetch(
+                "SELECT balance_minor FROM wallet_accounts WHERE id = ANY($1) ORDER BY id",
+                wallet_ids,
+            )
+            transaction_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM wallet_transactions WHERE idempotency_key=$1",
+                key,
+            )
+        assert sorted(row["balance_minor"] for row in balances) == [0, 700]
+        assert transaction_count == 1
+    finally:
+        async with database_pool.acquire() as conn:
+            await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)", wallet_ids)
+            await conn.execute("DELETE FROM wallet_accounts WHERE id = ANY($1)", wallet_ids)
+            await conn.execute("DELETE FROM users WHERE id = ANY($1)", user_ids)
