@@ -289,7 +289,7 @@ async def prometheus_metrics(authorization: str | None = Header(default=None)):
             """
         )
 
-    body = "\\n".join([
+    body = "\n".join([
         "# HELP vcar_order_event_outbox_pending Undelivered order status events.",
         "# TYPE vcar_order_event_outbox_pending gauge",
         f"vcar_order_event_outbox_pending {int(pending_outbox or 0)}",
