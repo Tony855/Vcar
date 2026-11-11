@@ -20,7 +20,7 @@ echo "[2/7] Preparing persistent per-install secrets..."
 if [[ ! -f .env ]]; then
   install -m 600 .env.example .env
 fi
-DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-db-password)"
+DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-db-password --write-role-sql /tmp/vcar-role-bootstrap.sql)"
 DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2-)"
 if [[ -z "$DB_PASSWORD" || -z "$DATABASE_URL" ]]; then
   echo "Unable to initialize DATABASE_URL safely." >&2
