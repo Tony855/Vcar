@@ -101,6 +101,7 @@ async def test_passenger_stream_replays_and_deduplicates_pubsub_overlap(monkeypa
             raise AssertionError(query)
 
         async def fetchrow(self, query, *args):
+            order.append("database_snapshot")
             assert "SELECT o.status" in query
             return {"status": "IN_PROGRESS", "latest_event_id": 5}
 
@@ -174,6 +175,6 @@ async def test_passenger_stream_replays_and_deduplicates_pubsub_overlap(monkeypa
         websocket, 8, "single-use-ticket", last_event_id=3
     )
 
-    assert order[0] == "subscribe"
+    assert order.index("subscribe") < order.index("database_snapshot")
     assert [event["event_id"] for event in websocket.sent] == [4, 5, 6, 7]
     assert websocket.sent[-1]["status"] == "COMPLETED"
