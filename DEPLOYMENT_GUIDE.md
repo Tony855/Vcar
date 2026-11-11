@@ -38,7 +38,7 @@ docker compose -f docker-compose.osrm.yml --profile prepare run --rm osrm-prepar
 docker compose -f docker-compose.osrm.yml up -d osrm
 ```
 
-检查路由服务：
+确认 OSRM 健康并完成 Route/Table 冒烟测试后，再在 Vcar 的 `.env` 中设置 `OSRM_ENABLED=true` 并重启 Bot/Web。未启用时保留旧版距离估算兼容模式；启用后价格使用 OSRM 道路距离，派单优先使用 OSRM Table ETA。OSRM 故障时派单排序可回退为 GEO 距离，但计价不会静默退回直线距离。\n\n检查路由服务：
 
 ```bash
 curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?overview=false'
