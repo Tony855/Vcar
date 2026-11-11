@@ -125,3 +125,41 @@ async def driver_location_stream(websocket: WebSocket, token: str):
     finally:
         await pubsub.unsubscribe(f"driver:location:{telegram_id}")
         await pubsub.aclose()
+
+
+
+class NavigationRequest(BaseModel):
+    coordinates: list[tuple[float, float]] = Field(min_length=2, max_length=25)
+
+
+@router.post("/driver/navigation/route")
+async def driver_navigation_route(
+    request: NavigationRequest,
+    claims: dict = Depends(verify_driver_token),
+):
+    try:
+        from app.infrastructure.osrm.client import OSRMClient, RoutingError
+        result = await OSRMClient().route(
+            request.coordinates, alternatives=False, steps=True
+        )
+        if not result.get("routes"):
+            raise HTTPException(status_code=404, detail="No drivable route found")
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RoutingError as exc:
+        raise HTTPException(status_code=503, detail="Navigation service unavailable") from exc
+
+
+@router.post("/driver/navigation/match")
+async def driver_navigation_match(
+    request: NavigationRequest,
+    claims: dict = Depends(verify_driver_token),
+):
+    try:
+        from app.infrastructure.osrm.client import OSRMClient, RoutingError
+        return await OSRMClient().match(request.coordinates)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RoutingError as exc:
+        raise HTTPException(status_code=503, detail="Navigation matching unavailable") from exc
