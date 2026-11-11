@@ -35,6 +35,18 @@ def fleet_websocket_url(base_url: str, ticket: str) -> str:
     return ws_base + "/api/v1/admin/fleet/stream?ticket=" + quote(ticket, safe="")
 
 
+def is_fleet_snapshot_frame(payload: str) -> bool:
+    try:
+        frame = json.loads(payload)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(frame, dict)
+        and frame.get("type") == "snapshot"
+        and isinstance(frame.get("drivers"), list)
+    )
+
+
 def is_fleet_location_event(payload: str) -> bool:
     try:
         event = json.loads(payload)
@@ -53,6 +65,7 @@ def build_report(
     *, requested_connections: int, connected: int, messages_sent: int,
     frames_received: int, connect_latencies_ms: list[float],
     fanout_latencies_ms: list[float], failures: int, elapsed_seconds: float,
+    reconnect_attempts: int = 0, reconnect_snapshots: int = 0,
 ) -> dict:
     expected = connected * messages_sent
     return {
@@ -64,6 +77,9 @@ def build_report(
         "expected_frames": expected,
         "frame_delivery_rate": round(frames_received / expected, 4) if expected else 0.0,
         "failures": failures,
+        "reconnect_attempts": reconnect_attempts,
+        "reconnect_snapshots": reconnect_snapshots,
+        "reconnect_snapshot_rate": round(reconnect_snapshots / reconnect_attempts, 4) if reconnect_attempts else 1.0,
         "connect_latency_ms": {
             "p50": round(percentile(connect_latencies_ms, 0.50), 2),
             "p95": round(percentile(connect_latencies_ms, 0.95), 2),
@@ -127,7 +143,20 @@ async def run(args: argparse.Namespace) -> int:
         if not sockets:
             return 1
 
-        await asyncio.sleep(1.0)
+        # Consume the durable snapshot sent on every new admin stream before
+        # counting live GPS fan-out frames.
+        async def receive_initial_snapshot(ws):
+            nonlocal failures
+            try:
+                frame = await ws.receive(timeout=args.receive_timeout)
+                if frame.type != aiohttp.WSMsgType.TEXT or not is_fleet_snapshot_frame(frame.data):
+                    failures += 1
+            except Exception:
+                failures += 1
+
+        await asyncio.gather(*(receive_initial_snapshot(ws) for ws in sockets))
+
+        await asyncio.sleep(0.2)
         for index in range(args.messages):
             now = datetime.now(timezone.utc) + timedelta(microseconds=index)
             payload = {
@@ -163,6 +192,36 @@ async def run(args: argparse.Namespace) -> int:
             await asyncio.gather(*(receive_one(ws) for ws in sockets))
             fanout_latencies.append((time.monotonic() - fanout_started) * 1000)
 
+        reconnect_attempts = 0
+        reconnect_snapshots = 0
+        for index in range(min(args.reconnect_probes, len(sockets))):
+            reconnect_attempts += 1
+            old_socket = sockets[index]
+            await old_socket.close()
+            try:
+                async with session.post(
+                    base + "/api/ws-ticket",
+                    json={"scope": "admin-fleet"},
+                    headers=admin_headers,
+                ) as response:
+                    if response.status != 200:
+                        raise RuntimeError(f"reconnect ticket endpoint returned {response.status}")
+                    ticket_payload = await response.json()
+                ticket = ticket_payload.get("ticket")
+                if not isinstance(ticket, str) or not ticket:
+                    raise RuntimeError("reconnect ticket endpoint returned no ticket")
+                new_socket = await session.ws_connect(
+                    fleet_websocket_url(base, ticket), heartbeat=20
+                )
+                frame = await new_socket.receive(timeout=args.receive_timeout)
+                if frame.type != aiohttp.WSMsgType.TEXT or not is_fleet_snapshot_frame(frame.data):
+                    raise RuntimeError("reconnected stream did not send a fleet snapshot")
+                sockets[index] = new_socket
+                reconnect_snapshots += 1
+            except Exception as exc:
+                failures += 1
+                print(f"WebSocket reconnect probe failed: {type(exc).__name__}")
+
         elapsed = time.monotonic() - started
         report = build_report(
             requested_connections=args.connections,
@@ -173,6 +232,8 @@ async def run(args: argparse.Namespace) -> int:
             fanout_latencies_ms=fanout_latencies,
             failures=failures,
             elapsed_seconds=elapsed,
+            reconnect_attempts=reconnect_attempts,
+            reconnect_snapshots=reconnect_snapshots,
         )
         rendered = json.dumps(report, indent=2, sort_keys=True)
         print(rendered)
@@ -190,6 +251,8 @@ def main() -> int:
     parser.add_argument("--base-url", default=os.getenv("VCAR_BASE_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--connections", type=int, default=500)
     parser.add_argument("--messages", type=int, default=3)
+    parser.add_argument("--reconnect-probes", type=int, default=5,
+                        help="Number of admin clients to reconnect and verify snapshot recovery (0..connections)")
     parser.add_argument("--latitude", type=float, default=11.5564)
     parser.add_argument("--longitude", type=float, default=104.9282)
     parser.add_argument("--receive-timeout", type=float, default=12.0)
@@ -198,6 +261,8 @@ def main() -> int:
     args = parser.parse_args()
     if not 1 <= args.connections <= 1000 or not 1 <= args.messages <= 20:
         parser.error("connections must be 1..1000 and messages must be 1..20")
+    if not 0 <= args.reconnect_probes <= args.connections:
+        parser.error("reconnect-probes must be 0..connections")
     if args.receive_timeout <= 0 or not 0 <= args.min_delivery_rate <= 1:
         parser.error("receive-timeout must be positive and min-delivery-rate must be 0..1")
     if not (-90 <= args.latitude <= 90 and -180 <= args.longitude <= 180):
