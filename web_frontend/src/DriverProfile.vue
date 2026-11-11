@@ -79,60 +79,43 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
+import { createDriverApi } from './api/driver'
 
 const route = useRoute()
 const router = useRouter()
-
 const info = ref({})
 const reviews = ref([])
 const supportList = ref([])
 const showSupportModal = ref(false)
-let tgId = null
+const tgId = ref(null)
 
-const goToOrders = () => router.push(`/mini/${tgId}/orders`)
-const goToIncome = () => router.push(`/mini/${tgId}/income`)
-const goToAccount = () => router.push(`/mini/${tgId}/account`)
+const goToOrders = () => router.push(`/mini/${tgId.value}/orders`)
+const goToIncome = () => router.push(`/mini/${tgId.value}/income`)
+const goToAccount = () => router.push(`/mini/${tgId.value}/account`)
 
 const openTelegram = (username) => {
   showSupportModal.value = false
   const url = `https://t.me/${username}`
-  if (window.Telegram?.WebApp) {
-    window.Telegram.WebApp.openTelegramLink(url)
-  } else {
-    window.open(url)
-  }
+  if (window.Telegram?.WebApp) window.Telegram.WebApp.openTelegramLink(url)
+  else window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 onMounted(async () => {
-  if (window.Telegram?.WebApp?.initDataUnsafe?.user?.id) {
-    tgId = window.Telegram.WebApp.initDataUnsafe.user.id
-    window.Telegram.WebApp.ready()
-    window.Telegram.WebApp.expand()
-  } else if (route.params.tg_id) {
-    tgId = route.params.tg_id
-  } else {
-    const match = window.location.pathname.match(/\/mini\/(\d+)/)
-    if (match) tgId = match[1]
+  try {
+    const { api, tgId: authenticatedTgId } = await createDriverApi(route.params.tg_id)
+    tgId.value = authenticatedTgId
+    const [support, profile, reviewList] = await Promise.all([
+      api.get('/config/support'),
+      api.get(`/driver/${authenticatedTgId}/profile`),
+      api.get(`/driver/${authenticatedTgId}/reviews`)
+    ])
+    supportList.value = (support.data.username || 'Tony855').split(',').map(s => s.trim()).filter(Boolean)
+    info.value = profile.data
+    reviews.value = reviewList.data
+  } catch (error) {
+    console.error('Driver profile authentication/load failed:', error)
+    window.alert(error.response?.data?.detail || error.message || '无法验证司机身份')
   }
-
-  if (!tgId) return
-
-  try {
-    const supRes = await axios.get('/api/config/support')
-    const rawStr = supRes.data.username || "Tony855"
-    supportList.value = rawStr.split(',').map(s => s.trim()).filter(s => s)
-  } catch(e) { console.error(e) }
-
-  try {
-    const res1 = await axios.get(`/api/driver/${tgId}/profile`)
-    info.value = res1.data
-  } catch(e) { console.error(e) }
-
-  try {
-    const res2 = await axios.get(`/api/driver/${tgId}/reviews`)
-    reviews.value = res2.data
-  } catch(e) { console.error(e) }
 })
 </script>
 
