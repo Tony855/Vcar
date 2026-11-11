@@ -36,6 +36,7 @@ let map
 let pickupMarker
 let dropoffMarker
 let pollTimer
+let orderSocket
 
 const coords = point => `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`
 function setMarker(point, type) {
@@ -80,11 +81,28 @@ async function book() {
       dropoff_lat: dropoff.value.lat, dropoff_lng: dropoff.value.lng
     }, { headers: { Authorization: `Bearer ${token.value}` } })
     order.value = response.data
-    pollTimer = window.setInterval(refreshOrder, 5000)
+    connectOrderStream()
+    pollTimer = window.setInterval(refreshOrder, 10000)
   } catch (err) {
     error.value = err.response?.data?.detail || '下单失败，请检查路线服务或稍后重试'
   } finally { submitting.value = false }
 }
+function connectOrderStream() {
+  if (!order.value || !token.value) return
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  orderSocket = new WebSocket(`${protocol}//${location.host}/api/passenger/orders/${order.value.order_id}/stream?token=${encodeURIComponent(token.value)}`)
+  orderSocket.onmessage = event => {
+    try {
+      order.value = { ...order.value, ...JSON.parse(event.data) }
+      if (['COMPLETED', 'CANCELLED'].includes(order.value.status) && pollTimer) {
+        window.clearInterval(pollTimer)
+        pollTimer = undefined
+        orderSocket.close()
+      }
+    } catch { /* Keep polling if a stream frame is malformed. */ }
+  }
+}
+
 async function refreshOrder() {
   if (!order.value) return
   try {
@@ -118,7 +136,7 @@ onMounted(async () => {
   })
   await authenticate()
 })
-onUnmounted(() => { if (pollTimer) window.clearInterval(pollTimer); if (map) map.remove() })
+onUnmounted(() => { if (pollTimer) window.clearInterval(pollTimer); if (orderSocket) orderSocket.close(); if (map) map.remove() })
 </script>
 
 <style scoped>
