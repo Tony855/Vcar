@@ -102,3 +102,37 @@ def test_load_acceptance_requires_connection_frame_and_both_snapshot_rates():
         assert not meets_acceptance_thresholds(failing, 0.99), key
 
     assert not meets_acceptance_thresholds(passing | {"failures": 1}, 0.99)
+
+
+def test_fleet_event_validation_rejects_boolean_identity_and_coordinates():
+    import json
+
+    valid = {
+        "telegram_id": 123,
+        "latitude": 11.5,
+        "longitude": 104.9,
+        "recorded_at": "2026-11-12T00:00:00+00:00",
+    }
+    for field, value in (
+        ("telegram_id", True),
+        ("telegram_id", 0),
+        ("latitude", True),
+        ("latitude", 91),
+        ("longitude", False),
+        ("longitude", 181),
+        ("recorded_at", ""),
+    ):
+        malformed = {**valid, field: value}
+        assert not is_fleet_location_event(json.dumps(malformed)), (field, value)
+
+
+def test_fleet_event_validation_rejects_non_finite_coordinates():
+    import json
+
+    event = {
+        "telegram_id": 123,
+        "latitude": float("nan"),
+        "longitude": 104.9,
+        "recorded_at": "2026-11-12T00:00:00+00:00",
+    }
+    assert not is_fleet_location_event(json.dumps(event))
