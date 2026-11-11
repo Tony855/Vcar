@@ -59,7 +59,7 @@ def _telegram_init_data(bot_token: str, user_id: int, auth_date: int) -> str:
         "user": json.dumps({"id": user_id, "first_name": "Driver"}, separators=(",", ":")),
         "query_id": "test-query",
     }
-    check = "\\n".join(f"{key}={fields[key]}" for key in sorted(fields))
+    check = "\n".join(f"{key}={fields[key]}" for key in sorted(fields))
     secret = hmac.new(bot_token.encode(), b"WebAppData", hashlib.sha256).digest()
     fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
     return urlencode(fields)
