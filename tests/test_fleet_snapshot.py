@@ -66,3 +66,75 @@ async def test_fetch_fleet_snapshot_reads_durable_approved_fleet():
     assert len(snapshot) == 1
     assert snapshot[0]["telegram_id"] == 1001
     assert snapshot[0]["online"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_fleet_stream_subscribes_before_sending_durable_snapshot(monkeypatch):
+    from fastapi import WebSocketDisconnect
+
+    from app.modules.locations import router as locations_router
+
+    order = []
+    driver = row(1001, NOW, first_name="Driver")
+
+    class Connection:
+        async def fetch(self, query):
+            order.append("database_snapshot")
+            assert "driver_status='APPROVED'" in query
+            return [driver]
+
+    class Acquire:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class Pool:
+        def acquire(self):
+            return Acquire()
+
+    class PubSub:
+        async def subscribe(self, channel):
+            order.append("subscribe")
+            assert channel == "fleet:locations"
+
+        async def get_message(self, **kwargs):
+            raise WebSocketDisconnect(code=1000)
+
+        async def unsubscribe(self, channel):
+            order.append("unsubscribe")
+
+        async def aclose(self):
+            order.append("close")
+
+    class Redis:
+        def pubsub(self):
+            return PubSub()
+
+    class WebSocket:
+        sent = None
+
+        async def accept(self):
+            order.append("accept")
+
+        async def send_json(self, payload):
+            self.sent = payload
+            order.append("send_snapshot")
+
+    async def valid_ticket(ticket, scope):
+        assert ticket == "single-use"
+        assert scope == "admin-fleet"
+        return {"role": "admin", "sub": "admin-1"}
+
+    websocket = WebSocket()
+    monkeypatch.setattr(locations_router, "consume_ws_ticket", valid_ticket)
+    monkeypatch.setattr(locations_router.db, "pool", Pool())
+    monkeypatch.setattr(locations_router.db, "redis", Redis())
+
+    await locations_router.admin_fleet_stream(websocket, "single-use")
+
+    assert order.index("subscribe") < order.index("database_snapshot")
+    assert websocket.sent["type"] == "snapshot"
+    assert websocket.sent["drivers"][0]["telegram_id"] == 1001
+    assert websocket.sent["drivers"][0]["online"] is True
