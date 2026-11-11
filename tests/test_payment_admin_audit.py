@@ -30,3 +30,15 @@ async def test_admin_adjustment_records_authenticated_admin_subject(monkeypatch)
     assert result["transaction_id"] == 7
     assert captured["metadata"]["admin_subject"] == "admin-42"
     assert captured["metadata"]["reason"] == "Manual correction approved"
+
+
+
+def test_admin_adjustment_rejects_zero_amount():
+    with pytest.raises(ValueError):
+        router.AdminAdjustment(
+            user_id=12,
+            currency="USD",
+            amount_minor=0,
+            reason="Manual correction approved",
+            idempotency_key="admin-adjustment-0008",
+        )
