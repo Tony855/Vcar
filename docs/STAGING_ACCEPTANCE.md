@@ -137,8 +137,8 @@ monitoring stack.
 - [ ] Verify a future cursor is reset to a current snapshot and cross-passenger order IDs remain denied.
 
 The server subscribes to Redis before reading the durable outbox. Clients should persist the
-latest processed event ID and reconnect with the last_event_id query parameter; events are
-at-least-once at the transport boundary, so clients must deduplicate by event ID. CI covers
+latest processed event ID in session state and reconnect with the last_event_id query parameter;
+events are at-least-once at the transport boundary, so clients must deduplicate by event ID. CI covers
 ordering, bounded replay, resync, and replay/PubSub overlap. This does not yet constitute a full
 passenger UI end-to-end run.
 
