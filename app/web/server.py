@@ -289,6 +289,17 @@ async def prometheus_metrics(authorization: str | None = Header(default=None)):
             """
         )
 
+    pool_size = getattr(db.pool, "get_size", lambda: 0)()
+    pool_idle_size = getattr(db.pool, "get_idle_size", lambda: 0)()
+    redis_available = 0
+    try:
+        if db.redis is not None:
+            await db.redis.ping()
+            redis_available = 1
+    except Exception:
+        # The metrics endpoint should remain scrapeable during Redis outages.
+        redis_available = 0
+
     body = "\n".join([
         "# HELP vcar_order_event_outbox_pending Undelivered order status events.",
         "# TYPE vcar_order_event_outbox_pending gauge",
@@ -302,6 +313,15 @@ async def prometheus_metrics(authorization: str | None = Header(default=None)):
         "# HELP vcar_driver_locations_stale Approved drivers without a GPS sample received in the last 120 seconds.",
         "# TYPE vcar_driver_locations_stale gauge",
         f"vcar_driver_locations_stale {int(stale_drivers or 0)}",
+        "# HELP vcar_database_pool_connections Current asyncpg pool connections.",
+        "# TYPE vcar_database_pool_connections gauge",
+        f"vcar_database_pool_connections {int(pool_size)}",
+        "# HELP vcar_database_pool_idle_connections Idle asyncpg pool connections.",
+        "# TYPE vcar_database_pool_idle_connections gauge",
+        f"vcar_database_pool_idle_connections {int(pool_idle_size)}",
+        "# HELP vcar_redis_available Whether Redis responds to PING.",
+        "# TYPE vcar_redis_available gauge",
+        f"vcar_redis_available {redis_available}",
         "",
     ])
     return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
