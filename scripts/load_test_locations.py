@@ -69,12 +69,12 @@ def is_fleet_location_event(payload: str) -> bool:
         and telegram_id > 0
         and isinstance(latitude, (int, float))
         and not isinstance(latitude, bool)
-        and math.isfinite(latitude)
         and -90 <= latitude <= 90
+        and math.isfinite(latitude)
         and isinstance(longitude, (int, float))
         and not isinstance(longitude, bool)
-        and math.isfinite(longitude)
         and -180 <= longitude <= 180
+        and math.isfinite(longitude)
         and isinstance(recorded_at, str)
         and bool(recorded_at.strip())
     )
