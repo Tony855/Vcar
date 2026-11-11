@@ -14,6 +14,7 @@ class Settings:
     cors_origins: tuple[str, ...]
     osrm_base_url: str
     osrm_profile: str
+    osrm_enabled: bool
     osrm_timeout_seconds: float
     osrm_max_table_coordinates: int
 
@@ -35,6 +36,7 @@ class Settings:
             cors_origins=origins,
             osrm_base_url=os.getenv("OSRM_BASE_URL", "http://127.0.0.1:5000").rstrip("/"),
             osrm_profile=os.getenv("OSRM_PROFILE", "driving"),
+            osrm_enabled=os.getenv("OSRM_ENABLED", "false").lower() in ("1", "true", "yes", "on"),
             osrm_timeout_seconds=float(os.getenv("OSRM_TIMEOUT_SECONDS", "8")),
             osrm_max_table_coordinates=int(os.getenv("OSRM_MAX_TABLE_COORDINATES", "100")),
         )
