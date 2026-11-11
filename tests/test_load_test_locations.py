@@ -1,4 +1,4 @@
-from scripts.load_test_locations import build_report, percentile
+from scripts.load_test_locations import build_report, meets_acceptance_thresholds, percentile
 
 
 def test_percentile_handles_empty_and_small_samples():
@@ -80,3 +80,25 @@ def test_build_report_includes_initial_and_reconnect_snapshot_rates():
     )
     assert report["initial_snapshot_rate"] == 0.95
     assert report["reconnect_snapshot_rate"] == 1.0
+
+
+def test_load_acceptance_requires_connection_frame_and_both_snapshot_rates():
+    passing = {
+        "failures": 0,
+        "connection_success_rate": 0.99,
+        "frame_delivery_rate": 0.99,
+        "initial_snapshot_rate": 1.0,
+        "reconnect_snapshot_rate": 1.0,
+    }
+    assert meets_acceptance_thresholds(passing, 0.99)
+
+    for key in (
+        "connection_success_rate",
+        "frame_delivery_rate",
+        "initial_snapshot_rate",
+        "reconnect_snapshot_rate",
+    ):
+        failing = passing | {key: 0.98}
+        assert not meets_acceptance_thresholds(failing, 0.99), key
+
+    assert not meets_acceptance_thresholds(passing | {"failures": 1}, 0.99)
