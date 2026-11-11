@@ -84,3 +84,25 @@ def test_telegram_init_data_rejects_expired_payload():
     data = _telegram_init_data(token, 123456, int(time.time()) - 90_000)
     with pytest.raises(ValueError):
         verify_telegram_webapp_init_data(data, token)
+
+from app.core.security import verify_driver_token
+
+
+@pytest.mark.asyncio
+async def test_driver_token_requires_driver_role(monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", "d" * 48)
+    token = create_access_token("12345", role="driver")
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    payload = await verify_driver_token(credentials)
+    assert payload["sub"] == "12345"
+    assert payload["role"] == "driver"
+
+
+@pytest.mark.asyncio
+async def test_driver_token_rejects_admin_role(monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", "d" * 48)
+    token = create_access_token("admin", role="admin")
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    with pytest.raises(HTTPException) as exc:
+        await verify_driver_token(credentials)
+    assert exc.value.status_code == 403
