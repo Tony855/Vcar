@@ -60,7 +60,7 @@ path.write_text("\n".join(out).rstrip() + "\n")
 os.chmod(path, 0o600)
 if args.write_role_sql:
     sql_path = Path(args.write_role_sql)
-    sql_path.write_text("ALTER ROLE vcar LOGIN PASSWORD '" + password.replace("'", "''") + "';\\n")
+    sql_path.write_text("ALTER ROLE vcar LOGIN PASSWORD '" + password.replace("'", "''") + "';" + chr(10))
     os.chmod(sql_path, 0o600)
 if args.print_db_password:
     print(password)
