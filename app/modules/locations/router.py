@@ -147,7 +147,14 @@ async def driver_location_stream(websocket: WebSocket, ticket: str):
     try:
         # Subscribe first, then read PostgreSQL: updates committed during the
         # snapshot query are queued by Redis and delivered after this snapshot.
-        pubsub = await subscribe()
+        try:
+            pubsub = await subscribe()
+        except Exception:
+            logger.warning(
+                "Driver location Pub/Sub unavailable at connect; using durable snapshot",
+                extra={"telegram_id": telegram_id},
+                exc_info=True,
+            )
         await load_snapshot()
         last_reconciliation = asyncio.get_running_loop().time()
         while True:
@@ -267,7 +274,13 @@ async def admin_fleet_stream(websocket: WebSocket, ticket: str):
     try:
         # Subscribe before the durable snapshot so GPS updates committed while
         # PostgreSQL is queried remain queued in this Pub/Sub subscription.
-        pubsub = await subscribe()
+        try:
+            pubsub = await subscribe()
+        except Exception:
+            logger.warning(
+                "Fleet Pub/Sub unavailable at connect; using durable snapshot",
+                exc_info=True,
+            )
         await send_snapshot()
         last_reconciliation = asyncio.get_running_loop().time()
         while True:
