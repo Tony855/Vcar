@@ -14,8 +14,10 @@ sys.path.append(BASE_DIR)
 from app.core.config import settings
 from app.db.core import db
 from app.core.security import verify_token, create_access_token, verify_password
+from app.modules.routing.router import router as routing_router
 
 app = FastAPI()
+app.include_router(routing_router, prefix="/api/v1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
