@@ -136,15 +136,27 @@ class OrderRepository:
     @classmethod
     async def update_status(cls, oid, new_status, expected_status, actor_user_id=None, actor_role="SYSTEM"):
         validate_transition(expected_status, new_status)
+        # Human actors must be bound to the order participant recorded in PostgreSQL.
+        # SYSTEM is reserved for trusted internal transitions without a user identity.
+        if actor_role not in {"SYSTEM", "DRIVER", "PASSENGER"}:
+            return False
+        if actor_role != "SYSTEM" and actor_user_id is None:
+            return False
+
         async with db.pool.acquire() as connection:
             async with connection.transaction():
                 row = await connection.fetchrow(
                     """
                     UPDATE orders SET status=$1
                     WHERE id=$2 AND status=$3
+                      AND (
+                        ($5='SYSTEM' AND $4::bigint IS NULL)
+                        OR ($5='DRIVER' AND driver_id=$4)
+                        OR ($5='PASSENGER' AND customer_id=$4)
+                      )
                     RETURNING id
                     """,
-                    new_status, oid, expected_status,
+                    new_status, oid, expected_status, actor_user_id, actor_role,
                 )
                 if not row:
                     return False
