@@ -39,6 +39,7 @@ fi
 
 echo "⚙️ 初始化数据表..."
 PGPASSWORD=vcar psql -h 127.0.0.1 -U vcar -d vcar -f app/db/schema.sql > /dev/null
+DATABASE_URL="postgresql://vcar:vcar@127.0.0.1:5432/vcar" .venv/bin/alembic upgrade head
 
 echo "🎨 编译 Vue3 前端后台..."
 if [ -d "web_frontend" ]; then
