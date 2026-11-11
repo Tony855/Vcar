@@ -28,7 +28,7 @@ class Settings:
         return cls(
             passenger_bot_token=os.getenv("PASSENGER_BOT_TOKEN", ""),
             driver_bot_token=os.getenv("DRIVER_BOT_TOKEN", ""),
-            database_url=os.getenv("DATABASE_URL") or "postgresql://vcar:vcar@127.0.0.1:5432/vcar",
+            database_url=os.getenv("DATABASE_URL", "").strip(),
             secret_key=os.getenv("SECRET_KEY", ""),
             redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
             admin_username=os.getenv("ADMIN_USERNAME", "admin"),
