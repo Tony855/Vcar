@@ -87,19 +87,26 @@ async function book() {
     error.value = err.response?.data?.detail || '下单失败，请检查路线服务或稍后重试'
   } finally { submitting.value = false }
 }
-function connectOrderStream() {
+async function connectOrderStream() {
   if (!order.value || !token.value) return
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  orderSocket = new WebSocket(`${protocol}//${location.host}/api/passenger/orders/${order.value.order_id}/stream?token=${encodeURIComponent(token.value)}`)
-  orderSocket.onmessage = event => {
-    try {
-      order.value = { ...order.value, ...JSON.parse(event.data) }
-      if (['COMPLETED', 'CANCELLED'].includes(order.value.status) && pollTimer) {
-        window.clearInterval(pollTimer)
-        pollTimer = undefined
-        orderSocket.close()
-      }
-    } catch { /* Keep polling if a stream frame is malformed. */ }
+  try {
+    const response = await axios.post('/api/ws-ticket', {
+      scope: `passenger-order:${order.value.order_id}`
+    }, { headers: { Authorization: `Bearer ${token.value}` } })
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    orderSocket = new WebSocket(`${protocol}//${location.host}/api/passenger/orders/${order.value.order_id}/stream?ticket=${encodeURIComponent(response.data.ticket)}`)
+    orderSocket.onmessage = event => {
+      try {
+        order.value = { ...order.value, ...JSON.parse(event.data) }
+        if (['COMPLETED', 'CANCELLED'].includes(order.value.status) && pollTimer) {
+          window.clearInterval(pollTimer)
+          pollTimer = undefined
+          orderSocket.close()
+        }
+      } catch { /* Keep polling if a stream frame is malformed. */ }
+    }
+  } catch {
+    // Polling remains active when Redis or the ticket service is unavailable.
   }
 }
 
