@@ -1,0 +1,21 @@
+# Optional Prometheus Blackbox Exporter targets.
+# Keep the exporter private; do not expose health endpoints publicly.
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      follow_redirects: false
+
+# Configure Prometheus scrape_configs with metrics_path: /probe
+# and params: {module: [http_2xx]}. Replace addresses for staging.
+targets:
+  - name: vcar-live
+    url: http://127.0.0.1:8080/health/live
+  - name: vcar-ready
+    url: http://127.0.0.1:8080/health/ready
+  - name: osrm-route
+    url: "http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?overview=false"
