@@ -31,6 +31,37 @@ class LedgerResult:
     replayed: bool
 
 
+def _canonical_metadata(value) -> str:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return json.dumps(value or {}, sort_keys=True, separators=(",", ":"))
+
+
+def _request_matches(
+    previous,
+    *,
+    user_id: int,
+    amount_minor: int,
+    currency: str,
+    kind: str,
+    order_id: int | None,
+    provider_reference: str | None,
+    metadata: dict | None,
+) -> bool:
+    return (
+        previous["user_id"] == user_id
+        and previous["amount_minor"] == amount_minor
+        and previous["currency"] == currency.upper()
+        and previous["kind"] == kind
+        and previous["order_id"] == order_id
+        and previous["provider_reference"] == provider_reference
+        and _canonical_metadata(previous["metadata"]) == _canonical_metadata(metadata)
+    )
+
+
 class WalletLedger:
     @staticmethod
     async def post(
@@ -58,12 +89,20 @@ class WalletLedger:
                 # Serialize reuse of an idempotency key even when callers target different wallets.
                 await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", idempotency_key)
                 previous = await conn.fetchrow(
-                    "SELECT t.id, t.wallet_id, t.amount_minor, t.currency, t.kind, t.order_id, w.user_id FROM wallet_transactions t JOIN wallet_accounts w ON w.id=t.wallet_id WHERE t.idempotency_key=$1",
+                    "SELECT t.id, t.wallet_id, t.amount_minor, t.currency, t.kind, t.order_id, t.provider_reference, t.metadata, w.user_id FROM wallet_transactions t JOIN wallet_accounts w ON w.id=t.wallet_id WHERE t.idempotency_key=$1",
                     idempotency_key,
                 )
                 if previous:
-                    if (previous["user_id"] != user_id or previous["amount_minor"] != amount_minor or
-                        previous["currency"] != currency.upper() or previous["kind"] != kind or previous["order_id"] != order_id):
+                    if not _request_matches(
+                        previous,
+                        user_id=user_id,
+                        amount_minor=amount_minor,
+                        currency=currency,
+                        kind=kind,
+                        order_id=order_id,
+                        provider_reference=provider_reference,
+                        metadata=metadata,
+                    ):
                         raise IdempotencyConflict("Idempotency key was already used for a different payment")
                     balance = await conn.fetchval(
                         "SELECT balance_minor FROM wallet_accounts WHERE id=$1",
@@ -82,7 +121,19 @@ class WalletLedger:
                     idempotency_key,
                 )
                 if previous:
-                    if (previous["wallet_id"] != wallet["id"] or previous["amount_minor"] != amount_minor or previous["currency"] != currency.upper() or previous["kind"] != kind or previous["order_id"] != order_id):
+                    if (
+                        previous["wallet_id"] != wallet["id"]
+                        or not _request_matches(
+                            previous,
+                            user_id=user_id,
+                            amount_minor=amount_minor,
+                            currency=currency,
+                            kind=kind,
+                            order_id=order_id,
+                            provider_reference=provider_reference,
+                            metadata=metadata,
+                        )
+                    ):
                         raise IdempotencyConflict("Idempotency key was already used for a different payment")
                     balance = await conn.fetchval("SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet["id"])
                     return LedgerResult(previous["id"], wallet["id"], balance, True)
