@@ -46,7 +46,7 @@ OSRM does not provide live traffic. Do not represent its duration as a traffic-a
 Run the authenticated load script only with separate short-lived staging driver and admin JWTs. It connects admin fleet-stream subscribers while a driver publishes GPS updates:
 ```bash
 DRIVER_TOKEN='(inject securely)' ADMIN_TOKEN='(inject securely)' python scripts/load_test_locations.py \
-  --base-url https://staging.example.invalid --connections 50 --messages 3 \
+  --base-url https://staging.example.invalid --connections 50 --messages 3 --reconnect-probes 5 \
   --json-output artifacts/gps-50.json
 ```
 Repeat at 100, 250 and 500 connections, allowing the host to recover between runs.
