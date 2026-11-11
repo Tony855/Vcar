@@ -13,12 +13,13 @@ class FakeConnection:
         self.count = len(self.events) if count is None else count
         self.calls = []
 
+    async def fetchrow(self, query, *args):
+        self.calls.append((query, args))
+        assert "SELECT o.status" in query
+        return {"status": self.status, "latest_event_id": self.latest}
+
     async def fetchval(self, query, *args):
         self.calls.append((query, args))
-        if "SELECT status FROM orders" in query:
-            return self.status
-        if "MAX(event_id)" in query:
-            return self.latest
         if "COUNT(*)" in query:
             return self.count
         raise AssertionError(query)
@@ -95,13 +96,13 @@ async def test_passenger_stream_replays_and_deduplicates_pubsub_overlap(monkeypa
         async def fetchval(self, query, *args):
             if "SELECT id FROM orders" in query:
                 return 8
-            if "SELECT status FROM orders" in query:
-                return "IN_PROGRESS"
-            if "MAX(event_id)" in query:
-                return 5
             if "COUNT(*)" in query:
                 return 2
             raise AssertionError(query)
+
+        async def fetchrow(self, query, *args):
+            assert "SELECT o.status" in query
+            return {"status": "IN_PROGRESS", "latest_event_id": 5}
 
         async def fetch(self, query, *args):
             assert "ORDER BY event_id" in query
