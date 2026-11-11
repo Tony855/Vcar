@@ -60,8 +60,8 @@ class WalletLedger:
                     idempotency_key,
                 )
                 if previous:
-                    if (previous["amount_minor"] != amount_minor or
-                        previous["currency"] != currency.upper()):
+                    if (previous["user_id"] != user_id or previous["amount_minor"] != amount_minor or
+                        previous["currency"] != currency.upper() or previous["kind"] != kind or previous["order_id"] != order_id):
                         raise IdempotencyConflict("Idempotency key was already used for a different payment")
                     balance = await conn.fetchval(
                         "SELECT balance_minor FROM wallet_accounts WHERE id=$1",
