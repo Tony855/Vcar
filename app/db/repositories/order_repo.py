@@ -29,6 +29,8 @@ class OrderRepository:
 
     @staticmethod
     async def _publish_status(order_id, status):
+        if db.redis is None:
+            return
         try:
             await db.redis.publish(f"order:status:{order_id}", json.dumps({"order_id": order_id, "status": status}))
         except Exception:
