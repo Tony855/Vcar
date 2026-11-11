@@ -1,7 +1,10 @@
 import json
+import logging
 
 from app.db.core import db
 from app.modules.orders.state_machine import validate_transition, InvalidOrderTransition
+
+logger = logging.getLogger(__name__)
 
 
 class OrderRepository:
@@ -24,6 +27,13 @@ class OrderRepository:
             json.dumps(metadata or {}),
         )
 
+    @staticmethod
+    async def _publish_status(order_id, status):
+        try:
+            await db.redis.publish(f"order:status:{order_id}", json.dumps({"order_id": order_id, "status": status}))
+        except Exception:
+            logger.exception("Unable to publish order status update", extra={"order_id": order_id})
+
     @classmethod
     async def create(cls, cid, plng, plat, dlng, dlat, dist, price):
         async with db.pool.acquire() as connection:
@@ -42,7 +52,8 @@ class OrderRepository:
                     connection, row["id"], None, "DISPATCHING",
                     actor_user_id=cid, actor_role="PASSENGER",
                 )
-                return dict(row)
+            await cls._publish_status(row["id"], "DISPATCHING")
+            return dict(row)
 
     @staticmethod
     async def get(oid):
@@ -117,7 +128,8 @@ class OrderRepository:
                     connection, oid, "DISPATCHING", "ACCEPTED",
                     actor_user_id=did, actor_role="DRIVER",
                 )
-                return True
+            await cls._publish_status(oid, "ACCEPTED")
+            return True
 
     @classmethod
     async def update_status(cls, oid, new_status, expected_status, actor_user_id=None, actor_role="SYSTEM"):
@@ -138,7 +150,8 @@ class OrderRepository:
                     connection, oid, expected_status, new_status,
                     actor_user_id=actor_user_id, actor_role=actor_role,
                 )
-                return True
+            await cls._publish_status(oid, new_status)
+            return True
 
     @classmethod
     async def cancel_with_fee(cls, oid, uid, role, fee=0.0):
@@ -172,7 +185,8 @@ class OrderRepository:
                     actor_user_id=uid, actor_role=role,
                     metadata={"cancel_fee": float(fee)},
                 )
-                return True
+            await cls._publish_status(oid, "CANCELLED")
+            return True
 
     @staticmethod
     async def get_customer_orders(cid):
