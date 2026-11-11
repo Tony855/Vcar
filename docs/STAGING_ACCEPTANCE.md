@@ -40,16 +40,16 @@ OSRM does not provide live traffic. Do not represent its duration as a traffic-a
 
 ## 3. GPS/WebSocket capacity
 
-Run the authenticated load script only with a short-lived staging driver token:
+Run the authenticated load script only with separate short-lived staging driver and admin JWTs. It connects admin fleet-stream subscribers while a driver publishes GPS updates:
 ```bash
-DRIVER_TOKEN='(inject securely)' python scripts/load_test_locations.py \
+DRIVER_TOKEN='(inject securely)' ADMIN_TOKEN='(inject securely)' python scripts/load_test_locations.py \
   --base-url https://staging.example.invalid --connections 50 --messages 3 \
   --json-output artifacts/gps-50.json
 ```
 Repeat at 100, 250 and 500 connections, allowing the host to recover between runs.
 Record host CPU, RSS, Redis memory, DB pool saturation, event-loop lag, disconnects and
 server-side request rates alongside the generated client report. The script reports
-connection success, frame delivery, publish throughput and p50/p95/p99 connection/fan-out
+admin subscriber connection success, fleet event delivery, publish throughput and p50/p95/p99 connection/fan-out
 latency. Client-side results alone do not establish server capacity.
 
 Acceptance thresholds must be agreed before the run; suggested starting gates:
