@@ -94,7 +94,7 @@ def verify_telegram_webapp_init_data(
     supplied_hash = values.pop("hash", "")
     if len(supplied_hash) != 64:
         raise ValueError("Invalid Telegram initData hash")
-    data_check_string = "\\n".join(f"{key}={values[key]}" for key in sorted(values))
+    data_check_string = "\n".join(f"{key}={values[key]}" for key in sorted(values))
     secret_key = hmac.new(bot_token.encode(), b"WebAppData", hashlib.sha256).digest()
     expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected_hash, supplied_hash):
