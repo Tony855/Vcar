@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime, timezone
 import aiohttp
 from fastapi import FastAPI, Depends, HTTPException, Response, Query
 from fastapi.responses import HTMLResponse, FileResponse
@@ -79,11 +80,13 @@ async def login(data: LoginData):
 @app.get("/api/stats", dependencies=[Depends(verify_token)])
 async def get_stats():
     async with db.pool.acquire() as c:
+        online_since = __import__("time").time() - 120
+        online_drivers = await db.redis.zcount("driver:heartbeat", online_since, "+inf")
         return {
             "total_orders": await c.fetchval("SELECT COUNT(*) FROM orders"),
             "active_orders": await c.fetchval("SELECT COUNT(*) FROM orders WHERE status IN ('DISPATCHING','ACCEPTED','IN_PROGRESS')"),
             "total_users": await c.fetchval("SELECT COUNT(*) FROM users"),
-            "drivers_online": await c.fetchval("SELECT COUNT(*) FROM users WHERE driver_status='APPROVED'") # 简化统计
+            "drivers_online": online_drivers
         }
 
 @app.get("/api/orders", dependencies=[Depends(verify_token)])
@@ -92,7 +95,7 @@ async def get_admin_orders():
         rows = await c.fetch("SELECT o.id, o.status, o.distance_km, o.price_estimate, o.driver_id, du.plate_number as driver_plate FROM orders o LEFT JOIN users du ON o.driver_id=du.id ORDER BY o.id DESC LIMIT 50")
         return [dict(r) for r in rows]
 
-@app.get("/api/pricing")
+@app.get("/api/pricing", dependencies=[Depends(verify_token)])
 async def get_pricing():
     async with db.pool.acquire() as c:
         # 只查起步价和每公里，防止把客服字符串转 float 报错
@@ -113,7 +116,7 @@ async def set_pricing(price: PriceUpdate):
         await c.execute("UPDATE settings SET value=$1 WHERE key='per_km_rate'", str(price.per_km))
     return {"status": "ok"}
 
-@app.get("/api/config/support")
+@app.get("/api/config/support", dependencies=[Depends(verify_token)])
 async def get_support_config():
     async with db.pool.acquire() as c:
         val = await c.fetchval("SELECT value FROM settings WHERE key='support_username'")
@@ -210,3 +213,25 @@ async def serve_spa(full_path: str):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
+@app.get("/api/admin/fleet", dependencies=[Depends(verify_token)])
+async def get_live_fleet():
+    async with db.pool.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT u.id, u.telegram_id, u.first_name, u.phone, u.plate_number,
+                   u.rating, ST_Y(l.position::geometry) AS latitude,
+                   ST_X(l.position::geometry) AS longitude,
+                   l.accuracy_m, l.heading_deg, l.speed_mps,
+                   l.recorded_at, l.received_at
+            FROM users u
+            LEFT JOIN driver_locations l ON l.driver_id=u.id
+            WHERE u.driver_status='APPROVED'
+            ORDER BY l.received_at DESC NULLS LAST
+            """
+        )
+    return [
+        {**dict(row), "online": bool(row["received_at"] and
+          (datetime.now(timezone.utc) - row["received_at"]).total_seconds() <= 120)}
+        for row in rows
+    ]
