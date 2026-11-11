@@ -19,14 +19,32 @@ async def load_order_stream_bootstrap(
     The caller subscribes to Redis before invoking this function. Pub/Sub frames
     queued during the database read are deduplicated by event_id in the stream.
     """
-    status = await connection.fetchval(
-        "SELECT status FROM orders WHERE id=$1", order_id
-    )
-    latest_event_id = await connection.fetchval(
-        "SELECT COALESCE(MAX(event_id), 0) FROM order_event_outbox WHERE order_id=$1",
+    # Read status and event cursor in one SQL statement so both values share
+    # one PostgreSQL statement snapshot. Separate reads could pair an old status
+    # with a new cursor and make a just-committed transition impossible to replay.
+    current = await connection.fetchrow(
+        """
+        SELECT o.status,
+               COALESCE((
+                   SELECT MAX(outbox.event_id)
+                   FROM order_event_outbox AS outbox
+                   WHERE outbox.order_id=o.id
+               ), 0) AS latest_event_id
+        FROM orders AS o
+        WHERE o.id=$1
+        """,
         order_id,
     )
-    latest_event_id = int(latest_event_id or 0)
+    if current is None:
+        return {
+            "type": "snapshot",
+            "order_id": order_id,
+            "status": None,
+            "last_event_id": 0,
+            "resync_required": True,
+        }
+    status = current["status"]
+    latest_event_id = int(current["latest_event_id"] or 0)
     cursor = max(0, int(last_event_id or 0))
 
     if cursor == 0 or cursor > latest_event_id:
