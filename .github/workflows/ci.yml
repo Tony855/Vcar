@@ -14,6 +14,21 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: .
+      DATABASE_URL: postgresql://vcar:test@127.0.0.1:5432/vcar
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vcar
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: vcar
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vcar -d vcar"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,6 +39,9 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app migrations tests
       - run: DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar alembic upgrade head --sql
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f app/db/schema.sql
+      - run: alembic upgrade head
       - run: pytest -q
 
   frontend:
