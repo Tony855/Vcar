@@ -87,7 +87,7 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 
 - `GET /health/live` 是进程存活检查；`GET /health/ready` 同时检查 PostgreSQL、PostGIS 和 Redis。
 - 数据库备份：`bash scripts/backup_database.sh`。脚本验证 dump 可读后才原子移动为正式备份，默认保留 14 天。
-- 数据库恢复：先验证备份文件，再执行 `CONFIRM_RESTORE=YES bash scripts/restore_database.sh /path/to/vcar-backup.dump`。恢复会停止 Bot/Web 服务并覆盖数据库对象，必须先另做当前库备份。
+- 数据库恢复：先验证备份文件并另做当前库备份，再执行 `CONFIRM_RESTORE=YES bash scripts/restore_database.sh /path/to/vcar-backup.dump`。恢复会停止 Bot/Web 服务并覆盖数据库对象；脚本使用仅保存在 root 保护环境文件中的 `MIGRATION_DATABASE_URL`（旧版未拆分凭据时才回退到 `DATABASE_URL`），不会使用受限的 `vcar_app` 运行账号。恢复失败时脚本仍会尝试重新启动服务，但必须人工检查数据库状态和健康检查。
 - 以上脚本只备份 PostgreSQL 数据；媒体文件、上传目录、OSRM 地图数据和服务器密钥需要单独纳入主机级备份策略。
 
 
@@ -126,7 +126,7 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - GPS/WebSocket fan-out: provision an approved staging driver, export its short-lived JWT as `DRIVER_TOKEN`, then run `VCAR_BASE_URL=https://your-staging-api.example python scripts/load_test_locations.py --connections 500 --messages 3`.
 - The WebSocket load test sends real authenticated GPS updates and measures fan-out to connected clients. Start with 50, then 100, 250 and 500 clients while observing API CPU/memory, Redis memory/clients, PostgreSQL connections, event loop latency and reverse-proxy limits.
 - Do not run the 500-client test against production without a maintenance window and explicit authorization. The script deliberately requires a valid approved driver token and does not create fake driver accounts.
-- Browser WebSocket connections now use random single-use tickets with a 30-second TTL. The reusable JWT is sent only in the HTTPS `POST /api/ws-ticket` Authorization header; the ticket is consumed atomically on connect and is bound to a specific role/scope. Reverse proxies should still redact query strings because the short-lived ticket itself appears in the WebSocket URL.
+- Browser WebSocket connections use random single-use tickets with a 30-second TTL. The reusable JWT is sent only in the HTTPS `POST /api/ws-ticket` Authorization header; the ticket is consumed atomically on connect and is bound to a specific role/scope. Reverse proxies should still redact query strings because the short-lived ticket itself appears in the WebSocket URL. The ticket is not a reusable JWT.
 
 
 - The installer keeps the full `.env` (including `MIGRATION_DATABASE_URL`) as `root:root 0600`. It generates `.env.runtime` without the migration URL and points systemd services only at that sanitized file. ACLs explicitly deny the `vcar` service user access to the owner credential file.

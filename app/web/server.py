@@ -42,8 +42,13 @@ class PriceUpdate(BaseModel): base_fare: float; per_km: float
 class ReviewData(BaseModel): tg_id: int; status: str
 
 @app.on_event("startup")
-async def startup(): 
+async def startup():
     await db.init()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await db.close()
 
 # 挂载静态文件
 static_dir = os.path.join(BASE_DIR, "app", "web", "static")
