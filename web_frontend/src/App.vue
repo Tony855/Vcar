@@ -74,6 +74,9 @@
             </el-col>
           </el-row>
         </el-tab-pane>
+        <el-tab-pane label="🗺️ 实时车队" name="fleet">
+          <FleetMap v-if="activeTab === 'fleet'" :token="token" />
+        </el-tab-pane>
       </el-tabs>
     </el-main>
   </el-container>
@@ -82,6 +85,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
+import FleetMap from './FleetMap.vue'
 import { ElMessage } from 'element-plus'
 
 const api = axios.create({ baseURL: '/api' })
