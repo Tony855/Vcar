@@ -13,11 +13,13 @@ sys.path.append(BASE_DIR)
 
 from app.core.config import settings
 from app.db.core import db
-from app.core.security import verify_token, create_access_token, verify_password
+from app.core.security import verify_token, verify_driver_token, create_access_token, verify_password
 from app.modules.routing.router import router as routing_router
+from app.modules.auth.router import router as auth_router
 
 app = FastAPI()
 app.include_router(routing_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
@@ -125,7 +127,9 @@ async def set_support_config(data: SupportUpdate):
 
 # ================= 3. 司机小程序接口 =================
 @app.get("/api/driver/{tg_id}/profile")
-async def get_driver_profile(tg_id: int):
+async def get_driver_profile(tg_id: int, claims: dict = Depends(verify_driver_token)):
+    if str(tg_id) != str(claims["sub"]):
+        raise HTTPException(status_code=403, detail="Cannot access another driver profile")
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id, rating, plate_number FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return {"error": "Driver not found"}
@@ -146,7 +150,9 @@ async def get_driver_profile(tg_id: int):
         }
 
 @app.get("/api/driver/{tg_id}/reviews")
-async def get_driver_reviews(tg_id: int):
+async def get_driver_reviews(tg_id: int, claims: dict = Depends(verify_driver_token)):
+    if str(tg_id) != str(claims["sub"]):
+        raise HTTPException(status_code=403, detail="Cannot access another driver reviews")
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return []
@@ -154,7 +160,9 @@ async def get_driver_reviews(tg_id: int):
         return [dict(r) for r in rows]
 
 @app.get("/api/driver/{tg_id}/orders")
-async def get_driver_orders(tg_id: int):
+async def get_driver_orders(tg_id: int, claims: dict = Depends(verify_driver_token)):
+    if str(tg_id) != str(claims["sub"]):
+        raise HTTPException(status_code=403, detail="Cannot access another driver orders")
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return []
@@ -167,7 +175,9 @@ async def get_driver_orders(tg_id: int):
         return res
 
 @app.get("/api/driver/{tg_id}/income")
-async def get_driver_income(tg_id: int):
+async def get_driver_income(tg_id: int, claims: dict = Depends(verify_driver_token)):
+    if str(tg_id) != str(claims["sub"]):
+        raise HTTPException(status_code=403, detail="Cannot access another driver income")
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return []
