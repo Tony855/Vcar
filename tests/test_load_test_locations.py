@@ -30,3 +30,34 @@ def test_build_report_zero_denominators_are_safe():
     assert report["connection_success_rate"] == 0
     assert report["frame_delivery_rate"] == 0
     assert report["gps_publish_per_second"] == 0
+
+from scripts.load_test_locations import fleet_websocket_url, is_fleet_location_event
+
+
+def test_fleet_websocket_url_uses_secure_scheme_and_encodes_ticket():
+    assert fleet_websocket_url("https://staging.example", "a+b/c") == (
+        "wss://staging.example/api/v1/admin/fleet/stream?ticket=a%2Bb%2Fc"
+    )
+    assert fleet_websocket_url("http://localhost:8080", "ticket") == (
+        "ws://localhost:8080/api/v1/admin/fleet/stream?ticket=ticket"
+    )
+
+
+def test_fleet_websocket_url_rejects_unsupported_scheme():
+    import pytest
+    with pytest.raises(ValueError):
+        fleet_websocket_url("ftp://staging.example", "ticket")
+
+
+def test_fleet_event_validation_rejects_non_location_frames():
+    import json
+
+    event = {
+        "telegram_id": 123,
+        "latitude": 11.5,
+        "longitude": 104.9,
+        "recorded_at": "2026-11-12T00:00:00+00:00",
+    }
+    assert is_fleet_location_event(json.dumps(event))
+    assert not is_fleet_location_event('{"type":"ready"}')
+    assert not is_fleet_location_event("not-json")
