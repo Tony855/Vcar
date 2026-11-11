@@ -12,8 +12,8 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/7] Installing runtime dependencies..."
 apt-get update -qq
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
-apt-get install -y -qq postgresql postgresql-client postgresql-contrib postgis redis-server python3 python3-venv python3-pip curl nodejs acl >/dev/null
+curl -fsSL https://deb.nodesource.com/setup_26.x | bash - >/dev/null 2>&1
+apt-get install -y -qq postgresql postgresql-client postgresql-contrib postgis redis-server python3 python3-venv python3-pip python3-dev build-essential libpq-dev curl nodejs acl >/dev/null
 systemctl enable --now postgresql redis-server
 
 echo "[2/7] Preparing persistent per-install secrets..."
@@ -21,8 +21,10 @@ if [[ ! -f .env ]]; then
   install -m 600 .env.example .env
 fi
 DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-db-password --write-role-sql /tmp/vcar-role-bootstrap.sql)"
+MIGRATION_DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-migration-db-password)"
 DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2-)"
-if [[ -z "$DB_PASSWORD" || -z "$DATABASE_URL" ]]; then
+MIGRATION_DATABASE_URL="$(grep '^MIGRATION_DATABASE_URL=' .env | cut -d= -f2-)"
+if [[ -z "$DB_PASSWORD" || -z "$MIGRATION_DB_PASSWORD" || -z "$DATABASE_URL" || -z "$MIGRATION_DATABASE_URL" ]]; then
   echo "Unable to initialize DATABASE_URL safely." >&2
   exit 1
 fi
@@ -35,21 +37,22 @@ chmod 600 /tmp/vcar-role-bootstrap.sql
 if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='vcar'\"" | grep -q 1; then
   su - postgres -c "createuser vcar"
 fi
-su - postgres -c "psql -v ON_ERROR_STOP=1 -f /tmp/vcar-role-bootstrap.sql"
+su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -f /tmp/vcar-role-bootstrap.sql"
 rm -f /tmp/vcar-role-bootstrap.sql
 su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='vcar'\"" | grep -q 1 || su - postgres -c "createdb -O vcar vcar"
 su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -c \"CREATE EXTENSION IF NOT EXISTS postgis\""
 
 echo "[4/7] Installing Python dependencies and applying migrations..."
 python3 -m venv .venv
+.venv/bin/pip install --disable-pip-version-check -q --upgrade pip
 .venv/bin/pip install --disable-pip-version-check -q -r requirements.txt
-PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U vcar -d vcar -v ON_ERROR_STOP=1 -f app/db/schema.sql >/dev/null
-DATABASE_URL="$DATABASE_URL" .venv/bin/alembic upgrade head
+PGPASSWORD="$MIGRATION_DB_PASSWORD" psql -h 127.0.0.1 -U vcar -d vcar -v ON_ERROR_STOP=1 -f app/db/schema.sql >/dev/null
+DATABASE_URL="$DATABASE_URL" MIGRATION_DATABASE_URL="$MIGRATION_DATABASE_URL" .venv/bin/alembic upgrade head
 
 echo "[5/7] Building the admin frontend..."
 if [[ -d web_frontend ]]; then
   cd web_frontend
-  npm ci --silent
+  npm ci --silent --registry=https://registry.npmjs.org
   NODE_OPTIONS="--max-old-space-size=1024" npm run build
   cd "$PROJECT_DIR"
   install -d app/web/static
@@ -74,8 +77,14 @@ while [[ "$parent" != "/" ]]; do
   parent="$(dirname "$parent")"
 done
 setfacl -R -m u:vcar:rX "$PROJECT_DIR"
-chown root:vcar .env
-chmod 640 .env
+# Keep migration-owner credentials out of the service account and its environment.
+chown root:root .env
+chmod 600 .env
+setfacl -m u:vcar:--- "$PROJECT_DIR/.env"
+grep -v '^MIGRATION_DATABASE_URL=' .env > .env.runtime
+chown root:vcar .env.runtime
+chmod 640 .env.runtime
+setfacl -m u:vcar:r-- "$PROJECT_DIR/.env.runtime"
 install -d -o vcar -g vcar -m 750 /var/lib/vcar
 install -d -o vcar -g vcar -m 750 /var/log/vcar
 
@@ -92,7 +101,7 @@ Type=simple
 User=vcar
 Group=vcar
 WorkingDirectory=$PROJECT_DIR
-EnvironmentFile=$PROJECT_DIR/.env
+EnvironmentFile=$PROJECT_DIR/.env.runtime
 Environment=PYTHONUNBUFFERED=1
 ExecStart=$PROJECT_DIR/.venv/bin/python -m app.bot_main
 Restart=on-failure

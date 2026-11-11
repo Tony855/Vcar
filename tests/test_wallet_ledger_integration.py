@@ -81,3 +81,46 @@ async def test_postgis_driver_location_schema(database_pool):
         )
     names = {row["column_name"] for row in columns}
     assert {"position", "accuracy_m", "heading_deg", "speed_mps", "recorded_at", "received_at"} <= names
+
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_cannot_be_replayed_into_another_wallet(database_pool):
+    async with database_pool.acquire() as conn:
+        user_ids = []
+        wallet_ids = []
+        for _ in range(2):
+            telegram_id = int(uuid.uuid4().int % 8_000_000_000) + 1
+            user_id = await conn.fetchval(
+                "INSERT INTO users (telegram_id, first_name) VALUES ($1, 'wallet-cross-user') RETURNING id",
+                telegram_id,
+            )
+            wallet_id = await conn.fetchval(
+                "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', 0) RETURNING id",
+                user_id,
+            )
+            user_ids.append(user_id)
+            wallet_ids.append(wallet_id)
+
+    key = f"wallet-cross-user-{uuid.uuid4()}"
+    try:
+        await WalletLedger.post(
+            user_id=user_ids[0], currency="USD", amount_minor=500,
+            kind="TOPUP", idempotency_key=key,
+        )
+        with pytest.raises(IdempotencyConflict):
+            await WalletLedger.post(
+                user_id=user_ids[1], currency="USD", amount_minor=500,
+                kind="TOPUP", idempotency_key=key,
+            )
+        async with database_pool.acquire() as conn:
+            balances = await conn.fetch(
+                "SELECT balance_minor FROM wallet_accounts WHERE id = ANY($1) ORDER BY id",
+                wallet_ids,
+            )
+        assert [row["balance_minor"] for row in balances] == [500, 0]
+    finally:
+        async with database_pool.acquire() as conn:
+            await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)", wallet_ids)
+            await conn.execute("DELETE FROM wallet_accounts WHERE id = ANY($1)", wallet_ids)
+            await conn.execute("DELETE FROM users WHERE id = ANY($1)", user_ids)

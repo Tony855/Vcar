@@ -74,6 +74,9 @@
             </el-col>
           </el-row>
         </el-tab-pane>
+        <el-tab-pane label="🗺️ 实时车队" name="fleet">
+          <FleetMap v-if="activeTab === 'fleet'" :token="token" />
+        </el-tab-pane>
       </el-tabs>
     </el-main>
   </el-container>
@@ -82,13 +85,14 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
+import FleetMap from './FleetMap.vue'
 import { ElMessage } from 'element-plus'
 
 const api = axios.create({ baseURL: '/api' })
-const token = localStorage.getItem('vcar_token')
-if (token) api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+const token = ref(localStorage.getItem('vcar_token') || '')
+if (token.value) api.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
 
-const isLoggedIn = ref(!!token)
+const isLoggedIn = ref(!!token.value)
 const loading = ref(false)
 const loginForm = ref({ username: '', password: '' })
 const activeTab = ref('orders')
@@ -109,6 +113,7 @@ const login = async () => {
   try {
     const res = await api.post('/login', loginForm.value)
     localStorage.setItem('vcar_token', res.data.token)
+    token.value = res.data.token
     api.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`
     isLoggedIn.value = true
     fetchAdminData()
@@ -118,6 +123,8 @@ const login = async () => {
 
 const logout = () => {
   localStorage.removeItem('vcar_token')
+  token.value = ''
+  delete api.defaults.headers.common['Authorization']
   isLoggedIn.value = false
 }
 

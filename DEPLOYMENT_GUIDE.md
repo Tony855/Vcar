@@ -89,3 +89,44 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - 数据库备份：`bash scripts/backup_database.sh`。脚本验证 dump 可读后才原子移动为正式备份，默认保留 14 天。
 - 数据库恢复：先验证备份文件，再执行 `CONFIRM_RESTORE=YES bash scripts/restore_database.sh /path/to/vcar-backup.dump`。恢复会停止 Bot/Web 服务并覆盖数据库对象，必须先另做当前库备份。
 - 以上脚本只备份 PostgreSQL 数据；媒体文件、上传目录、OSRM 地图数据和服务器密钥需要单独纳入主机级备份策略。
+
+
+## Runtime and dependency baseline (November 2026)
+
+- Python support target: 3.12–3.14; CI validates 3.13 and 3.14. Python dependencies are resolved in `uv.lock`; `requirements.txt` is an exported, fully pinned runtime install manifest.
+- Frontend build target: Node.js 26 LTS and npm 11; Vue 3.5, Vue Router 4, Element Plus 2.14, Vite 8 and `@vitejs/plugin-vue` 6. The npm lockfile is generated against the official npm registry.
+- CI uses current major versions of the official checkout/setup actions and PostGIS 3.7 on PostgreSQL 16.
+- PostgreSQL major-version upgrades are deliberately not performed automatically. Existing production databases require a separate backup/restore and compatibility rehearsal before any PostgreSQL or PostGIS major upgrade. Moving an existing PostGIS database from older Debian/glibc/PostGIS image families to PostGIS 3.7 requires a dump/restore plan; do not simply point a 3.7 image at an old data directory.
+- OSRM remains pinned to upstream v5.27.1 until route/table/match integration tests prove compatibility with a newer engine.
+- Production rollout requires staged dependency installation, database backup, migration dry-run, health checks and a rollback window. This repository change does not update any running host.
+
+
+## Least-privilege database credentials
+
+- `DATABASE_URL` is the application runtime connection and must use the restricted `vcar_app` login.
+- `MIGRATION_DATABASE_URL` is reserved for the schema owner `vcar` and is used only by Alembic and installer schema import.
+- The installer upgrades legacy `DATABASE_URL=...vcar...` configurations by preserving that owner URL as `MIGRATION_DATABASE_URL`, generating a separate runtime login, and applying table/sequence grants plus default privileges for future Alembic objects.
+- The application role receives SELECT/INSERT/UPDATE/DELETE and sequence privileges but no table ownership or schema DDL privileges. CI verifies it can query application data but cannot create tables.
+- Do not put the migration-owner URL in application-only containers or expose it to web workers. Keep it only in the protected installer/migration environment.
+- Existing deployments must take a database backup before running the updated installer. The installer does not run automatically against a live production host as part of this repository change.
+
+## New map and wallet APIs
+
+- Passenger WebApp: `/passenger`; it uses Telegram WebApp identity, map clicks for pickup/drop-off, `POST /api/passenger/orders`, and reads only the authenticated passenger's own order status.
+- Driver WebApp: `/mini/{telegram_id}/navigation`; GPS sharing requires an approved driver session and route planning uses OSRM. Location updates are throttled client-side to one per 10 seconds.
+- Admin console: the `实时车队` tab reads `/api/admin/fleet` and subscribes to `/api/v1/admin/fleet/stream`; it falls back to periodic refresh and bounded WebSocket reconnect.
+- Wallet: `/api/v1/wallet/me` opens/returns a single USD or KHR wallet, `/api/v1/wallet/me/transactions` lists the caller's own ledger, and `/api/v1/wallet/admin/adjust` provides an auditable idempotent admin adjustment.
+- No real payment-provider adapter is enabled. ABA/Bakong callbacks, settlement, refunds, withdrawals and reconciliation must remain disabled until official provider specifications and sandbox credentials are available.
+- OSRM real-map smoke checks: set `OSRM_BASE_URL` and run `python scripts/smoke_osrm.py`. The script checks Nearest, Route, Table and Match endpoints against the configured Cambodia map server.
+
+
+## Staging acceptance and scale checks
+
+- OSRM map acceptance: run `OSRM_BASE_URL=https://your-staging-osrm.example python scripts/smoke_osrm.py`; all four Route/Table/Match/Nearest checks must return `code=Ok`.
+- GPS/WebSocket fan-out: provision an approved staging driver, export its short-lived JWT as `DRIVER_TOKEN`, then run `VCAR_BASE_URL=https://your-staging-api.example python scripts/load_test_locations.py --connections 500 --messages 3`.
+- The WebSocket load test sends real authenticated GPS updates and measures fan-out to connected clients. Start with 50, then 100, 250 and 500 clients while observing API CPU/memory, Redis memory/clients, PostgreSQL connections, event loop latency and reverse-proxy limits.
+- Do not run the 500-client test against production without a maintenance window and explicit authorization. The script deliberately requires a valid approved driver token and does not create fake driver accounts.
+- Browser WebSocket connections now use random single-use tickets with a 30-second TTL. The reusable JWT is sent only in the HTTPS `POST /api/ws-ticket` Authorization header; the ticket is consumed atomically on connect and is bound to a specific role/scope. Reverse proxies should still redact query strings because the short-lived ticket itself appears in the WebSocket URL.
+
+
+- The installer keeps the full `.env` (including `MIGRATION_DATABASE_URL`) as `root:root 0600`. It generates `.env.runtime` without the migration URL and points systemd services only at that sanitized file. ACLs explicitly deny the `vcar` service user access to the owner credential file.

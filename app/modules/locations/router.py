@@ -5,12 +5,11 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
-import jwt
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ConfigDict
 
-from app.core.config import settings
 from app.core.security import verify_driver_token
+from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.core import db
 
 router = APIRouter(tags=["driver-location"])
@@ -95,18 +94,14 @@ async def update_driver_location(
         "recorded_at": recorded_at.isoformat(),
     }
     await db.redis.publish(f"driver:location:{telegram_id}", json.dumps(event))
+    await db.redis.publish("fleet:locations", json.dumps(event))
     return {"accepted": True, "recorded_at": recorded_at.isoformat()}
 
 
 @router.websocket("/driver/location/stream")
-async def driver_location_stream(websocket: WebSocket, token: str):
-    # Browser WebSocket APIs cannot set Authorization headers. Require a short-lived
-    # driver JWT and keep reverse-proxy query-string logging disabled for this route.
-    try:
-        claims = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
-        if claims.get("role") != "driver" or not claims.get("sub"):
-            raise ValueError("invalid role")
-    except (jwt.PyJWTError, ValueError):
+async def driver_location_stream(websocket: WebSocket, ticket: str):
+    claims = await consume_ws_ticket(ticket, "driver-location")
+    if not claims or claims.get("role") != "driver":
         await websocket.close(code=4401)
         return
     telegram_id = int(claims["sub"])
@@ -163,3 +158,29 @@ async def driver_navigation_match(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RoutingError as exc:
         raise HTTPException(status_code=503, detail="Navigation matching unavailable") from exc
+
+
+
+@router.websocket("/admin/fleet/stream")
+async def admin_fleet_stream(websocket: WebSocket, ticket: str):
+    """Authenticated admin-only fleet stream using a single-use WebSocket ticket."""
+    claims = await consume_ws_ticket(ticket, "admin-fleet")
+    if not claims or claims.get("role") != "admin":
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    pubsub = db.redis.pubsub()
+    try:
+        await pubsub.subscribe("fleet:locations")
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message and message.get("type") == "message":
+                await websocket.send_text(message["data"])
+            else:
+                await asyncio.sleep(0.1)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await pubsub.unsubscribe("fleet:locations")
+        await pubsub.aclose()

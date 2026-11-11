@@ -41,6 +41,10 @@
           <span class="menu-icon">👤</span>
           <span class="menu-text">账户信息</span>
         </div>
+        <div class="menu-item" @click="goToNavigation">
+          <span class="menu-icon">🧭</span>
+          <span class="menu-text">司机导航</span>
+        </div>
         <div class="menu-item" @click="showSupportModal = true">
           <span class="menu-icon">🎧</span>
           <span class="menu-text">联系客服</span>
@@ -92,6 +96,7 @@ const tgId = ref(null)
 const goToOrders = () => router.push(`/mini/${tgId.value}/orders`)
 const goToIncome = () => router.push(`/mini/${tgId.value}/income`)
 const goToAccount = () => router.push(`/mini/${tgId.value}/account`)
+const goToNavigation = () => router.push(`/mini/${tgId.value}/navigation`)
 
 const openTelegram = (username) => {
   showSupportModal.value = false
