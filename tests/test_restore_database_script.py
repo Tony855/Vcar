@@ -42,7 +42,6 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False, fail_
         "FAIL_RESTORE": "1" if fail_restore else "0",
         "FAIL_DUMP": "1" if fail_dump else "0",
         "FAIL_LIST": "7" if fail_list else "0",
-        "FAIL_LIST": "7" if fail_list else "0",
     }
     result = subprocess.run(
         ["bash", str(SCRIPT), str(dump)],
