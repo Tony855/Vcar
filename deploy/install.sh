@@ -21,8 +21,10 @@ if [[ ! -f .env ]]; then
   install -m 600 .env.example .env
 fi
 DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-db-password --write-role-sql /tmp/vcar-role-bootstrap.sql)"
+MIGRATION_DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-migration-db-password)"
 DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2-)"
-if [[ -z "$DB_PASSWORD" || -z "$DATABASE_URL" ]]; then
+MIGRATION_DATABASE_URL="$(grep '^MIGRATION_DATABASE_URL=' .env | cut -d= -f2-)"
+if [[ -z "$DB_PASSWORD" || -z "$MIGRATION_DB_PASSWORD" || -z "$DATABASE_URL" || -z "$MIGRATION_DATABASE_URL" ]]; then
   echo "Unable to initialize DATABASE_URL safely." >&2
   exit 1
 fi
@@ -44,8 +46,8 @@ echo "[4/7] Installing Python dependencies and applying migrations..."
 python3 -m venv .venv
 .venv/bin/pip install --disable-pip-version-check -q --upgrade pip
 .venv/bin/pip install --disable-pip-version-check -q -r requirements.txt
-PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U vcar -d vcar -v ON_ERROR_STOP=1 -f app/db/schema.sql >/dev/null
-DATABASE_URL="$DATABASE_URL" .venv/bin/alembic upgrade head
+PGPASSWORD="$MIGRATION_DB_PASSWORD" psql -h 127.0.0.1 -U vcar -d vcar -v ON_ERROR_STOP=1 -f app/db/schema.sql >/dev/null
+DATABASE_URL="$DATABASE_URL" MIGRATION_DATABASE_URL="$MIGRATION_DATABASE_URL" .venv/bin/alembic upgrade head
 
 echo "[5/7] Building the admin frontend..."
 if [[ -d web_frontend ]]; then
