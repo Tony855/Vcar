@@ -48,6 +48,24 @@ function upsertDriver(driver) {
   else drivers.value.push(driver)
 }
 
+function applyFleetSnapshot(snapshot) {
+  const nextDrivers = Array.isArray(snapshot?.drivers) ? snapshot.drivers : []
+  drivers.value = nextDrivers
+  const presentWithLocation = new Set()
+  for (const driver of nextDrivers) {
+    if (driver.latitude != null && driver.longitude != null) {
+      presentWithLocation.add(String(driver.telegram_id))
+      upsertDriver(driver)
+    }
+  }
+  for (const [id, marker] of markers) {
+    if (!presentWithLocation.has(id)) {
+      map.removeLayer(marker)
+      markers.delete(id)
+    }
+  }
+}
+
 async function loadFleet() {
   loading.value = true
   error.value = ''
@@ -89,8 +107,11 @@ async function connectFleetSocket() {
     socket = new WebSocket(`${protocol}//${location.host}/api/v1/admin/fleet/stream?ticket=${encodeURIComponent(response.data.ticket)}`)
     socket.onopen = () => { reconnectDelay = 1000; error.value = '' }
     socket.onmessage = event => {
-      try { upsertDriver({ ...JSON.parse(event.data), online: true }) }
-      catch { /* Ignore malformed telemetry frame. */ }
+      try {
+        const payload = JSON.parse(event.data)
+        if (payload?.type === 'snapshot') applyFleetSnapshot(payload)
+        else upsertDriver({ ...payload, online: true })
+      } catch { /* Ignore malformed telemetry frame. */ }
     }
     socket.onclose = () => {
       if (disposed) return
