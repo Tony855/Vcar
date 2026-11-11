@@ -14,6 +14,8 @@ async def init_connection(conn):
 class DB:
     def __init__(self): self.pool = None; self.redis = None
     async def init(self):
+        if not settings.database_url:
+            raise RuntimeError("DATABASE_URL must be configured; insecure built-in database credentials are disabled")
         self.pool = await asyncpg.create_pool(
             settings.database_url, 
             min_size=2, 
