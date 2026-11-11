@@ -12,8 +12,8 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/7] Installing runtime dependencies..."
 apt-get update -qq
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
-apt-get install -y -qq postgresql postgresql-client postgresql-contrib postgis redis-server python3 python3-venv python3-pip curl nodejs acl >/dev/null
+curl -fsSL https://deb.nodesource.com/setup_26.x | bash - >/dev/null 2>&1
+apt-get install -y -qq postgresql postgresql-client postgresql-contrib postgis redis-server python3 python3-venv python3-pip python3-dev build-essential libpq-dev curl nodejs acl >/dev/null
 systemctl enable --now postgresql redis-server
 
 echo "[2/7] Preparing persistent per-install secrets..."
@@ -42,6 +42,7 @@ su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -c \"CREATE EXTENSION IF NOT E
 
 echo "[4/7] Installing Python dependencies and applying migrations..."
 python3 -m venv .venv
+.venv/bin/pip install --disable-pip-version-check -q --upgrade pip
 .venv/bin/pip install --disable-pip-version-check -q -r requirements.txt
 PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -U vcar -d vcar -v ON_ERROR_STOP=1 -f app/db/schema.sql >/dev/null
 DATABASE_URL="$DATABASE_URL" .venv/bin/alembic upgrade head
@@ -49,7 +50,7 @@ DATABASE_URL="$DATABASE_URL" .venv/bin/alembic upgrade head
 echo "[5/7] Building the admin frontend..."
 if [[ -d web_frontend ]]; then
   cd web_frontend
-  npm ci --silent
+  npm ci --silent --registry=https://registry.npmjs.org
   NODE_OPTIONS="--max-old-space-size=1024" npm run build
   cd "$PROJECT_DIR"
   install -d app/web/static
