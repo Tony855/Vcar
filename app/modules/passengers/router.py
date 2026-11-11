@@ -89,3 +89,24 @@ async def create_booking(
         request.dropoff_lng, request.dropoff_lat, distance_km, price,
     )
     return {"order_id": order["id"], "status": "DISPATCHING", "distance_km": distance_km, "price_estimate": price}
+
+
+
+@router.get("/orders/{order_id}")
+async def passenger_order_status(
+    order_id: int,
+    authorization: str | None = Header(default=None),
+):
+    claims = passenger_claims(authorization)
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, status, price_estimate, distance_km, created_at
+            FROM orders
+            WHERE id=$1 AND customer_id=(SELECT id FROM users WHERE telegram_id=$2)
+            """,
+            order_id, int(claims["sub"]),
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return dict(row)
