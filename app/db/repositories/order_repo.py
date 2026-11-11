@@ -1,10 +1,7 @@
 import json
-import logging
 
 from app.db.core import db
 from app.modules.orders.state_machine import validate_transition, InvalidOrderTransition
-
-logger = logging.getLogger(__name__)
 
 
 class OrderRepository:
@@ -105,15 +102,6 @@ class OrderRepository:
             )
             return result == "UPDATE 1"
 
-    @staticmethod
-    async def _publish_status(order_id, status):
-        if db.redis is None:
-            return
-        try:
-            await db.redis.publish(f"order:status:{order_id}", json.dumps({"order_id": order_id, "status": status}))
-        except Exception:
-            logger.exception("Unable to publish order status update", extra={"order_id": order_id})
-
     @classmethod
     async def create(cls, cid, plng, plat, dlng, dlat, dist, price):
         async with db.pool.acquire() as connection:
@@ -132,7 +120,6 @@ class OrderRepository:
                     connection, row["id"], None, "DISPATCHING",
                     actor_user_id=cid, actor_role="PASSENGER",
                 )
-            await cls._publish_status(row["id"], "DISPATCHING")
             return dict(row)
 
     @staticmethod
@@ -208,7 +195,6 @@ class OrderRepository:
                     connection, oid, "DISPATCHING", "ACCEPTED",
                     actor_user_id=did, actor_role="DRIVER",
                 )
-            await cls._publish_status(oid, "ACCEPTED")
             return True
 
     @classmethod
@@ -242,7 +228,6 @@ class OrderRepository:
                     connection, oid, expected_status, new_status,
                     actor_user_id=actor_user_id, actor_role=actor_role,
                 )
-            await cls._publish_status(oid, new_status)
             return True
 
     @classmethod
@@ -277,7 +262,6 @@ class OrderRepository:
                     actor_user_id=uid, actor_role=role,
                     metadata={"cancel_fee": float(fee)},
                 )
-            await cls._publish_status(oid, "CANCELLED")
             return True
 
     @staticmethod

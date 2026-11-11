@@ -8,6 +8,7 @@ from aiogram.enums import ParseMode
 
 from app.core.config import settings
 from app.db.core import db
+from app.services.order_event_outbox import run_order_event_outbox_worker
 from app.bot.handlers import passenger, driver
 
 
@@ -35,6 +36,13 @@ async def main():
     logging.info("✅ Vcar V2 DDD架构启动成功！")
 
     stop_event = asyncio.Event()
+    outbox_worker_task = asyncio.create_task(
+        run_order_event_outbox_worker(
+            stop_event,
+            poll_interval=settings.order_event_outbox_poll_interval,
+        ),
+        name="order-event-outbox-worker",
+    )
 
     def _shutdown(*_):
         logging.info("🛑 收到停止信号，开始优雅关闭...")
@@ -62,6 +70,8 @@ async def main():
             _wait_and_stop(),
         )
     finally:
+        stop_event.set()
+        await outbox_worker_task
         logging.info("🧹 清理资源...")
         try:
             await db.pool.close()
