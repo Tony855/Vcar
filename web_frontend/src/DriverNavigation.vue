@@ -54,6 +54,7 @@ async function sendGps(position) {
   } catch (err) { error.value = err.response?.data?.detail || '位置上传失败' }
 }
 async function startGps() {
+  if (!api) { error.value = '司机身份验证尚未完成'; return }
   if (!navigator.geolocation) { error.value = '设备不支持 GPS 定位'; return }
   tracking.value = true
   watchId = navigator.geolocation.watchPosition(sendGps, err => {
