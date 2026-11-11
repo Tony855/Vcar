@@ -99,6 +99,7 @@ class DispatchService:
             return []
 
         eta_by_driver = {}
+        table_result_available = False
         if settings.osrm_enabled:
             routable = [candidate for candidate in candidates if candidate["coords"]]
             if routable:
@@ -110,6 +111,7 @@ class DispatchService:
                         destinations=[len(routable)],
                         annotations="duration,distance",
                     )
+                    table_result_available = True
                     durations = matrix.get("durations") or []
                     for candidate, row in zip(routable, durations):
                         if row and row[0] is not None:
@@ -120,7 +122,7 @@ class DispatchService:
         scored_drivers = []
         for candidate in candidates:
             eta_seconds = eta_by_driver.get(candidate["tg_id"])
-            if settings.osrm_enabled and eta_seconds is None and candidate["coords"]:
+            if table_result_available and eta_seconds is None and candidate["coords"]:
                 # OSRM confirmed there is no usable road route to this pickup.
                 continue
 
