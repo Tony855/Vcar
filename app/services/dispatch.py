@@ -122,7 +122,7 @@ class DispatchService:
         scored_drivers = []
         for candidate in candidates:
             eta_seconds = eta_by_driver.get(candidate["tg_id"])
-            if table_result_available and eta_seconds is None and candidate["coords"]:
+            if table_result_available and eta_seconds is None:
                 # OSRM confirmed there is no usable road route to this pickup.
                 continue
 
