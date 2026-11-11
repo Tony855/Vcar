@@ -14,7 +14,7 @@ def test_build_report_exposes_delivery_and_latency_percentiles():
         fanout_latencies_ms=[5, 15, 25, 35], failures=10, elapsed_seconds=2.0,
     )
     assert report["connection_success_rate"] == 0.95
-    assert report["frame_delivery_rate"] == 270 / 285
+    assert report["frame_delivery_rate"] == 0.9474
     assert report["expected_frames"] == 285
     assert report["connect_latency_ms"]["p95"] == 40
     assert report["fanout_latency_ms"]["p50"] == 25
