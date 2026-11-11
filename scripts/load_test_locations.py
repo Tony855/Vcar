@@ -243,7 +243,7 @@ async def run(args: argparse.Namespace) -> int:
             output.write_text(rendered + "\n", encoding="utf-8")
         for ws in sockets:
             await ws.close()
-    return 1 if failures or report["frame_delivery_rate"] < args.min_delivery_rate else 0
+    return 1 if failures or report["frame_delivery_rate"] < args.min_delivery_rate or report["reconnect_snapshot_rate"] < args.min_delivery_rate else 0
 
 
 def main() -> int:
