@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 
 import asyncpg
@@ -165,7 +166,7 @@ async def test_order_status_outbox_is_transactional_and_retryable(database_pool)
             )
         assert initial is not None
         assert initial["order_id"] == order["id"]
-        assert initial["payload"]["status"] == "DISPATCHING"
+        assert json.loads(initial["payload"])["status"] == "DISPATCHING"
         assert initial["attempts"] == 0
         assert initial["delivered_at"] is None
 
@@ -179,7 +180,7 @@ async def test_order_status_outbox_is_transactional_and_retryable(database_pool)
         assert await OrderRepository.accept(order["id"], driver_id) is True
         claimed = await OrderRepository.claim_status_events(limit=10)
         assert len(claimed) == 1
-        assert claimed[0]["payload"]["status"] == "ACCEPTED"
+        assert json.loads(claimed[0]["payload"])["status"] == "ACCEPTED"
         assert await OrderRepository.retry_status_event(
             claimed[0]["id"], "temporary Redis outage"
         ) is True
