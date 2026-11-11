@@ -12,6 +12,7 @@ from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.core import db
 from app.modules.locations.gps import is_newer_sample, build_location_snapshot
 from app.modules.locations.redis_projection import publish_driver_location
+from app.modules.locations.fleet import fetch_fleet_snapshot
 
 router = APIRouter(tags=["driver-location"])
 
@@ -200,6 +201,11 @@ async def admin_fleet_stream(websocket: WebSocket, ticket: str):
     pubsub = db.redis.pubsub()
     try:
         await pubsub.subscribe("fleet:locations")
+        # Subscribe before the durable snapshot so GPS updates committed while
+        # PostgreSQL is queried remain queued in this Pub/Sub subscription.
+        async with db.pool.acquire() as conn:
+            snapshot = await fetch_fleet_snapshot(conn)
+        await websocket.send_json({"type": "snapshot", "drivers": snapshot})
         while True:
             message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if message and message.get("type") == "message":

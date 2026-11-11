@@ -59,6 +59,11 @@ Acceptance thresholds must be agreed before the run; suggested starting gates:
 - no cross-account location leakage;
 - clean disconnect and reconnect behavior.
 
+The administrator fleet WebSocket now sends a durable PostgreSQL snapshot immediately after
+subscribing to Redis, including on reconnect. The frontend reconciles its marker set from this
+snapshot before applying subsequent live events. This is covered by unit/CI tests; the 50–500
+connection staging runs below remain NOT RUN and are not implied by the code change.
+
 ## 4. Database backup and restore
 
 - [ ] Verify `MIGRATION_DATABASE_URL` is root-only and points to the schema owner.
