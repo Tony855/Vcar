@@ -136,3 +136,16 @@ def test_fleet_event_validation_rejects_non_finite_coordinates():
         "recorded_at": "2026-11-12T00:00:00+00:00",
     }
     assert not is_fleet_location_event(json.dumps(event))
+
+
+
+def test_fleet_event_validation_rejects_unbounded_integer_coordinates():
+    import json
+
+    event = {
+        "telegram_id": 123,
+        "latitude": 10**1000,
+        "longitude": 104.9,
+        "recorded_at": "2026-11-12T00:00:00+00:00",
+    }
+    assert not is_fleet_location_event(json.dumps(event))
