@@ -70,3 +70,62 @@ async def verify_token(credentials: HTTPAuthorizationCredentials | None = Depend
     if not payload.get("sub") or payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     return payload
+
+import json
+import time
+from urllib.parse import parse_qsl
+
+
+def verify_telegram_webapp_init_data(
+    init_data: str,
+    bot_token: str,
+    *,
+    max_age_seconds: int = 86_400,
+) -> dict[str, Any]:
+    """Validate Telegram WebApp initData using the bot-token HMAC scheme."""
+    if not init_data or not bot_token:
+        raise ValueError("Telegram WebApp authentication is not configured")
+    pairs = parse_qsl(init_data, keep_blank_values=True, strict_parsing=True)
+    values: dict[str, str] = {}
+    for key, value in pairs:
+        if key in values:
+            raise ValueError("Duplicate Telegram initData field")
+        values[key] = value
+    supplied_hash = values.pop("hash", "")
+    if len(supplied_hash) != 64:
+        raise ValueError("Invalid Telegram initData hash")
+    data_check_string = "\\n".join(f"{key}={values[key]}" for key in sorted(values))
+    secret_key = hmac.new(bot_token.encode(), b"WebAppData", hashlib.sha256).digest()
+    expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_hash, supplied_hash):
+        raise ValueError("Telegram initData signature mismatch")
+    try:
+        auth_date = int(values["auth_date"])
+        user = json.loads(values["user"])
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("Telegram initData is missing required user data") from exc
+    now = int(time.time())
+    if auth_date > now + 60 or now - auth_date > max_age_seconds:
+        raise ValueError("Telegram initData has expired")
+    if not isinstance(user, dict) or not isinstance(user.get("id"), int):
+        raise ValueError("Telegram initData user is invalid")
+    return {"user": user, "auth_date": auth_date}
+
+
+async def verify_driver_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> dict[str, Any]:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Bearer token required",
+                            headers={"WWW-Authenticate": "Bearer"})
+    try:
+        payload = jwt.decode(credentials.credentials, _secret_key(), algorithms=[_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired",
+                            headers={"WWW-Authenticate": "Bearer"})
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token",
+                            headers={"WWW-Authenticate": "Bearer"})
+    if not payload.get("sub") or payload.get("role") != "driver":
+        raise HTTPException(status_code=403, detail="Driver permissions required")
+    return payload
