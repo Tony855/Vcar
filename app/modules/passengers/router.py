@@ -1,0 +1,91 @@
+"""Passenger Telegram WebApp session and booking API."""
+from __future__ import annotations
+
+import jwt
+from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel, Field
+
+from app.core.config import settings
+from app.core.security import create_access_token, verify_telegram_webapp_init_data
+from app.db.core import db
+from app.db.repositories.order_repo import OrderRepository
+from app.services.pricing import PricingService
+from app.infrastructure.osrm.client import RoutingError
+
+router = APIRouter(prefix="/passenger", tags=["passenger"])
+
+
+class TelegramSessionRequest(BaseModel):
+    init_data: str = Field(min_length=1, max_length=8192)
+
+
+class BookingRequest(BaseModel):
+    pickup_lat: float = Field(ge=-90, le=90)
+    pickup_lng: float = Field(ge=-180, le=180)
+    dropoff_lat: float = Field(ge=-90, le=90)
+    dropoff_lng: float = Field(ge=-180, le=180)
+
+
+@router.post("/session")
+async def passenger_session(request: TelegramSessionRequest):
+    if not settings.passenger_bot_token:
+        raise HTTPException(status_code=503, detail="Passenger Telegram bot is not configured")
+    try:
+        verified = verify_telegram_webapp_init_data(request.init_data, settings.passenger_bot_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid Telegram WebApp authentication") from exc
+    user = verified["user"]
+    telegram_id = int(user["id"])
+    async with db.pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (telegram_id, first_name, username, locale, driver_status)
+            VALUES ($1, $2, $3, $4, 'NONE')
+            ON CONFLICT (telegram_id) DO UPDATE SET
+                first_name=COALESCE(EXCLUDED.first_name, users.first_name),
+                username=COALESCE(EXCLUDED.username, users.username),
+                locale=COALESCE(EXCLUDED.locale, users.locale),
+                updated_at=now()
+            """,
+            telegram_id, user.get("first_name"), user.get("username"), user.get("language_code", "en"),
+        )
+    token = create_access_token(subject=str(telegram_id), role="passenger", expires_minutes=30)
+    return {"token": token, "tg_id": telegram_id, "expires_in": 1800}
+
+
+def passenger_claims(authorization: str | None) -> dict:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    try:
+        claims = jwt.decode(authorization[7:], settings.secret_key, algorithms=["HS256"])
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired passenger token") from exc
+    if claims.get("role") != "passenger" or not claims.get("sub"):
+        raise HTTPException(status_code=403, detail="Passenger permissions required")
+    return claims
+
+
+@router.post("/orders", status_code=201)
+async def create_booking(
+    request: BookingRequest,
+    authorization: str | None = Header(default=None),
+):
+    claims = passenger_claims(authorization)
+    async with db.pool.acquire() as conn:
+        customer_id = await conn.fetchval(
+            "SELECT id FROM users WHERE telegram_id=$1", int(claims["sub"])
+        )
+    if customer_id is None:
+        raise HTTPException(status_code=403, detail="Passenger profile not found")
+    try:
+        distance_km, price = await PricingService.estimate(
+            request.pickup_lat, request.pickup_lng,
+            request.dropoff_lat, request.dropoff_lng,
+        )
+    except (RoutingError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Unable to calculate a safe route quote") from exc
+    order = await OrderRepository.create(
+        customer_id, request.pickup_lng, request.pickup_lat,
+        request.dropoff_lng, request.dropoff_lat, distance_km, price,
+    )
+    return {"order_id": order["id"], "status": "DISPATCHING", "distance_km": distance_km, "price_estimate": price}
