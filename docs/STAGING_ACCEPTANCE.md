@@ -101,7 +101,10 @@ the pre-restore backup command fails; CI covers this fail-closed path.
 - [ ] Verify services start, survive reboot, restart on failure and pass readiness checks.
 - [ ] Verify failed install/upgrade rollback and rerun idempotency.
 
-CI syntax checks are not a substitute for these VM runs. The installer publishes frontend assets
+The supported-OS gate is now isolated in `scripts/check_supported_os.sh` and covered for
+Ubuntu 22.04 rejection, Ubuntu 24.04 acceptance, Debian 12 rejection, and Debian 13 acceptance.
+CI syntax checks and this preflight test are not a substitute for the full disposable-VM runs.
+The installer publishes frontend assets
 through a staged directory and restores the previous assets if the final directory swap fails;
 CI covers publish success, incomplete build rejection, and swap-failure rollback. This does not
 replace the Ubuntu/Debian VM upgrade matrix.
@@ -116,12 +119,14 @@ replace the Ubuntu/Debian VM upgrade matrix.
 - [ ] Ensure probes and logs never expose secrets or WebSocket tickets.
 
 The app now exposes `/metrics` only when `METRICS_BEARER_TOKEN` is configured and a matching
-Bearer token is supplied. Metrics include pending outbox count/age and fresh/stale driver counts.
-Prometheus reads the token from `/etc/prometheus/secrets/vcar-metrics-token`; provision this file
-with restrictive permissions and the same random value as the app environment. Load
-`deploy/monitoring/vcar-alert-rules.yml` through Prometheus `rule_files`. Test alert delivery and
-acknowledgement in staging. The supplied scrape and alert files are templates, not an installed
-monitoring stack.
+Bearer token is supplied. Metrics include pending outbox count/age, fresh/stale driver counts,
+asyncpg pool current/idle/maximum connections, and Redis PING availability. The scrape remains
+available during a Redis outage so the Redis alert can fire. Alert rules cover metrics scrape
+failure, Redis unavailability, sustained DB pool saturation, and outbox backlog/age. CI validates
+the alert rules with Prometheus `promtool`. Prometheus reads the token from
+`/etc/prometheus/secrets/vcar-metrics-token`; provision this file with restrictive permissions
+and the same random value as the app environment. Test alert delivery and acknowledgement in
+staging. The supplied scrape and alert files are templates, not an installed monitoring stack.
 
 ## 7. Passenger / driver / admin end-to-end
 
