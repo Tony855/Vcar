@@ -77,8 +77,14 @@ while [[ "$parent" != "/" ]]; do
   parent="$(dirname "$parent")"
 done
 setfacl -R -m u:vcar:rX "$PROJECT_DIR"
-chown root:vcar .env
-chmod 640 .env
+# Keep migration-owner credentials out of the service account and its environment.
+chown root:root .env
+chmod 600 .env
+setfacl -m u:vcar:--- "$PROJECT_DIR/.env"
+grep -v '^MIGRATION_DATABASE_URL=' .env > .env.runtime
+chown root:vcar .env.runtime
+chmod 640 .env.runtime
+setfacl -m u:vcar:r-- "$PROJECT_DIR/.env.runtime"
 install -d -o vcar -g vcar -m 750 /var/lib/vcar
 install -d -o vcar -g vcar -m 750 /var/log/vcar
 
@@ -95,7 +101,7 @@ Type=simple
 User=vcar
 Group=vcar
 WorkingDirectory=$PROJECT_DIR
-EnvironmentFile=$PROJECT_DIR/.env
+EnvironmentFile=$PROJECT_DIR/.env.runtime
 Environment=PYTHONUNBUFFERED=1
 ExecStart=$PROJECT_DIR/.venv/bin/python -m app.bot_main
 Restart=on-failure
