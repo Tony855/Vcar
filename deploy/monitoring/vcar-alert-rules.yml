@@ -10,6 +10,24 @@ groups:
           summary: Vcar metrics endpoint is unreachable
           description: Prometheus has failed to scrape the authenticated Vcar metrics endpoint for more than two minutes.
 
+      - alert: VcarRedisUnavailable
+        expr: vcar_redis_available == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar Redis dependency is unavailable
+          description: Vcar metrics can still be scraped, but Redis PING has failed for more than two minutes.
+
+      - alert: VcarDatabasePoolSaturated
+        expr: vcar_database_pool_max_connections > 0 and (vcar_database_pool_connections - vcar_database_pool_idle_connections) / vcar_database_pool_max_connections > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Vcar database connection pool is near capacity
+          description: More than 85 percent of the configured database pool has been checked out for five minutes.
+
       - alert: VcarOrderOutboxBacklog
         expr: vcar_order_event_outbox_pending > 100
         for: 5m
