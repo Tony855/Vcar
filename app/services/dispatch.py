@@ -31,10 +31,12 @@ class DispatchService:
     @staticmethod
     async def go_online(driver_tid, lng, lat):
         await db.redis.geoadd("driver:online", (float(lng), float(lat), str(driver_tid)))
+        await db.redis.zadd("driver:heartbeat", {str(driver_tid): __import__("time").time()})
 
     @staticmethod
     async def go_offline(driver_tid):
         await db.redis.zrem("driver:online", str(driver_tid))
+        await db.redis.zrem("driver:heartbeat", str(driver_tid))
 
     @classmethod
     async def smart_dispatch(cls, pickup_lng, pickup_lat, top_n=3):
