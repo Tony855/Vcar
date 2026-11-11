@@ -1,8 +1,10 @@
 """Passenger Telegram WebApp session and booking API."""
 from __future__ import annotations
 
+import asyncio
+import json
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -110,3 +112,51 @@ async def passenger_order_status(
     if row is None:
         raise HTTPException(status_code=404, detail="Order not found")
     return dict(row)
+
+
+
+@router.websocket("/orders/{order_id}/stream")
+async def passenger_order_stream(websocket: WebSocket, order_id: int, token: str):
+    try:
+        claims = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+        if claims.get("role") != "passenger" or not claims.get("sub"):
+            raise ValueError("invalid role")
+    except (jwt.PyJWTError, ValueError):
+        await websocket.close(code=4401)
+        return
+
+    async with db.pool.acquire() as conn:
+        owned = await conn.fetchval(
+            """
+            SELECT id FROM orders
+            WHERE id=$1 AND customer_id=(SELECT id FROM users WHERE telegram_id=$2)
+            """,
+            order_id, int(claims["sub"]),
+        )
+    if owned is None:
+        await websocket.close(code=4403)
+        return
+
+    await websocket.accept()
+    channel = f"order:status:{order_id}"
+    pubsub = db.redis.pubsub()
+    try:
+        await pubsub.subscribe(channel)
+        async with db.pool.acquire() as conn:
+            status = await conn.fetchval("SELECT status FROM orders WHERE id=$1", order_id)
+        await websocket.send_text(json.dumps({"order_id": order_id, "status": status}))
+        if status not in ("COMPLETED", "CANCELLED"):
+            while True:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message and message.get("type") == "message":
+                    await websocket.send_text(message["data"])
+                    payload = json.loads(message["data"])
+                    if payload.get("status") in ("COMPLETED", "CANCELLED"):
+                        break
+                else:
+                    await asyncio.sleep(0.1)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await pubsub.unsubscribe(channel)
+        await pubsub.aclose()
