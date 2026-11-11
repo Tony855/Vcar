@@ -124,6 +124,9 @@ async def test_driver_location_stream_stays_available_when_redis_initial_subscri
         async def get_message(self, **kwargs):
             raise WebSocketDisconnect(code=1000)
 
+        async def unsubscribe(self, channel):
+            pass
+
         async def aclose(self):
             pass
 
