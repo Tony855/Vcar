@@ -34,7 +34,7 @@ pg_restore --list "$1" >/dev/null
 # Capture the current database immediately before a destructive restore. This
 # creates a verified rollback artifact without touching the supplied source dump.
 echo "Creating a verified pre-restore backup..."
-VCAR_ENV_FILE="$ENV_FILE" "$ROOT_DIR/scripts/backup_database.sh"
+VCAR_ENV_FILE="$ENV_FILE" bash "$ROOT_DIR/scripts/backup_database.sh"
 
 SERVICES_STOPPED=0
 restart_services() {
