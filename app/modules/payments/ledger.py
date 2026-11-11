@@ -56,7 +56,7 @@ class WalletLedger:
         async with db.pool.acquire() as conn:
             async with conn.transaction():
                 previous = await conn.fetchrow(
-                    "SELECT id, wallet_id, amount_minor, currency FROM wallet_transactions WHERE idempotency_key=$1",
+                    "SELECT t.id, t.wallet_id, t.amount_minor, t.currency, t.kind, t.order_id, w.user_id FROM wallet_transactions t JOIN wallet_accounts w ON w.id=t.wallet_id WHERE t.idempotency_key=$1",
                     idempotency_key,
                 )
                 if previous:
@@ -80,7 +80,7 @@ class WalletLedger:
                     idempotency_key,
                 )
                 if previous:
-                    if (previous["wallet_id"] != wallet["id"] or previous["amount_minor"] != amount_minor or previous["currency"] != currency.upper()):
+                    if (previous["wallet_id"] != wallet["id"] or previous["amount_minor"] != amount_minor or previous["currency"] != currency.upper() or previous["kind"] != kind or previous["order_id"] != order_id):
                         raise IdempotencyConflict("Idempotency key was already used for a different payment")
                     balance = await conn.fetchval("SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet["id"])
                     return LedgerResult(previous["id"], wallet["id"], balance, True)
