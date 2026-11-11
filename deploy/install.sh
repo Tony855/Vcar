@@ -92,9 +92,7 @@ if [[ -d web_frontend ]]; then
   npm ci --silent --registry=https://registry.npmjs.org
   NODE_OPTIONS="--max-old-space-size=1024" npm run build
   cd "$PROJECT_DIR"
-  install -d app/web/static
-  find app/web/static -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  cp -a web_frontend/dist/. app/web/static/
+  bash "$PROJECT_DIR/scripts/publish_frontend.sh" "$PROJECT_DIR/web_frontend/dist" "$PROJECT_DIR/app/web/static"
 fi
 
 echo "[6/7] Creating a restricted service identity..."

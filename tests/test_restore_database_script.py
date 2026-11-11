@@ -6,7 +6,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "restore_database.sh"
 
 
-def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False):
+def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False, fail_dump=False):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     command_log = tmp_path / "commands.log"
@@ -16,6 +16,7 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False):
     )
     (bin_dir / "pg_dump").write_text(
         "#!/usr/bin/env bash\nprintf 'pg_dump %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n"
+        "if [[ \"$FAIL_DUMP\" == 1 ]]; then exit 8; fi\n"
         "while (($#)); do if [[ \"$1\" == --file=* ]]; then "
         "printf 'pre-restore dump' > \"${1#--file=}\"; fi; shift; done\n",
         encoding="utf-8",
@@ -39,6 +40,7 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False):
         "VCAR_BACKUP_DIR": str(tmp_path / "pre-restore-backups"),
         "CONFIRM_RESTORE": confirm,
         "FAIL_RESTORE": "1" if fail_restore else "0",
+        "FAIL_DUMP": "1" if fail_dump else "0",
     }
     result = subprocess.run(
         ["bash", str(SCRIPT), str(dump)],
@@ -93,3 +95,16 @@ def test_restore_fails_closed_without_schema_owner_url(tmp_path):
     assert result.returncode == 1
     assert "missing" in result.stderr
     assert log == ""
+
+
+
+def test_restore_aborts_before_stopping_services_when_pre_restore_backup_fails(tmp_path):
+    result, log = _run_restore(
+        tmp_path,
+        env_text="MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
+        fail_dump=True,
+    )
+    assert result.returncode != 0
+    assert "pg_dump" in log
+    assert "systemctl stop vcar-bot vcar-web" not in log
+    assert "pg_restore --clean" not in log

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -15,6 +16,7 @@ from app.modules.locations.redis_projection import publish_driver_location
 from app.modules.locations.fleet import fetch_fleet_snapshot
 
 router = APIRouter(tags=["driver-location"])
+logger = logging.getLogger(__name__)
 
 
 class LocationUpdate(BaseModel):
@@ -207,11 +209,39 @@ async def admin_fleet_stream(websocket: WebSocket, ticket: str):
             snapshot = await fetch_fleet_snapshot(conn)
         await websocket.send_json({"type": "snapshot", "drivers": snapshot})
         while True:
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            try:
+                # Periodic durable reconciliation repairs missed Pub/Sub frames
+                # after Redis restarts without requiring an admin page reload.
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=15.0
+                )
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                logger.warning(
+                    "Fleet Pub/Sub unavailable; serving durable snapshot and retrying",
+                    exc_info=True,
+                )
+                async with db.pool.acquire() as conn:
+                    snapshot = await fetch_fleet_snapshot(conn)
+                await websocket.send_json({
+                    "type": "snapshot",
+                    "drivers": snapshot,
+                    "reason": "redis_recovery",
+                })
+                await asyncio.sleep(5.0)
+                continue
+
             if message and message.get("type") == "message":
                 await websocket.send_text(message["data"])
             else:
-                await asyncio.sleep(0.1)
+                async with db.pool.acquire() as conn:
+                    snapshot = await fetch_fleet_snapshot(conn)
+                await websocket.send_json({
+                    "type": "snapshot",
+                    "drivers": snapshot,
+                    "reason": "periodic_reconciliation",
+                })
     except WebSocketDisconnect:
         pass
     finally:

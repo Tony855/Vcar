@@ -14,6 +14,7 @@ from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.repositories.order_repo import OrderRepository
 from app.services.pricing import PricingService
 from app.infrastructure.osrm.client import RoutingError
+from app.modules.orders.stream import load_order_stream_bootstrap
 
 router = APIRouter(prefix="/passenger", tags=["passenger"])
 
@@ -117,7 +118,12 @@ async def passenger_order_status(
 
 
 @router.websocket("/orders/{order_id}/stream")
-async def passenger_order_stream(websocket: WebSocket, order_id: int, ticket: str):
+async def passenger_order_stream(
+    websocket: WebSocket,
+    order_id: int,
+    ticket: str,
+    last_event_id: int = 0,
+):
     claims = await consume_ws_ticket(ticket, f"passenger-order:{order_id}")
     if not claims or claims.get("role") != "passenger":
         await websocket.close(code=4401)
@@ -138,21 +144,47 @@ async def passenger_order_stream(websocket: WebSocket, order_id: int, ticket: st
     await websocket.accept()
     channel = f"order:status:{order_id}"
     pubsub = db.redis.pubsub()
+    last_sent_event_id = max(0, int(last_event_id or 0))
     try:
+        # Subscribe before replay/snapshot. Events published during the DB read
+        # remain queued; event_id filtering removes overlap with replay.
         await pubsub.subscribe(channel)
         async with db.pool.acquire() as conn:
-            status = await conn.fetchval("SELECT status FROM orders WHERE id=$1", order_id)
-        await websocket.send_text(json.dumps({"order_id": order_id, "status": status}))
-        if status not in ("COMPLETED", "CANCELLED"):
-            while True:
-                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                if message and message.get("type") == "message":
-                    await websocket.send_text(message["data"])
+            bootstrap = await load_order_stream_bootstrap(
+                conn, order_id=order_id, last_event_id=last_sent_event_id
+            )
+        if bootstrap["type"] == "replay":
+            for event in bootstrap["events"]:
+                event_id = int(event.get("event_id", 0))
+                if event_id <= last_sent_event_id:
+                    continue
+                await websocket.send_json(event)
+                last_sent_event_id = event_id
+                if event.get("status") in ("COMPLETED", "CANCELLED"):
+                    return
+        else:
+            await websocket.send_json(bootstrap)
+            last_sent_event_id = int(bootstrap["last_event_id"])
+
+        if bootstrap.get("status") in ("COMPLETED", "CANCELLED"):
+            return
+
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message and message.get("type") == "message":
+                try:
                     payload = json.loads(message["data"])
-                    if payload.get("status") in ("COMPLETED", "CANCELLED"):
-                        break
-                else:
-                    await asyncio.sleep(0.1)
+                    event_id = int(payload.get("event_id", 0))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if event_id <= last_sent_event_id:
+                    continue
+                await websocket.send_json(payload)
+                last_sent_event_id = event_id
+                if payload.get("status") in ("COMPLETED", "CANCELLED"):
+                    break
+            else:
+                await asyncio.sleep(0.1)
     except WebSocketDisconnect:
         pass
     finally:

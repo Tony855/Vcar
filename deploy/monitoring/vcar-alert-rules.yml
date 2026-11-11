@@ -1,0 +1,29 @@
+groups:
+  - name: vcar-reliability
+    rules:
+      - alert: VcarMetricsTargetDown
+        expr: up{job="vcar-app"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar metrics endpoint is unreachable
+          description: Prometheus has failed to scrape the authenticated Vcar metrics endpoint for more than two minutes.
+
+      - alert: VcarOrderOutboxBacklog
+        expr: vcar_order_event_outbox_pending > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Vcar order event outbox backlog is growing
+          description: More than 100 order status events have remained undelivered for five minutes.
+
+      - alert: VcarOrderOutboxDeliveryStalled
+        expr: vcar_order_event_outbox_oldest_age_seconds > 300
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar has an old undelivered order event
+          description: The oldest pending order event is more than five minutes old.

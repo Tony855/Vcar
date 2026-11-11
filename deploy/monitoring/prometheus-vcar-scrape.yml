@@ -17,3 +17,12 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: 127.0.0.1:9115
+
+  - job_name: vcar-app
+    metrics_path: /metrics
+    scrape_interval: 15s
+    bearer_token_file: /etc/prometheus/secrets/vcar-metrics-token
+    static_configs:
+      - targets:
+          # Replace with the private address of the Vcar web service.
+          - 127.0.0.1:8080

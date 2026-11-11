@@ -25,6 +25,9 @@ webhook secrets into this report.
 **Current repository boundary:** wallet ledger and audited admin adjustments only. No real
 provider adapter or verified ABA/Bakong settlement is claimed. Keep external payment disabled
 until all checks above pass. Never credit a wallet based only on a browser redirect or client claim.
+The current release deliberately does not invent a callback signature, merchant identity, or
+provider status mapping. Provider integration remains blocked on the official merchant contract
+and sandbox; CI cannot certify settlement correctness without those inputs.
 
 ## 2. Cambodia OSRM map and route quality
 
@@ -43,7 +46,7 @@ OSRM does not provide live traffic. Do not represent its duration as a traffic-a
 Run the authenticated load script only with separate short-lived staging driver and admin JWTs. It connects admin fleet-stream subscribers while a driver publishes GPS updates:
 ```bash
 DRIVER_TOKEN='(inject securely)' ADMIN_TOKEN='(inject securely)' python scripts/load_test_locations.py \
-  --base-url https://staging.example.invalid --connections 50 --messages 3 \
+  --base-url https://staging.example.invalid --connections 50 --messages 3 --reconnect-probes 5 \
   --json-output artifacts/gps-50.json
 ```
 Repeat at 100, 250 and 500 connections, allowing the host to recover between runs.
@@ -58,6 +61,10 @@ Acceptance thresholds must be agreed before the run; suggested starting gates:
 - no sustained CPU/RAM saturation or DB/Redis pool exhaustion;
 - no cross-account location leakage;
 - clean disconnect and reconnect behavior.
+
+The admin fleet stream periodically reconciles from PostgreSQL and falls back to a durable
+snapshot if Redis Pub/Sub fails. CI covers the Redis exception fallback; run a Redis restart
+exercise in staging and verify the browser remains populated while Redis recovers.
 
 The administrator fleet WebSocket now sends a durable PostgreSQL snapshot immediately after
 subscribing to Redis, including on reconnect. The frontend reconciles its marker set from this
@@ -75,7 +82,8 @@ connection staging runs below remain NOT RUN and are not implied by the code cha
 - [ ] Record restore duration and RPO/RTO; prove rollback before any production change.
 
 The backup script validates the custom-format archive before publishing it. A successful
-archive listing is not a full restore rehearsal.
+archive listing is not a full restore rehearsal. Restore now aborts before stopping services if
+the pre-restore backup command fails; CI covers this fail-closed path.
 
 ## 5. Installer and upgrade matrix
 
@@ -86,7 +94,10 @@ archive listing is not a full restore rehearsal.
 - [ ] Verify services start, survive reboot, restart on failure and pass readiness checks.
 - [ ] Verify failed install/upgrade rollback and rerun idempotency.
 
-CI syntax checks are not a substitute for these VM runs.
+CI syntax checks are not a substitute for these VM runs. The installer publishes frontend assets
+through a staged directory and restores the previous assets if the final directory swap fails;
+CI covers publish success, incomplete build rejection, and swap-failure rollback. This does not
+replace the Ubuntu/Debian VM upgrade matrix.
 
 ## 6. Monitoring and alerting
 
@@ -97,7 +108,13 @@ CI syntax checks are not a substitute for these VM runs.
 - [ ] Route alerts to an owned on-call destination and test delivery/acknowledgement.
 - [ ] Ensure probes and logs never expose secrets or WebSocket tickets.
 
-The supplied Blackbox target list is a configuration template, not an installed monitoring stack.
+The app now exposes `/metrics` only when `METRICS_BEARER_TOKEN` is configured and a matching
+Bearer token is supplied. Metrics include pending outbox count/age and fresh/stale driver counts.
+Prometheus reads the token from `/etc/prometheus/secrets/vcar-metrics-token`; provision this file
+with restrictive permissions and the same random value as the app environment. Load
+`deploy/monitoring/vcar-alert-rules.yml` through Prometheus `rule_files`. Test alert delivery and
+acknowledgement in staging. The supplied scrape and alert files are templates, not an installed
+monitoring stack.
 
 ## 7. Passenger / driver / admin end-to-end
 
@@ -109,6 +126,21 @@ The supplied Blackbox target list is a configuration template, not an installed 
 - [ ] Verify access control between passenger/driver/admin roles and tenant/user boundaries.
 - [ ] Verify wallet ledger history and admin audit trail; do not test real money without provider sandbox.
 - [ ] Capture redacted traces, screenshots, test IDs and pass/fail evidence.
+
+## 8. Order status event reconnect/replay
+
+- [ ] Connect a passenger to an owned order stream and record the latest processed event ID from the initial snapshot.
+- [ ] Disconnect, advance the order through multiple transitions, and reconnect with that cursor.
+- [ ] Verify events are replayed in ascending event ID order before live Pub/Sub frames.
+- [ ] Verify overlap between replay and queued Pub/Sub frames is deduplicated by event ID.
+- [ ] Verify a cursor older than 500 events receives a current-state snapshot with resync_required=true.
+- [ ] Verify a future cursor is reset to a current snapshot and cross-passenger order IDs remain denied.
+
+The server subscribes to Redis before reading the durable outbox. Clients should persist the
+latest processed event ID in session state and reconnect with the last_event_id query parameter;
+events are at-least-once at the transport boundary, so clients must deduplicate by event ID. CI covers
+ordering, bounded replay, resync, and replay/PubSub overlap. This does not yet constitute a full
+passenger UI end-to-end run.
 
 ## Sign-off
 
