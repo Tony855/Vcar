@@ -8,6 +8,11 @@ from app.infrastructure.osrm.client import OSRMClient, RoutingError
 class DispatchService:
     @staticmethod
     async def get_nearby_drivers(lng, lat, radius_km=20):
+        now = __import__("time").time()
+        expired = await db.redis.zrangebyscore("driver:heartbeat", "-inf", now - 120)
+        if expired:
+            await db.redis.zrem("driver:heartbeat", *expired)
+            await db.redis.zrem("driver:online", *expired)
         return await db.redis.geosearch(
             "driver:online",
             longitude=float(lng),
