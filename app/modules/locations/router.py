@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -12,7 +13,9 @@ from app.core.security import verify_driver_token
 from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.core import db
 from app.modules.locations.gps import is_newer_sample
+from app.modules.locations.redis_projection import publish_driver_location
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["driver-location"])
 
 
@@ -85,9 +88,6 @@ async def update_driver_location(
                 active_order, driver["id"], point, payload.accuracy_m, recorded_at,
             )
 
-    await db.redis.geoadd("driver:online", (payload.longitude, payload.latitude, str(telegram_id)))
-    await db.redis.zadd("driver:heartbeat", {str(telegram_id): now.timestamp()})
-    await db.redis.zremrangebyscore("driver:heartbeat", "-inf", now.timestamp() - 120)
     event = {
         "telegram_id": telegram_id,
         "latitude": payload.latitude,
@@ -97,9 +97,19 @@ async def update_driver_location(
         "speed_mps": payload.speed_mps,
         "recorded_at": recorded_at.isoformat(),
     }
-    await db.redis.publish(f"driver:location:{telegram_id}", json.dumps(event))
-    await db.redis.publish("fleet:locations", json.dumps(event))
-    return {"accepted": True, "recorded_at": recorded_at.isoformat()}
+    realtime_published = await publish_driver_location(
+        db.redis,
+        telegram_id=telegram_id,
+        longitude=payload.longitude,
+        latitude=payload.latitude,
+        heartbeat_at=now.timestamp(),
+        event=event,
+    )
+    return {
+        "accepted": True,
+        "recorded_at": recorded_at.isoformat(),
+        "realtime_published": realtime_published,
+    }
 
 
 @router.websocket("/driver/location/stream")
