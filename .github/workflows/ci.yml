@@ -55,6 +55,8 @@ jobs:
         run: |
           OWNER_BOOTSTRAP_URL="$DATABASE_URL"
           python deploy/bootstrap_env.py --env-file /tmp/vcar-ci.env --write-role-sql /tmp/vcar-ci-roles.sql
+          grep -v '^MIGRATION_DATABASE_URL=' /tmp/vcar-ci.env > /tmp/vcar-ci.runtime.env
+          ! grep -q '^MIGRATION_DATABASE_URL=' /tmp/vcar-ci.runtime.env
           set -a
           . /tmp/vcar-ci.env
           set +a
