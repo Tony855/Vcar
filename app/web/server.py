@@ -1,9 +1,10 @@
 import asyncio
 import os
+import secrets
 import sys
 from datetime import datetime, timezone
 import aiohttp
-from fastapi import FastAPI, Depends, HTTPException, Response, Query
+from fastapi import FastAPI, Depends, HTTPException, Response, Query, Header
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -252,6 +253,58 @@ async def get_live_fleet():
           (datetime.now(timezone.utc) - row["received_at"]).total_seconds() <= 120)}
         for row in rows
     ]
+
+
+@app.get("/metrics")
+async def prometheus_metrics(authorization: str | None = Header(default=None)):
+    """Private Prometheus metrics; disabled unless a dedicated token is configured."""
+    expected = settings.metrics_bearer_token
+    if not expected:
+        raise HTTPException(status_code=404, detail="Metrics endpoint is disabled")
+    supplied = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        supplied = authorization[7:].strip()
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Metrics authentication required")
+
+    async with db.pool.acquire() as connection:
+        pending_outbox = await connection.fetchval(
+            "SELECT COUNT(*) FROM order_event_outbox WHERE delivered_at IS NULL"
+        )
+        oldest_outbox_age = await connection.fetchval(
+            """
+            SELECT COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)
+            FROM order_event_outbox WHERE delivered_at IS NULL
+            """
+        )
+        fresh_drivers = await connection.fetchval(
+            "SELECT COUNT(*) FROM driver_locations WHERE received_at >= now() - interval '120 seconds'"
+        )
+        stale_drivers = await connection.fetchval(
+            """
+            SELECT COUNT(*) FROM users u
+            LEFT JOIN driver_locations l ON l.driver_id=u.id
+            WHERE u.driver_status='APPROVED'
+              AND (l.received_at IS NULL OR l.received_at < now() - interval '120 seconds')
+            """
+        )
+
+    body = "\\n".join([
+        "# HELP vcar_order_event_outbox_pending Undelivered order status events.",
+        "# TYPE vcar_order_event_outbox_pending gauge",
+        f"vcar_order_event_outbox_pending {int(pending_outbox or 0)}",
+        "# HELP vcar_order_event_outbox_oldest_age_seconds Age of the oldest undelivered order event.",
+        "# TYPE vcar_order_event_outbox_oldest_age_seconds gauge",
+        f"vcar_order_event_outbox_oldest_age_seconds {float(oldest_outbox_age or 0):.3f}",
+        "# HELP vcar_driver_locations_fresh Approved drivers with a GPS sample received in the last 120 seconds.",
+        "# TYPE vcar_driver_locations_fresh gauge",
+        f"vcar_driver_locations_fresh {int(fresh_drivers or 0)}",
+        "# HELP vcar_driver_locations_stale Approved drivers without a GPS sample received in the last 120 seconds.",
+        "# TYPE vcar_driver_locations_stale gauge",
+        f"vcar_driver_locations_stale {int(stale_drivers or 0)}",
+        "",
+    ])
+    return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @app.get("/health/live")
