@@ -32,7 +32,7 @@ chmod 600 .env
 echo "[3/7] Provisioning the local database without a repository default password..."
 su - postgres -c "psql -v ON_ERROR_STOP=1 -v db_password='$DB_PASSWORD' <<'SQL'
 SELECT format('CREATE ROLE vcar LOGIN PASSWORD %L', :'db_password')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='vcar') \\gexec
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='vcar') \gexec
 ALTER ROLE vcar LOGIN PASSWORD :'db_password';
 SQL"
 su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='vcar'\"" | grep -q 1 || su - postgres -c "createdb -O vcar vcar"
