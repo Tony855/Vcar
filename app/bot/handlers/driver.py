@@ -229,7 +229,7 @@ async def handle_driver_location(msg: Message, passenger_bot):
 
     # 2. 如果状态是已接单(ACCEPTED)，说明司机刚到，发“开始”按钮
     if active['status'] == 'ACCEPTED':
-        if await OrderRepository.update_status(active['id'], OrderStatus.ARRIVED.value, OrderStatus.ACCEPTED.value):
+        if await OrderRepository.update_status(active['id'], OrderStatus.ARRIVED.value, OrderStatus.ACCEPTED.value, actor_user_id=user['id'], actor_role='DRIVER'):
             # 强制清理底部长条键盘
             await msg.answer(t("driver.arrived_success", user), reply_markup=ReplyKeyboardRemove())
             
@@ -244,7 +244,7 @@ async def handle_driver_location(msg: Message, passenger_bot):
 async def start(call: CallbackQuery, passenger_bot):
     user = await UserRepository.get_or_create(call.from_user.id)
     oid = int(call.data.split(':')[1])
-    if await OrderRepository.update_status(oid, OrderStatus.IN_PROGRESS.value, OrderStatus.ARRIVED.value):
+    if await OrderRepository.update_status(oid, OrderStatus.IN_PROGRESS.value, OrderStatus.ARRIVED.value, actor_user_id=user['id'], actor_role='DRIVER'):
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t('driver.finish_btn', user), callback_data=f"fin:{oid}")]])
         await call.message.edit_text(t('driver.start_msg', user), reply_markup=kb)
         order = await OrderRepository.get(oid)
@@ -256,7 +256,7 @@ async def start(call: CallbackQuery, passenger_bot):
 async def finish(call: CallbackQuery, passenger_bot):
     user = await UserRepository.get_or_create(call.from_user.id)
     oid = int(call.data.split(':')[1])
-    if await OrderRepository.update_status(oid, OrderStatus.COMPLETED.value, OrderStatus.IN_PROGRESS.value):
+    if await OrderRepository.update_status(oid, OrderStatus.COMPLETED.value, OrderStatus.IN_PROGRESS.value, actor_user_id=user['id'], actor_role='DRIVER'):
         await call.message.edit_text(t('driver.finish_msg', user, order_id=oid))
         order = await OrderRepository.get(oid)
         if order and order.get('c_tg'):
