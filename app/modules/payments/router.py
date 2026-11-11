@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import jwt
 from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import settings
 from app.db.core import db
@@ -35,9 +35,16 @@ class WalletOpenRequest(BaseModel):
 class AdminAdjustment(BaseModel):
     user_id: int = Field(gt=0)
     currency: str = Field(pattern="^(USD|KHR)$")
-    amount_minor: int = Field(ne=0)
+    amount_minor: int
     reason: str = Field(min_length=8, max_length=300)
     idempotency_key: str = Field(min_length=12, max_length=128)
+
+    @field_validator("amount_minor")
+    @classmethod
+    def amount_must_not_be_zero(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("amount_minor must not be zero")
+        return value
 
 
 @router.post("/me", status_code=200)
