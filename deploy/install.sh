@@ -36,6 +36,7 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='vcar') \gexec
 ALTER ROLE vcar LOGIN PASSWORD :'db_password';
 SQL"
 su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='vcar'\"" | grep -q 1 || su - postgres -c "createdb -O vcar vcar"
+su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -c \"CREATE EXTENSION IF NOT EXISTS postgis\""
 
 echo "[4/7] Installing Python dependencies and applying migrations..."
 python3 -m venv .venv
