@@ -37,6 +37,11 @@ let pickupMarker
 let dropoffMarker
 let pollTimer
 let orderSocket
+let lastOrderEventId = 0
+let reconnectTimer
+let reconnectAttempts = 0
+let connectingOrderSocket = false
+let orderStreamStopped = false
 
 const coords = point => `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`
 function setMarker(point, type) {
@@ -87,26 +92,72 @@ async function book() {
     error.value = err.response?.data?.detail || '下单失败，请检查路线服务或稍后重试'
   } finally { submitting.value = false }
 }
+function stopOrderStream() {
+  orderStreamStopped = true
+  if (reconnectTimer) {
+    window.clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
+  if (orderSocket && orderSocket.readyState < WebSocket.CLOSING) orderSocket.close()
+}
+
+function scheduleOrderReconnect() {
+  if (orderStreamStopped || reconnectTimer || !order.value) return
+  if (['COMPLETED', 'CANCELLED'].includes(order.value.status)) return
+  const delay = Math.min(30000, 1000 * (2 ** Math.min(reconnectAttempts, 5)))
+  reconnectAttempts += 1
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = undefined
+    connectOrderStream()
+  }, delay)
+}
+
 async function connectOrderStream() {
-  if (!order.value || !token.value) return
+  if (!order.value || !token.value || connectingOrderSocket || orderStreamStopped) return
+  connectingOrderSocket = true
   try {
     const response = await axios.post('/api/ws-ticket', {
       scope: `passenger-order:${order.value.order_id}`
     }, { headers: { Authorization: `Bearer ${token.value}` } })
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    orderSocket = new WebSocket(`${protocol}//${location.host}/api/passenger/orders/${order.value.order_id}/stream?ticket=${encodeURIComponent(response.data.ticket)}`)
-    orderSocket.onmessage = event => {
+    const cursor = lastOrderEventId > 0 ? `&last_event_id=${lastOrderEventId}` : ''
+    const socket = new WebSocket(`${protocol}//${location.host}/api/passenger/orders/${order.value.order_id}/stream?ticket=${encodeURIComponent(response.data.ticket)}${cursor}`)
+    orderSocket = socket
+    socket.onopen = () => { reconnectAttempts = 0 }
+    socket.onmessage = event => {
       try {
-        order.value = { ...order.value, ...JSON.parse(event.data) }
-        if (['COMPLETED', 'CANCELLED'].includes(order.value.status) && pollTimer) {
-          window.clearInterval(pollTimer)
-          pollTimer = undefined
-          orderSocket.close()
+        const payload = JSON.parse(event.data)
+        if (payload.type === 'snapshot') {
+          const snapshotEventId = Number(payload.last_event_id || 0)
+          if (snapshotEventId >= lastOrderEventId) {
+            lastOrderEventId = snapshotEventId
+            order.value = { ...order.value, status: payload.status }
+          }
+        } else {
+          const eventId = Number(payload.event_id || 0)
+          if (eventId && eventId <= lastOrderEventId) return
+          if (eventId) lastOrderEventId = eventId
+          order.value = { ...order.value, ...payload }
         }
-      } catch { /* Keep polling if a stream frame is malformed. */ }
+        if (['COMPLETED', 'CANCELLED'].includes(order.value.status)) {
+          if (pollTimer) {
+            window.clearInterval(pollTimer)
+            pollTimer = undefined
+          }
+          stopOrderStream()
+        }
+      } catch { /* Keep polling and reconnecting if a stream frame is malformed. */ }
+    }
+    socket.onerror = () => socket.close()
+    socket.onclose = () => {
+      if (orderSocket === socket) orderSocket = undefined
+      scheduleOrderReconnect()
     }
   } catch {
-    // Polling remains active when Redis or the ticket service is unavailable.
+    // Polling remains active while ticket or Redis services recover.
+    scheduleOrderReconnect()
+  } finally {
+    connectingOrderSocket = false
   }
 }
 
@@ -118,8 +169,9 @@ async function refreshOrder() {
     })
     order.value = { ...order.value, ...response.data }
     if (['COMPLETED', 'CANCELLED'].includes(order.value.status)) {
-      window.clearInterval(pollTimer)
+      if (pollTimer) window.clearInterval(pollTimer)
       pollTimer = undefined
+      stopOrderStream()
     }
   } catch (err) {
     if (err.response?.status === 401 || err.response?.status === 404) {
@@ -143,7 +195,7 @@ onMounted(async () => {
   })
   await authenticate()
 })
-onUnmounted(() => { if (pollTimer) window.clearInterval(pollTimer); if (orderSocket) orderSocket.close(); if (map) map.remove() })
+onUnmounted(() => { if (pollTimer) window.clearInterval(pollTimer); stopOrderStream(); if (map) map.remove() })
 </script>
 
 <style scoped>
