@@ -28,6 +28,7 @@ async def run(args: argparse.Namespace) -> int:
     headers = {"Authorization": f"Bearer {token}"}
     sockets: list[aiohttp.ClientWebSocketResponse] = []
     failures = 0
+    batch_latencies: list[float] = []
     started = time.monotonic()
 
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
@@ -81,12 +82,23 @@ async def run(args: argparse.Namespace) -> int:
                 except Exception:
                     failures += 1
 
+            fanout_started = time.monotonic()
             await asyncio.gather(*(receive_one(ws) for ws in sockets))
+            batch_latencies.append((time.monotonic() - fanout_started) * 1000)
 
         elapsed = time.monotonic() - started
+        ordered = sorted(batch_latencies)
+        def percentile(value: float) -> float:
+            if not ordered:
+                return 0.0
+            index = min(len(ordered) - 1, max(0, int((len(ordered) - 1) * value + 0.999)))
+            return ordered[index]
         print(
-            f"connections={len(sockets)} messages={args.messages} "
-            f"received_frames={received} failures={failures} elapsed_seconds={elapsed:.2f}"
+            f"connections={len(sockets)} requested_connections={args.connections} "
+            f"messages={args.messages} received_frames={received} failures={failures} "
+            f"fanout_ms_p50={percentile(0.50):.1f} "
+            f"fanout_ms_p95={percentile(0.95):.1f} "
+            f"fanout_ms_p99={percentile(0.99):.1f} elapsed_seconds={elapsed:.2f}"
         )
         for ws in sockets:
             await ws.close()
