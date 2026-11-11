@@ -32,6 +32,8 @@ const markers = new Map()
 function upsertDriver(driver) {
   if (!driver || !driver.telegram_id || !Number.isFinite(Number(driver.latitude)) || !Number.isFinite(Number(driver.longitude))) return
   const id = String(driver.telegram_id)
+  const existingIndex = drivers.value.findIndex(x => String(x.telegram_id) === id)
+  if (existingIndex >= 0) driver = { ...drivers.value[existingIndex], ...driver }
   const point = [Number(driver.latitude), Number(driver.longitude)]
   const color = driver.online ? '#16a34a' : '#94a3b8'
   let marker = markers.get(id)
@@ -42,8 +44,7 @@ function upsertDriver(driver) {
     marker.setLatLng(point).setStyle({ color, fillColor: color })
   }
   marker.bindPopup(`司机 ${id}<br>${driver.first_name || ''}<br>${driver.plate_number || '未登记车牌'}<br>${driver.online ? '在线' : '离线'}`)
-  const index = drivers.value.findIndex(x => String(x.telegram_id) === id)
-  if (index >= 0) drivers.value[index] = { ...drivers.value[index], ...driver }
+  if (existingIndex >= 0) drivers.value[existingIndex] = driver
   else drivers.value.push(driver)
 }
 
