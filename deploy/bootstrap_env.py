@@ -11,6 +11,7 @@ from urllib.parse import quote, unquote, urlsplit
 parser = argparse.ArgumentParser()
 parser.add_argument("--env-file", default=".env")
 parser.add_argument("--print-db-password", action="store_true")
+parser.add_argument("--write-role-sql")
 args = parser.parse_args()
 path = Path(args.env_file)
 values: dict[str, str] = {}
@@ -57,5 +58,9 @@ for key, value in updates.items():
         out.append(f"{key}={value}")
 path.write_text("\n".join(out).rstrip() + "\n")
 os.chmod(path, 0o600)
+if args.write_role_sql:
+    sql_path = Path(args.write_role_sql)
+    sql_path.write_text("ALTER ROLE vcar LOGIN PASSWORD '" + password.replace("'", "''") + "';\\n")
+    os.chmod(sql_path, 0o600)
 if args.print_db_password:
     print(password)
