@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ sys.path.append(BASE_DIR)
 
 from app.core.config import settings
 from app.db.core import db
+from app.services.order_event_outbox import run_order_event_outbox_worker
 from app.core.security import verify_token, verify_driver_token, create_access_token, verify_password
 from app.modules.routing.router import router as routing_router
 from app.modules.auth.router import router as auth_router
@@ -23,6 +25,8 @@ from app.modules.passengers.router import router as passengers_router
 from app.modules.payments.router import router as wallet_router
 
 app = FastAPI()
+_outbox_stop_event = None
+_outbox_worker_task = None
 app.include_router(routing_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api")
 app.include_router(ws_auth_router, prefix="/api")
@@ -43,11 +47,27 @@ class ReviewData(BaseModel): tg_id: int; status: str
 
 @app.on_event("startup")
 async def startup():
+    global _outbox_stop_event, _outbox_worker_task
     await db.init()
+    _outbox_stop_event = asyncio.Event()
+    _outbox_worker_task = asyncio.create_task(
+        run_order_event_outbox_worker(
+            _outbox_stop_event,
+            poll_interval=settings.order_event_outbox_poll_interval,
+        ),
+        name="order-event-outbox-worker",
+    )
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    global _outbox_stop_event, _outbox_worker_task
+    if _outbox_stop_event is not None:
+        _outbox_stop_event.set()
+    if _outbox_worker_task is not None:
+        await _outbox_worker_task
+        _outbox_worker_task = None
+    _outbox_stop_event = None
     await db.close()
 
 # 挂载静态文件
