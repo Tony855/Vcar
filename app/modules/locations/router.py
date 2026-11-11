@@ -95,6 +95,7 @@ async def update_driver_location(
         "recorded_at": recorded_at.isoformat(),
     }
     await db.redis.publish(f"driver:location:{telegram_id}", json.dumps(event))
+    await db.redis.publish("fleet:locations", json.dumps(event))
     return {"accepted": True, "recorded_at": recorded_at.isoformat()}
 
 
@@ -163,3 +164,32 @@ async def driver_navigation_match(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RoutingError as exc:
         raise HTTPException(status_code=503, detail="Navigation matching unavailable") from exc
+
+
+
+@router.websocket("/admin/fleet/stream")
+async def admin_fleet_stream(websocket: WebSocket, token: str):
+    """Authenticated admin-only fleet stream; use a short-lived token."""
+    try:
+        claims = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+        if claims.get("role") != "admin" or not claims.get("sub"):
+            raise ValueError("invalid role")
+    except (jwt.PyJWTError, ValueError):
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    pubsub = db.redis.pubsub()
+    try:
+        await pubsub.subscribe("fleet:locations")
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message and message.get("type") == "message":
+                await websocket.send_text(message["data"])
+            else:
+                await asyncio.sleep(0.1)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await pubsub.unsubscribe("fleet:locations")
+        await pubsub.aclose()
