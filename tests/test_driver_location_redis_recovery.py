@@ -97,7 +97,7 @@ async def test_driver_location_stream_stays_available_when_redis_initial_subscri
 
     from app.modules.locations import router as locations_router
 
-    calls = {"pubsubs": 0, "reads": 0}
+    calls = {"pubsubs": 0, "reads": 0, "subscriptions": 0}
 
     class Connection:
         async def fetchrow(self, query, telegram_id):
@@ -117,7 +117,12 @@ async def test_driver_location_stream_stays_available_when_redis_initial_subscri
 
     class PubSub:
         async def subscribe(self, channel):
-            raise ConnectionError("redis unavailable")
+            calls["subscriptions"] += 1
+            if calls["subscriptions"] == 1:
+                raise ConnectionError("redis unavailable")
+
+        async def get_message(self, **kwargs):
+            raise WebSocketDisconnect(code=1000)
 
         async def aclose(self):
             pass
@@ -140,16 +145,17 @@ async def test_driver_location_stream_stays_available_when_redis_initial_subscri
     async def valid_ticket(ticket, scope):
         return {"role": "driver", "sub": "12345"}
 
-    async def stop_after_first_recovery(*_args):
-        raise WebSocketDisconnect(code=1000)
+    async def no_sleep(*_args):
+        return None
 
     websocket = WebSocket()
     monkeypatch.setattr(locations_router, "consume_ws_ticket", valid_ticket)
     monkeypatch.setattr(locations_router.db, "pool", Pool())
     monkeypatch.setattr(locations_router.db, "redis", Redis())
-    monkeypatch.setattr(locations_router.asyncio, "sleep", stop_after_first_recovery)
+    monkeypatch.setattr(locations_router.asyncio, "sleep", no_sleep)
 
     await locations_router.driver_location_stream(websocket, "single-use")
 
     assert calls["pubsubs"] == 2
+    assert calls["subscriptions"] == 2
     assert calls["reads"] == 2
