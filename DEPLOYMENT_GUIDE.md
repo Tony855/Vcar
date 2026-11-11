@@ -87,7 +87,7 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 
 - `GET /health/live` 是进程存活检查；`GET /health/ready` 同时检查 PostgreSQL、PostGIS 和 Redis。
 - 数据库备份：`bash scripts/backup_database.sh`。脚本验证 dump 可读后才原子移动为正式备份，默认保留 14 天。
-- 数据库恢复：先验证备份文件，再执行 `CONFIRM_RESTORE=YES bash scripts/restore_database.sh /path/to/vcar-backup.dump`。恢复会停止 Bot/Web 服务并覆盖数据库对象，必须先另做当前库备份。
+- 数据库恢复：先验证备份文件并另做当前库备份，再执行 `CONFIRM_RESTORE=YES bash scripts/restore_database.sh /path/to/vcar-backup.dump`。恢复会停止 Bot/Web 服务并覆盖数据库对象；脚本使用仅保存在 root 保护环境文件中的 `MIGRATION_DATABASE_URL`（旧版未拆分凭据时才回退到 `DATABASE_URL`），不会使用受限的 `vcar_app` 运行账号。恢复失败时脚本仍会尝试重新启动服务，但必须人工检查数据库状态和健康检查。
 - 以上脚本只备份 PostgreSQL 数据；媒体文件、上传目录、OSRM 地图数据和服务器密钥需要单独纳入主机级备份策略。
 
 
