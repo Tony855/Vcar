@@ -29,7 +29,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
+import { createDriverApi } from './api/driver'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,9 +40,12 @@ const goBack = () => router.push(`/mini/${tgId}`)
 
 onMounted(async () => {
   try {
-    const res = await axios.get(`/api/driver/${tgId}/profile`)
-    info.value = res.data
-  } catch (e) { console.error(e) }
+    const { api, tgId: authenticatedTgId } = await createDriverApi(tgId)
+    const response = await api.get(`/driver/${authenticatedTgId}/profile`)
+    info.value = response.data
+  } catch (error) {
+    console.error('Driver account authentication/load failed:', error)
+  }
 })
 </script>
 
