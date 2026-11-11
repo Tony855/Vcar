@@ -61,3 +61,22 @@ def test_fleet_event_validation_rejects_non_location_frames():
     assert is_fleet_location_event(json.dumps(event))
     assert not is_fleet_location_event('{"type":"ready"}')
     assert not is_fleet_location_event("not-json")
+
+
+def test_build_report_includes_initial_and_reconnect_snapshot_rates():
+    report = build_report(
+        requested_connections=20,
+        connected=20,
+        messages_sent=2,
+        frames_received=40,
+        connect_latencies_ms=[10],
+        fanout_latencies_ms=[5],
+        failures=0,
+        elapsed_seconds=2,
+        initial_snapshot_attempts=20,
+        initial_snapshots=19,
+        reconnect_attempts=5,
+        reconnect_snapshots=5,
+    )
+    assert report["initial_snapshot_rate"] == 0.95
+    assert report["reconnect_snapshot_rate"] == 1.0
