@@ -23,7 +23,7 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False, fail_
     )
     (bin_dir / "pg_restore").write_text(
         "#!/usr/bin/env bash\nprintf 'pg_restore %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n"
-        "if [[ \"$1\" == --list ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == --list ]]; then exit \"$FAIL_LIST\"; fi\n"
         "if [[ \"$FAIL_RESTORE\" == 1 ]]; then exit 9; fi\n",
         encoding="utf-8",
     )
@@ -41,6 +41,7 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False, fail_
         "CONFIRM_RESTORE": confirm,
         "FAIL_RESTORE": "1" if fail_restore else "0",
         "FAIL_DUMP": "1" if fail_dump else "0",
+        "FAIL_LIST": "7" if fail_list else "0",
         "FAIL_LIST": "7" if fail_list else "0",
     }
     result = subprocess.run(
@@ -115,7 +116,7 @@ def test_restore_aborts_before_stopping_services_when_pre_restore_backup_fails(t
 def test_restore_rejects_invalid_archive_before_backup_or_service_stop(tmp_path):
     result, log = _run_restore(
         tmp_path,
-        env_text="MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\\n",
+        env_text="MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
         fail_list=True,
     )
     assert result.returncode == 7
