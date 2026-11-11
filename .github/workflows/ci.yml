@@ -42,6 +42,7 @@ jobs:
       - run: docker run --rm --network host -v "$GITHUB_WORKSPACE:/workspace" -w /workspace postgis/postgis:16-3.4 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f app/db/schema.sql
       - run: alembic upgrade head
       - run: test "$(docker run --rm --network host postgis/postgis:16-3.4 psql "$DATABASE_URL" -Atc "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_name IN ('driver_locations','trip_tracks','wallet_accounts','wallet_transactions')) = 4 AND EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis')")" = "t"
+      - run: alembic downgrade 20261111_0001 && alembic upgrade head
       - run: pytest -q
 
   frontend:
