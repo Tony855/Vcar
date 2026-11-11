@@ -26,7 +26,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
+import { createDriverApi } from './api/driver'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,9 +34,7 @@ const tgId = route.params.tg_id
 const orders = ref([])
 const loading = ref(true)
 
-const goBack = () => {
-  router.push(`/mini/${tgId}`)
-}
+const goBack = () => router.push(`/mini/${tgId}`)
 
 const getStatusClass = (status) => {
   if (status === 'COMPLETED') return 'status-success'
@@ -45,17 +43,13 @@ const getStatusClass = (status) => {
   return 'status-default'
 }
 
-const formatTime = (timeStr) => {
-  if (!timeStr) return '未知时间'
-  return timeStr.substring(0, 16).replace('T', ' ')
-}
-
 onMounted(async () => {
   try {
-    const res = await axios.get(`/api/driver/${tgId}/orders`)
-    orders.value = res.data
-  } catch (e) {
-    console.error(e)
+    const { api, tgId: authenticatedTgId } = await createDriverApi(tgId)
+    const response = await api.get(`/driver/${authenticatedTgId}/orders`)
+    orders.value = response.data
+  } catch (error) {
+    console.error('Driver orders authentication/load failed:', error)
   } finally {
     loading.value = false
   }
