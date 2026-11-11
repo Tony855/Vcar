@@ -95,7 +95,7 @@ async def admin_wallet_adjustment(
     request: AdminAdjustment,
     authorization: str | None = Header(default=None),
 ):
-    _claims(authorization, {"admin"})
+    claims = _claims(authorization, {"admin"})
     try:
         result = await WalletLedger.post(
             user_id=request.user_id,
@@ -103,7 +103,11 @@ async def admin_wallet_adjustment(
             amount_minor=request.amount_minor,
             kind="ADMIN_ADJUSTMENT",
             idempotency_key=request.idempotency_key,
-            metadata={"reason": request.reason, "source": "admin"},
+            metadata={
+                "reason": request.reason,
+                "source": "admin",
+                "admin_subject": str(claims["sub"]),
+            },
         )
     except InsufficientFunds as exc:
         raise HTTPException(status_code=409, detail="Wallet balance cannot become negative") from exc
