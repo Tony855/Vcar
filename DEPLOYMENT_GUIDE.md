@@ -68,7 +68,7 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - 新迁移 `20261112_0002` 安装 PostGIS 扩展，并创建 `driver_locations`、`trip_tracks`、钱包和交易账本表。
 - 安装器会以 PostgreSQL 管理员身份启用 PostGIS；应用数据库账号仍为普通权限账号。
 - 司机使用 Telegram WebApp 换取的短期 JWT 调用 `POST /api/v1/driver/location`。采样必须包含时区，坐标、精度、方向、速度和时间范围均会校验。
-- 司机位置通过 Redis Pub/Sub 推送到 `/api/v1/driver/location/stream`。浏览器 WebSocket 目前通过短期 JWT query 参数认证；反向代理必须对该路径关闭 query-string 访问日志，避免记录令牌。
+- 司机位置通过 Redis Pub/Sub 推送到 `/api/v1/driver/location/stream`。浏览器先通过 HTTPS `POST /api/ws-ticket` 使用 Authorization 头换取 30 秒单次 ticket，再以 ticket 建立 WebSocket；不得将可复用 JWT 放入 URL。反向代理仍应脱敏 query string，避免记录短期 ticket。
 - 管理后台可通过 `GET /api/admin/fleet` 获取司机位置和 120 秒在线判定。派单会清理超时心跳，避免长期离线司机继续进入候选集。
 
 ### 乘客预约与司机导航
@@ -130,3 +130,41 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 
 
 - The installer keeps the full `.env` (including `MIGRATION_DATABASE_URL`) as `root:root 0600`. It generates `.env.runtime` without the migration URL and points systemd services only at that sanitized file. ACLs explicitly deny the `vcar` service user access to the owner credential file.
+
+
+## Staging 批量验收（本阶段）
+
+### 1. 支付安全边界
+- 当前钱包只提供整数最小货币单位的账本和管理员调账，不含 ABA/Bakong provider，不允许自行猜测签名算法、回调字段或结算规则。
+- 接入真实渠道前，必须取得官方商户 API 文档、签名/验签规范、沙箱商户号与密钥、回调重试规则、退款/冲正规则及结算对账文件。
+- 管理员调账会记录操作者 subject、原因和幂等键；生产调账仍须双人复核和审计留痕。
+
+### 2. OSRM 地图验收
+- 下载并预处理地图后，使用 staging 内部地址运行：
+  `OSRM_BASE_URL=http://127.0.0.1:5000 python scripts/smoke_osrm.py --origin 104.9282,11.5564 --destination 104.9500,11.5700`
+- 可将 origin/destination 替换为实际验收路线的经纬度（longitude,latitude）。Nearest、Route、Table、Match 四项必须全部返回 `code=Ok`；还需人工核对路线是否可通行、是否跨河/断路以及 ETA 是否合理。
+- 地图 PBF 版本、下载日期、OSRM 镜像版本和预处理参数必须记录在验收报告中。
+
+### 3. GPS/WebSocket 阶梯压测
+- 仅在隔离 staging 环境使用已批准的测试司机账号和短期 JWT。先执行 50，再执行 100、250、500：
+  `VCAR_BASE_URL=https://staging.example DRIVER_TOKEN='短期测试令牌' python scripts/load_test_locations.py --connections 50 --messages 3`
+- 每一级记录连接成功率、接收帧数、fan-out p50/p95/p99、CPU、内存、Redis clients/memory、PostgreSQL connections、事件循环延迟和反向代理连接数。
+- 500 连接未实际执行并保存指标前，不得标记为通过；禁止对生产环境运行压测。
+
+### 4. 数据库备份/恢复演练
+- 备份使用 `MIGRATION_DATABASE_URL` schema owner 凭据（旧安装才回退到 `DATABASE_URL`），运行时 `vcar_app` 不应承担完整 schema dump。
+- 在隔离 staging DB 执行备份，验证 `pg_restore --list`，恢复到空白数据库副本，检查 Alembic head、核心表行数、PostGIS、钱包账本与订单记录，再执行业务 smoke test。
+- 不对生产库执行恢复；生产恢复必须另行授权和变更审批。
+
+### 5. 安装器兼容性
+- 安装器仅接受 Ubuntu 24.04+ 和 Debian 13+，并在安装后检查 Python 3.12–3.14 与 Node.js 26。
+- 每个发行版都应在干净 VM 执行安装、systemd unit 校验、`bash scripts/healthcheck.sh`、升级和卸载/回滚演练；CI shell syntax 不等于真实 VM 安装通过。
+
+### 6. 健康检查与监控
+- 本机探针：`bash scripts/healthcheck.sh`；可通过 `VCAR_HEALTH_BASE_URL` 指向 staging。
+- 监控应分别采集 liveness/readiness、Bot/Web 服务重启次数、HTTP 5xx、WebSocket 活跃连接/断开、GPS 更新延迟、Redis 可用性、PostgreSQL pool 使用率和 OSRM 请求错误率。
+- 建议告警起点：readiness 连续 3 次失败、HTTP 5xx 5 分钟超过 5%、WebSocket fan-out p95 超过 2 秒、Redis/PostgreSQL 连接池耗尽。阈值应按 staging 基线校准，不应直接视为已部署告警。
+
+### 7. 端到端验收
+- 使用独立测试乘客、司机、管理员账号完成：乘客登录/选点/下单、司机接单/GPS/导航、管理员车队实时位置、订单状态推送、钱包只读流水和管理员调账审计。
+- 记录每一步请求 ID、结果、耗时和失败截图；真实支付流程在官方 provider 和沙箱验收完成前保持关闭。

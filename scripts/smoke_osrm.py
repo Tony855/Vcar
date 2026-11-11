@@ -1,6 +1,11 @@
-"""Smoke-test the OSRM Route, Table, Match and Nearest HTTP endpoints."""
+"""Smoke-test OSRM Route, Table, Match and Nearest endpoints.
+
+Use staging coordinates explicitly when validating a downloaded regional map:
+  python scripts/smoke_osrm.py --origin 104.9282,11.5564 --destination 104.9500,11.5700
+"""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -8,27 +13,56 @@ import urllib.error
 import urllib.request
 
 BASE = os.getenv("OSRM_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
-CHECKS = {
-    "nearest": "/nearest/v1/driving/104.9282,11.5564?number=1",
-    "route": "/route/v1/driving/104.9282,11.5564;104.9340,11.5620?overview=false",
-    "table": "/table/v1/driving/104.9282,11.5564;104.9340,11.5620",
-    "match": "/match/v1/driving/104.9282,11.5564;104.9340,11.5620?overview=false",
-}
+DEFAULT_ORIGIN = "104.9282,11.5564"
+DEFAULT_DESTINATION = "104.9340,11.5620"
 
 
-def main() -> int:
+def parse_coordinate(value: str) -> tuple[float, float]:
+    try:
+        lon_text, lat_text = value.split(",", 1)
+        lon, lat = float(lon_text), float(lat_text)
+    except (ValueError, AttributeError) as exc:
+        raise argparse.ArgumentTypeError("coordinate must be longitude,latitude") from exc
+    if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+        raise argparse.ArgumentTypeError("coordinate is outside longitude/latitude bounds")
+    return lon, lat
+
+
+def build_checks(origin: tuple[float, float], destination: tuple[float, float]) -> dict[str, str]:
+    first = f"{origin[0]:.6f},{origin[1]:.6f}"
+    second = f"{destination[0]:.6f},{destination[1]:.6f}"
+    pair = f"{first};{second}"
+    return {
+        "nearest": f"/nearest/v1/driving/{first}?number=1",
+        "route": f"/route/v1/driving/{pair}?overview=false",
+        "table": f"/table/v1/driving/{pair}",
+        "match": f"/match/v1/driving/{pair}?overview=false",
+    }
+
+
+def run_checks(base: str, checks: dict[str, str]) -> int:
     failed = []
-    for name, path in CHECKS.items():
+    for name, path in checks.items():
         try:
-            with urllib.request.urlopen(BASE + path, timeout=12) as response:
+            with urllib.request.urlopen(base.rstrip("/") + path, timeout=12) as response:
                 payload = json.loads(response.read())
-            if response.status != 200 or payload.get("code") != "Ok":
-                raise RuntimeError(f"unexpected OSRM code: {payload.get('code')}")
+                status = response.status
+            if status != 200 or payload.get("code") != "Ok":
+                raise RuntimeError(f"unexpected OSRM response: HTTP {status}, code={payload.get('code')}")
             print(f"PASS {name}")
         except (OSError, urllib.error.URLError, json.JSONDecodeError, RuntimeError) as exc:
             failed.append(name)
-            print(f"FAIL {name}: {exc}", file=sys.stderr)
+            print(f"FAIL {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
     return 1 if failed else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-url", default=BASE)
+    parser.add_argument("--origin", type=parse_coordinate, default=parse_coordinate(DEFAULT_ORIGIN))
+    parser.add_argument("--destination", type=parse_coordinate, default=parse_coordinate(DEFAULT_DESTINATION))
+    args = parser.parse_args(argv)
+    return run_checks(args.base_url, build_checks(args.origin, args.destination))
 
 
 if __name__ == "__main__":
