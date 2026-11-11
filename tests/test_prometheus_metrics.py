@@ -31,6 +31,22 @@ class Pool:
     def acquire(self):
         return Acquire()
 
+    def get_size(self):
+        return 7
+
+    def get_idle_size(self):
+        return 3
+
+
+class HealthyRedis:
+    async def ping(self):
+        return True
+
+
+class UnhealthyRedis:
+    async def ping(self):
+        raise ConnectionError("redis unavailable")
+
 
 @pytest.mark.asyncio
 async def test_metrics_requires_dedicated_bearer_token(monkeypatch):
@@ -52,6 +68,7 @@ async def test_metrics_endpoint_is_disabled_without_token(monkeypatch):
 async def test_metrics_returns_outbox_and_gps_gauges(monkeypatch):
     monkeypatch.setattr(server, "settings", SimpleNamespace(metrics_bearer_token="private-token"))
     monkeypatch.setattr(server.db, "pool", Pool())
+    monkeypatch.setattr(server.db, "redis", HealthyRedis())
 
     response = await server.prometheus_metrics("Bearer private-token")
     body = response.body.decode()
@@ -62,3 +79,16 @@ async def test_metrics_returns_outbox_and_gps_gauges(monkeypatch):
     assert "vcar_driver_locations_fresh 8" in body
     assert "vcar_driver_locations_stale 2" in body
     assert body.endswith("\n")
+
+
+
+@pytest.mark.asyncio
+async def test_metrics_remains_available_and_reports_redis_down(monkeypatch):
+    monkeypatch.setattr(server, "settings", SimpleNamespace(metrics_bearer_token="private-token"))
+    monkeypatch.setattr(server.db, "pool", Pool())
+    monkeypatch.setattr(server.db, "redis", UnhealthyRedis())
+
+    response = await server.prometheus_metrics("Bearer private-token")
+
+    assert response.status_code == 200
+    assert "vcar_redis_available 0" in response.body.decode()
