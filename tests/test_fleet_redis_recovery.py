@@ -14,7 +14,7 @@ async def test_admin_fleet_stream_falls_back_to_database_snapshot_when_redis_fai
 
     current = datetime.now(timezone.utc)
     driver = row(1002, current)
-    calls = {"redis": 0}
+    calls = {"redis": 0, "pubsubs": 0, "subscriptions": 0}
 
     class Connection:
         async def fetch(self, query):
@@ -33,7 +33,7 @@ async def test_admin_fleet_stream_falls_back_to_database_snapshot_when_redis_fai
 
     class PubSub:
         async def subscribe(self, channel):
-            pass
+            calls["subscriptions"] += 1
 
         async def get_message(self, **kwargs):
             calls["redis"] += 1
@@ -49,6 +49,7 @@ async def test_admin_fleet_stream_falls_back_to_database_snapshot_when_redis_fai
 
     class Redis:
         def pubsub(self):
+            calls["pubsubs"] += 1
             return PubSub()
 
     class WebSocket:
@@ -71,10 +72,13 @@ async def test_admin_fleet_stream_falls_back_to_database_snapshot_when_redis_fai
 
     await locations_router.admin_fleet_stream(websocket, "single-use")
 
-    assert len(websocket.sent) == 2
+    assert len(websocket.sent) == 3
     assert websocket.sent[0]["type"] == "snapshot"
     assert websocket.sent[1]["reason"] == "redis_recovery"
-    assert websocket.sent[1]["drivers"][0]["telegram_id"] == 1002
+    assert websocket.sent[2]["reason"] == "redis_recovery"
+    assert websocket.sent[2]["drivers"][0]["telegram_id"] == 1002
+    assert calls["pubsubs"] == 2
+    assert calls["subscriptions"] == 2
 
 
 async def _noop():
