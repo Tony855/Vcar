@@ -24,8 +24,12 @@ fi
 install -d -m 700 "$BACKUP_DIR"
 umask 077
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-TMP="$BACKUP_DIR/.vcar-$STAMP.dump.tmp"
-DEST="$BACKUP_DIR/vcar-$STAMP.dump"
+# mktemp makes concurrent backups unique even when both start in the same second.
+TMP="$(mktemp "$BACKUP_DIR/.vcar-$STAMP.XXXXXX.dump.tmp")"
+UNIQUE="$(basename "$TMP")"
+UNIQUE="${UNIQUE#.vcar-$STAMP.}"
+UNIQUE="${UNIQUE%.dump.tmp}"
+DEST="$BACKUP_DIR/vcar-$STAMP-$UNIQUE.dump"
 trap 'rm -f "$TMP"' EXIT
 
 pg_dump --format=custom --no-owner --no-acl --file="$TMP" "$BACKUP_DATABASE_URL"

@@ -173,3 +173,76 @@ async def test_concurrent_cross_wallet_idempotency_key_cannot_double_credit(data
             await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)", wallet_ids)
             await conn.execute("DELETE FROM wallet_accounts WHERE id = ANY($1)", wallet_ids)
             await conn.execute("DELETE FROM users WHERE id = ANY($1)", user_ids)
+
+
+@pytest.mark.asyncio
+async def test_idempotency_replay_requires_same_provider_reference_and_audit_metadata(database_pool):
+    telegram_id = int(uuid.uuid4().int % 8_000_000_000) + 1
+    async with database_pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            "INSERT INTO users (telegram_id, first_name) VALUES ($1, 'wallet-idempotency') RETURNING id",
+            telegram_id,
+        )
+        wallet_id = await conn.fetchval(
+            "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', 0) RETURNING id",
+            user_id,
+        )
+
+    key = f"wallet-provider-{uuid.uuid4()}"
+    try:
+        first = await WalletLedger.post(
+            user_id=user_id,
+            currency="USD",
+            amount_minor=1500,
+            kind="TOPUP",
+            idempotency_key=key,
+            provider_reference="provider-payment-001",
+            metadata={"provider": "sandbox", "merchant": "merchant-a"},
+        )
+        replay = await WalletLedger.post(
+            user_id=user_id,
+            currency="USD",
+            amount_minor=1500,
+            kind="TOPUP",
+            idempotency_key=key,
+            provider_reference="provider-payment-001",
+            metadata={"merchant": "merchant-a", "provider": "sandbox"},
+        )
+        assert replay.replayed is True
+        assert replay.transaction_id == first.transaction_id
+
+        with pytest.raises(IdempotencyConflict):
+            await WalletLedger.post(
+                user_id=user_id,
+                currency="USD",
+                amount_minor=1500,
+                kind="TOPUP",
+                idempotency_key=key,
+                provider_reference="provider-payment-002",
+                metadata={"provider": "sandbox", "merchant": "merchant-a"},
+            )
+        with pytest.raises(IdempotencyConflict):
+            await WalletLedger.post(
+                user_id=user_id,
+                currency="USD",
+                amount_minor=1500,
+                kind="TOPUP",
+                idempotency_key=key,
+                provider_reference="provider-payment-001",
+                metadata={"provider": "sandbox", "merchant": "merchant-b"},
+            )
+
+        async with database_pool.acquire() as conn:
+            balance = await conn.fetchval(
+                "SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet_id
+            )
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM wallet_transactions WHERE idempotency_key=$1", key
+            )
+        assert balance == 1500
+        assert count == 1
+    finally:
+        async with database_pool.acquire() as conn:
+            await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id=$1", wallet_id)
+            await conn.execute("DELETE FROM wallet_accounts WHERE id=$1", wallet_id)
+            await conn.execute("DELETE FROM users WHERE id=$1", user_id)

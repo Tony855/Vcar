@@ -66,6 +66,7 @@ def build_report(
     frames_received: int, connect_latencies_ms: list[float],
     fanout_latencies_ms: list[float], failures: int, elapsed_seconds: float,
     reconnect_attempts: int = 0, reconnect_snapshots: int = 0,
+    initial_snapshot_attempts: int = 0, initial_snapshots: int = 0,
 ) -> dict:
     expected = connected * messages_sent
     return {
@@ -77,6 +78,9 @@ def build_report(
         "expected_frames": expected,
         "frame_delivery_rate": round(frames_received / expected, 4) if expected else 0.0,
         "failures": failures,
+        "initial_snapshot_attempts": initial_snapshot_attempts,
+        "initial_snapshots": initial_snapshots,
+        "initial_snapshot_rate": round(initial_snapshots / initial_snapshot_attempts, 4) if initial_snapshot_attempts else 1.0,
         "reconnect_attempts": reconnect_attempts,
         "reconnect_snapshots": reconnect_snapshots,
         "reconnect_snapshot_rate": round(reconnect_snapshots / reconnect_attempts, 4) if reconnect_attempts else 1.0,
@@ -145,12 +149,17 @@ async def run(args: argparse.Namespace) -> int:
 
         # Consume the durable snapshot sent on every new admin stream before
         # counting live GPS fan-out frames.
+        initial_snapshot_attempts = len(sockets)
+        initial_snapshots = 0
+
         async def receive_initial_snapshot(ws):
-            nonlocal failures
+            nonlocal failures, initial_snapshots
             try:
                 frame = await ws.receive(timeout=args.receive_timeout)
                 if frame.type != aiohttp.WSMsgType.TEXT or not is_fleet_snapshot_frame(frame.data):
                     failures += 1
+                else:
+                    initial_snapshots += 1
             except Exception:
                 failures += 1
 
@@ -234,6 +243,8 @@ async def run(args: argparse.Namespace) -> int:
             elapsed_seconds=elapsed,
             reconnect_attempts=reconnect_attempts,
             reconnect_snapshots=reconnect_snapshots,
+            initial_snapshot_attempts=initial_snapshot_attempts,
+            initial_snapshots=initial_snapshots,
         )
         rendered = json.dumps(report, indent=2, sort_keys=True)
         print(rendered)
@@ -243,7 +254,12 @@ async def run(args: argparse.Namespace) -> int:
             output.write_text(rendered + "\n", encoding="utf-8")
         for ws in sockets:
             await ws.close()
-    return 1 if failures or report["frame_delivery_rate"] < args.min_delivery_rate or report["reconnect_snapshot_rate"] < args.min_delivery_rate else 0
+    return 1 if (
+        failures
+        or report["frame_delivery_rate"] < args.min_delivery_rate
+        or report["initial_snapshot_rate"] < args.min_delivery_rate
+        or report["reconnect_snapshot_rate"] < args.min_delivery_rate
+    ) else 0
 
 
 def main() -> int:

@@ -25,6 +25,9 @@ webhook secrets into this report.
 **Current repository boundary:** wallet ledger and audited admin adjustments only. No real
 provider adapter or verified ABA/Bakong settlement is claimed. Keep external payment disabled
 until all checks above pass. Never credit a wallet based only on a browser redirect or client claim.
+Wallet idempotency now binds a replay to the same user, amount, currency, kind, order, provider
+reference and canonical audit metadata. This is a ledger safety guard, not provider signature
+verification or evidence of settlement.
 The current release deliberately does not invent a callback signature, merchant identity, or
 provider status mapping. Provider integration remains blocked on the official merchant contract
 and sandbox; CI cannot certify settlement correctness without those inputs.
@@ -67,9 +70,12 @@ snapshot if Redis Pub/Sub fails. CI covers the Redis exception fallback; run a R
 exercise in staging and verify the browser remains populated while Redis recovers.
 
 The administrator fleet WebSocket now sends a durable PostgreSQL snapshot immediately after
-subscribing to Redis, including on reconnect. The frontend reconciles its marker set from this
-snapshot before applying subsequent live events. This is covered by unit/CI tests; the 50–500
-connection staging runs below remain NOT RUN and are not implied by the code change.
+subscribing to Redis, including on reconnect. If a Pub/Sub connection fails, it rebuilds the
+subscription and sends another durable snapshot. The driver location WebSocket also rebuilds
+its subscription and periodically reconciles from PostgreSQL every 30 seconds, repairing missed
+Redis publications. The frontend reconciles its marker set from admin snapshots before applying
+subsequent live events. CI covers the reconnect paths; the 50–500 connection staging runs below
+remain NOT RUN and are not implied by the code change.
 
 ## 4. Database backup and restore
 
@@ -81,7 +87,8 @@ connection staging runs below remain NOT RUN and are not implied by the code cha
 - [ ] Run API readiness and critical business flows after restore.
 - [ ] Record restore duration and RPO/RTO; prove rollback before any production change.
 
-The backup script validates the custom-format archive before publishing it. A successful
+The backup script validates the custom-format archive before publishing it. Concurrent backup
+runs receive unique temporary and final archive names, avoiding same-second overwrite. A successful
 archive listing is not a full restore rehearsal. Restore now aborts before stopping services if
 the pre-restore backup command fails; CI covers this fail-closed path.
 
