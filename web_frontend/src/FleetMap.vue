@@ -24,6 +24,9 @@ const onlineCount = computed(() => drivers.value.filter(x => x.online).length)
 let map
 let socket
 let refreshTimer
+let reconnectTimer
+let reconnectDelay = 1000
+let disposed = false
 const markers = new Map()
 
 function upsertDriver(driver) {
@@ -71,19 +74,31 @@ onMounted(async () => {
     maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map)
   await loadFleet()
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  socket = new WebSocket(`${protocol}//${location.host}/api/v1/admin/fleet/stream?token=${encodeURIComponent(props.token)}`)
-  socket.onmessage = event => {
-    try {
-      const update = JSON.parse(event.data)
-      upsertDriver({ ...update, online: true })
-    } catch { /* Ignore malformed telemetry frame. */ }
-  }
-  socket.onclose = () => { error.value = '实时连接已断开，地图将继续定时刷新' }
+  connectFleetSocket()
   refreshTimer = window.setInterval(loadFleet, 15000)
 })
+function connectFleetSocket() {
+  if (disposed) return
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  socket = new WebSocket(`${protocol}//${location.host}/api/v1/admin/fleet/stream?token=${encodeURIComponent(props.token)}`)
+  socket.onopen = () => { reconnectDelay = 1000; error.value = '' }
+  socket.onmessage = event => {
+    try { upsertDriver({ ...JSON.parse(event.data), online: true }) }
+    catch { /* Ignore malformed telemetry frame. */ }
+  }
+  socket.onclose = () => {
+    if (disposed) return
+    error.value = '实时连接已断开，正在尝试重连；地图仍会定时刷新'
+    reconnectTimer = window.setTimeout(connectFleetSocket, reconnectDelay)
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000)
+  }
+  socket.onerror = () => socket.close()
+}
+
 onUnmounted(() => {
+  disposed = true
   if (refreshTimer) window.clearInterval(refreshTimer)
+  if (reconnectTimer) window.clearTimeout(reconnectTimer)
   if (socket) socket.close()
   if (map) map.remove()
 })
