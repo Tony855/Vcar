@@ -187,14 +187,14 @@ async def test_order_status_outbox_is_transactional_and_retryable(database_pool)
         async with database_pool.acquire() as connection:
             retry = await connection.fetchrow(
                 """
-                SELECT attempts, locked_at, available_at, last_error, delivered_at
+                SELECT attempts, locked_at, available_at, created_at, last_error, delivered_at
                 FROM order_event_outbox WHERE id=$1
                 """,
                 claimed[0]["id"],
             )
         assert retry["attempts"] == 1
         assert retry["locked_at"] is None
-        assert retry["available_at"] > retry["created_at"] if "created_at" in retry else True
+        assert retry["available_at"] > retry["created_at"]
         assert retry["last_error"] == "temporary Redis outage"
         assert retry["delivered_at"] is None
     finally:
