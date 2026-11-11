@@ -29,6 +29,12 @@ class FakePool:
 
 
 class FakeRedis:
+    async def zrangebyscore(self, *args, **kwargs):
+        return []
+
+    async def zrem(self, *args, **kwargs):
+        return 0
+
     async def geosearch(self, *args, **kwargs):
         return [
             ("1001", "0.5", ("104.9000", "11.5000")),
