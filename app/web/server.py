@@ -17,11 +17,13 @@ from app.core.security import verify_token, verify_driver_token, create_access_t
 from app.modules.routing.router import router as routing_router
 from app.modules.auth.router import router as auth_router
 from app.modules.locations.router import router as locations_router
+from app.modules.passengers.router import router as passengers_router
 
 app = FastAPI()
 app.include_router(routing_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api")
 app.include_router(locations_router, prefix="/api/v1")
+app.include_router(passengers_router, prefix="/api")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
