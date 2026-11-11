@@ -55,8 +55,10 @@ DRIVER_TOKEN='(inject securely)' ADMIN_TOKEN='(inject securely)' python scripts/
 Repeat at 100, 250 and 500 connections, allowing the host to recover between runs.
 Record host CPU, RSS, Redis memory, DB pool saturation, event-loop lag, disconnects and
 server-side request rates alongside the generated client report. The script reports
-admin subscriber connection success, fleet event delivery, publish throughput and p50/p95/p99 connection/fan-out
-latency. Client-side results alone do not establish server capacity.
+admin subscriber connection success, initial snapshot delivery, fleet event delivery, reconnect
+snapshot delivery, publish throughput and p50/p95/p99 connection/fan-out latency. Its exit gate
+requires connection, frame, initial snapshot and reconnect snapshot rates to meet the configured
+minimum and zero recorded failures. Client-side results alone do not establish server capacity.
 
 Acceptance thresholds must be agreed before the run; suggested starting gates:
 - connection success >= 99%;
@@ -66,8 +68,9 @@ Acceptance thresholds must be agreed before the run; suggested starting gates:
 - clean disconnect and reconnect behavior.
 
 The admin fleet stream periodically reconciles from PostgreSQL and falls back to a durable
-snapshot if Redis Pub/Sub fails. CI covers the Redis exception fallback; run a Redis restart
-exercise in staging and verify the browser remains populated while Redis recovers.
+snapshot if Redis Pub/Sub fails. Driver and administrator stream recovery paths have automated
+Redis-failure/re-subscription coverage. Run a Redis restart exercise in staging and verify the
+browser remains populated while Redis recovers.
 
 The administrator fleet WebSocket now sends a durable PostgreSQL snapshot immediately after
 subscribing to Redis, including on reconnect. If a Pub/Sub connection fails, it rebuilds the
@@ -88,9 +91,10 @@ remain NOT RUN and are not implied by the code change.
 - [ ] Record restore duration and RPO/RTO; prove rollback before any production change.
 
 The backup script validates the custom-format archive before publishing it. Concurrent backup
-runs receive unique temporary and final archive names, avoiding same-second overwrite. A successful
-archive listing is not a full restore rehearsal. Restore now aborts before stopping services if
-the pre-restore backup command fails; CI covers this fail-closed path.
+runs receive unique temporary and final archive names, avoiding same-second overwrite. Restore
+rejects an unreadable/invalid archive before creating the pre-restore backup or stopping services,
+and aborts before service stop if the pre-restore backup command fails. CI covers these fail-closed
+paths. A successful archive listing is not a full restore rehearsal.
 
 ## 5. Installer and upgrade matrix
 
