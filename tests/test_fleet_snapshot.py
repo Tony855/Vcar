@@ -75,7 +75,8 @@ async def test_admin_fleet_stream_subscribes_before_sending_durable_snapshot(mon
     from app.modules.locations import router as locations_router
 
     order = []
-    driver = row(1001, NOW, first_name="Driver")
+    current = datetime.now(timezone.utc)
+    driver = row(1001, current, first_name="Driver")
 
     class Connection:
         async def fetch(self, query):
