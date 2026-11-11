@@ -81,3 +81,98 @@ async def test_future_cursor_resets_to_current_snapshot():
     assert result["type"] == "snapshot"
     assert result["resync_required"] is True
     assert result["last_event_id"] == 14
+
+
+@pytest.mark.asyncio
+async def test_passenger_stream_replays_and_deduplicates_pubsub_overlap(monkeypatch):
+    from fastapi import WebSocketDisconnect
+
+    from app.modules.passengers import router as passenger_router
+
+    order = []
+
+    class Connection:
+        async def fetchval(self, query, *args):
+            if "SELECT id FROM orders" in query:
+                return 8
+            if "SELECT status FROM orders" in query:
+                return "IN_PROGRESS"
+            if "MAX(event_id)" in query:
+                return 5
+            if "COUNT(*)" in query:
+                return 2
+            raise AssertionError(query)
+
+        async def fetch(self, query, *args):
+            assert "ORDER BY event_id" in query
+            return [
+                {"payload": {"event_id": 4, "order_id": 8, "status": "ARRIVED"}},
+                {"payload": {"event_id": 5, "order_id": 8, "status": "IN_PROGRESS"}},
+            ]
+
+    class Acquire:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class Pool:
+        def acquire(self):
+            return Acquire()
+
+    class PubSub:
+        def __init__(self):
+            self.frames = [
+                {"type": "message", "data": json.dumps({"event_id": 5, "status": "IN_PROGRESS"})},
+                {"type": "message", "data": json.dumps({"event_id": 6, "status": "ARRIVED"})},
+                {"type": "message", "data": json.dumps({"event_id": 7, "status": "COMPLETED"})},
+            ]
+
+        async def subscribe(self, channel):
+            order.append("subscribe")
+
+        async def get_message(self, **kwargs):
+            if self.frames:
+                return self.frames.pop(0)
+            raise WebSocketDisconnect(code=1000)
+
+        async def unsubscribe(self, channel):
+            pass
+
+        async def aclose(self):
+            pass
+
+    class Redis:
+        def pubsub(self):
+            return PubSub()
+
+    class WebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def accept(self):
+            order.append("accept")
+
+        async def close(self, code):
+            self.close_code = code
+
+        async def send_json(self, payload):
+            self.sent.append(payload)
+
+    async def valid_ticket(ticket, scope):
+        assert scope == "passenger-order:8"
+        return {"sub": "1001", "role": "passenger"}
+
+    websocket = WebSocket()
+    monkeypatch.setattr(passenger_router, "consume_ws_ticket", valid_ticket)
+    monkeypatch.setattr(passenger_router.db, "pool", Pool())
+    monkeypatch.setattr(passenger_router.db, "redis", Redis())
+
+    await passenger_router.passenger_order_stream(
+        websocket, 8, "single-use-ticket", last_event_id=3
+    )
+
+    assert order[0] == "subscribe"
+    assert [event["event_id"] for event in websocket.sent] == [4, 5, 6, 7]
+    assert websocket.sent[-1]["status"] == "COMPLETED"
