@@ -23,14 +23,20 @@ async def run(args: argparse.Namespace) -> int:
     connector = aiohttp.TCPConnector(limit=max(args.connections + 20, 100))
     timeout = aiohttp.ClientTimeout(total=20, connect=10, sock_read=15)
     base = args.base_url.rstrip("/")
-    ws_url = base.replace("https://", "wss://").replace("http://", "ws://")
-    ws_url += "/api/v1/driver/location/stream?token=" + quote(token, safe="")
+    ws_base = base.replace("https://", "wss://").replace("http://", "ws://")
+    ws_base += "/api/v1/driver/location/stream"
     headers = {"Authorization": f"Bearer {token}"}
     sockets: list[aiohttp.ClientWebSocketResponse] = []
     failures = 0
     started = time.monotonic()
 
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+        async with session.post(base + "/api/ws-ticket", json={"scope": "driver-location"}, headers=headers) as response:
+            if response.status != 200:
+                raise SystemExit(f"Unable to obtain driver WebSocket ticket ({response.status})")
+            ticket_payload = await response.json()
+        ws_url = ws_base + "?ticket=" + quote(ticket_payload["ticket"], safe="")
+
         async def connect_one():
             nonlocal failures
             try:
