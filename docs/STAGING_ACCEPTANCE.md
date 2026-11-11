@@ -85,7 +85,7 @@ CI syntax checks are not a substitute for these VM runs.
 
 ## 6. Monitoring and alerting
 
-- [ ] Configure a private Blackbox Exporter using `deploy/monitoring/blackbox-vcar.yml`.
+- [ ] Configure a private Blackbox Exporter using `deploy/monitoring/blackbox-vcar.yml` and `deploy/monitoring/prometheus-vcar-scrape.yml`.
 - [ ] Probe `/health/live`, `/health/ready` and OSRM route endpoint from the monitoring network.
 - [ ] Alert on failed probes, sustained readiness failure, high CPU/RAM/disk, DB pool saturation,
       Redis unavailable, backup age and backup/restore job failure.
