@@ -149,3 +149,44 @@ def test_fleet_event_validation_rejects_unbounded_integer_coordinates():
         "recorded_at": "2026-11-12T00:00:00+00:00",
     }
     assert not is_fleet_location_event(json.dumps(event))
+
+
+
+def test_build_report_does_not_treat_skipped_snapshot_probes_as_success():
+    report = build_report(
+        requested_connections=10,
+        connected=10,
+        messages_sent=1,
+        frames_received=10,
+        connect_latencies_ms=[10],
+        fanout_latencies_ms=[5],
+        failures=0,
+        elapsed_seconds=1,
+        initial_snapshot_attempts=0,
+        initial_snapshots=0,
+        reconnect_attempts=0,
+        reconnect_snapshots=0,
+    )
+    assert report["initial_snapshot_rate"] == 0.0
+    assert report["reconnect_snapshot_rate"] == 0.0
+    assert not meets_acceptance_thresholds(report, 0.99)
+
+
+def test_build_report_keeps_success_rate_when_all_snapshot_probes_pass():
+    report = build_report(
+        requested_connections=10,
+        connected=10,
+        messages_sent=1,
+        frames_received=10,
+        connect_latencies_ms=[10],
+        fanout_latencies_ms=[5],
+        failures=0,
+        elapsed_seconds=1,
+        initial_snapshot_attempts=10,
+        initial_snapshots=10,
+        reconnect_attempts=3,
+        reconnect_snapshots=3,
+    )
+    assert report["initial_snapshot_rate"] == 1.0
+    assert report["reconnect_snapshot_rate"] == 1.0
+    assert meets_acceptance_thresholds(report, 0.99)
