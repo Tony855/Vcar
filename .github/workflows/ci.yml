@@ -38,6 +38,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app migrations tests
+      - run: bash -n deploy/install.sh scripts/*.sh
       - run: DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar alembic upgrade head --sql
       - run: docker run --rm --network host -v "$GITHUB_WORKSPACE:/workspace" -w /workspace postgis/postgis:16-3.4 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f app/db/schema.sql
       - run: alembic upgrade head
