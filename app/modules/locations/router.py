@@ -46,6 +46,9 @@ async def update_driver_location(
         )
         if not driver:
             raise HTTPException(status_code=403, detail="Approved driver account required")
+        latest = await conn.fetchval("SELECT recorded_at FROM driver_locations WHERE driver_id=$1", driver["id"])
+        if latest is not None and recorded_at <= latest:
+            raise HTTPException(status_code=409, detail="GPS sample is older than the last accepted sample")
         point = f"SRID=4326;POINT({payload.longitude} {payload.latitude})"
         await conn.execute(
             """
