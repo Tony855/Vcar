@@ -118,3 +118,12 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - Wallet: `/api/v1/wallet/me` opens/returns a single USD or KHR wallet, `/api/v1/wallet/me/transactions` lists the caller's own ledger, and `/api/v1/wallet/admin/adjust` provides an auditable idempotent admin adjustment.
 - No real payment-provider adapter is enabled. ABA/Bakong callbacks, settlement, refunds, withdrawals and reconciliation must remain disabled until official provider specifications and sandbox credentials are available.
 - OSRM real-map smoke checks: set `OSRM_BASE_URL` and run `python scripts/smoke_osrm.py`. The script checks Nearest, Route, Table and Match endpoints against the configured Cambodia map server.
+
+
+## Staging acceptance and scale checks
+
+- OSRM map acceptance: run `OSRM_BASE_URL=https://your-staging-osrm.example python scripts/smoke_osrm.py`; all four Route/Table/Match/Nearest checks must return `code=Ok`.
+- GPS/WebSocket fan-out: provision an approved staging driver, export its short-lived JWT as `DRIVER_TOKEN`, then run `VCAR_BASE_URL=https://your-staging-api.example python scripts/load_test_locations.py --connections 500 --messages 3`.
+- The WebSocket load test sends real authenticated GPS updates and measures fan-out to connected clients. Start with 50, then 100, 250 and 500 clients while observing API CPU/memory, Redis memory/clients, PostgreSQL connections, event loop latency and reverse-proxy limits.
+- Do not run the 500-client test against production without a maintenance window and explicit authorization. The script deliberately requires a valid approved driver token and does not create fake driver accounts.
+- WebSocket JWTs are currently carried as short-lived query parameters because browser WebSocket APIs cannot attach arbitrary Authorization headers. Reverse proxies must redact query strings for these routes; replacing this with one-time WebSocket tickets remains a security follow-up.
