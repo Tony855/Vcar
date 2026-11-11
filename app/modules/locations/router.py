@@ -120,11 +120,10 @@ async def driver_location_stream(websocket: WebSocket, ticket: str):
         return
     telegram_id = int(claims["sub"])
     await websocket.accept()
-    pubsub = db.redis.pubsub()
-    try:
-        await pubsub.subscribe(f"driver:location:{telegram_id}")
-        # Subscribe first, then read PostgreSQL: updates committed during the
-        # snapshot query are queued by Redis and delivered after this snapshot.
+    channel = f"driver:location:{telegram_id}"
+    pubsub = None
+
+    async def load_snapshot():
         async with db.pool.acquire() as conn:
             latest = await conn.fetchrow(
                 """
@@ -139,17 +138,66 @@ async def driver_location_stream(websocket: WebSocket, ticket: str):
         snapshot = build_location_snapshot(latest, telegram_id)
         if snapshot is not None:
             await websocket.send_json(snapshot)
+
+    async def subscribe():
+        subscriber = db.redis.pubsub()
+        await subscriber.subscribe(channel)
+        return subscriber
+
+    try:
+        # Subscribe first, then read PostgreSQL: updates committed during the
+        # snapshot query are queued by Redis and delivered after this snapshot.
+        pubsub = await subscribe()
+        await load_snapshot()
+        last_reconciliation = asyncio.get_running_loop().time()
         while True:
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            try:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=1.0
+                )
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                logger.warning(
+                    "Driver location Pub/Sub unavailable; rebuilding subscription",
+                    extra={"telegram_id": telegram_id},
+                    exc_info=True,
+                )
+                try:
+                    await pubsub.aclose()
+                except Exception:
+                    logger.debug("Failed to close stale driver Pub/Sub", exc_info=True)
+                pubsub = None
+                await asyncio.sleep(1.0)
+                try:
+                    pubsub = await subscribe()
+                except Exception:
+                    logger.warning(
+                        "Driver location Pub/Sub resubscribe failed",
+                        extra={"telegram_id": telegram_id},
+                        exc_info=True,
+                    )
+                await load_snapshot()
+                last_reconciliation = asyncio.get_running_loop().time()
+                continue
+
             if message and message.get("type") == "message":
                 await websocket.send_text(message["data"])
             else:
-                await asyncio.sleep(0.1)
+                now = asyncio.get_running_loop().time()
+                if now - last_reconciliation >= 30.0:
+                    # Repair events lost during a Redis restart or transient
+                    # publish failure from the durable PostgreSQL row.
+                    await load_snapshot()
+                    last_reconciliation = now
     except WebSocketDisconnect:
         pass
     finally:
-        await pubsub.unsubscribe(f"driver:location:{telegram_id}")
-        await pubsub.aclose()
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe(channel)
+            finally:
+                await pubsub.aclose()
 
 
 
@@ -200,50 +248,71 @@ async def admin_fleet_stream(websocket: WebSocket, ticket: str):
         return
 
     await websocket.accept()
-    pubsub = db.redis.pubsub()
-    try:
-        await pubsub.subscribe("fleet:locations")
-        # Subscribe before the durable snapshot so GPS updates committed while
-        # PostgreSQL is queried remain queued in this Pub/Sub subscription.
+    channel = "fleet:locations"
+    pubsub = None
+
+    async def subscribe():
+        subscriber = db.redis.pubsub()
+        await subscriber.subscribe(channel)
+        return subscriber
+
+    async def send_snapshot(reason=None):
         async with db.pool.acquire() as conn:
             snapshot = await fetch_fleet_snapshot(conn)
-        await websocket.send_json({"type": "snapshot", "drivers": snapshot})
+        frame = {"type": "snapshot", "drivers": snapshot}
+        if reason:
+            frame["reason"] = reason
+        await websocket.send_json(frame)
+
+    try:
+        # Subscribe before the durable snapshot so GPS updates committed while
+        # PostgreSQL is queried remain queued in this Pub/Sub subscription.
+        pubsub = await subscribe()
+        await send_snapshot()
+        last_reconciliation = asyncio.get_running_loop().time()
         while True:
+            if pubsub is None:
+                await asyncio.sleep(5.0)
+                try:
+                    pubsub = await subscribe()
+                except Exception:
+                    logger.warning("Fleet Pub/Sub resubscribe failed", exc_info=True)
+                await send_snapshot("redis_recovery")
+                last_reconciliation = asyncio.get_running_loop().time()
+                continue
             try:
                 # Periodic durable reconciliation repairs missed Pub/Sub frames
                 # after Redis restarts without requiring an admin page reload.
                 message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=15.0
+                    ignore_subscribe_messages=True, timeout=1.0
                 )
             except WebSocketDisconnect:
                 raise
             except Exception:
                 logger.warning(
-                    "Fleet Pub/Sub unavailable; serving durable snapshot and retrying",
+                    "Fleet Pub/Sub unavailable; rebuilding subscription",
                     exc_info=True,
                 )
-                async with db.pool.acquire() as conn:
-                    snapshot = await fetch_fleet_snapshot(conn)
-                await websocket.send_json({
-                    "type": "snapshot",
-                    "drivers": snapshot,
-                    "reason": "redis_recovery",
-                })
-                await asyncio.sleep(5.0)
+                try:
+                    await pubsub.aclose()
+                except Exception:
+                    logger.debug("Failed to close stale fleet Pub/Sub", exc_info=True)
+                pubsub = None
+                await send_snapshot("redis_recovery")
                 continue
 
             if message and message.get("type") == "message":
                 await websocket.send_text(message["data"])
             else:
-                async with db.pool.acquire() as conn:
-                    snapshot = await fetch_fleet_snapshot(conn)
-                await websocket.send_json({
-                    "type": "snapshot",
-                    "drivers": snapshot,
-                    "reason": "periodic_reconciliation",
-                })
+                now = asyncio.get_running_loop().time()
+                if now - last_reconciliation >= 15.0:
+                    await send_snapshot("periodic_reconciliation")
+                    last_reconciliation = now
     except WebSocketDisconnect:
         pass
     finally:
-        await pubsub.unsubscribe("fleet:locations")
-        await pubsub.aclose()
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe(channel)
+            finally:
+                await pubsub.aclose()
