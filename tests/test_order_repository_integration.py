@@ -87,3 +87,59 @@ async def test_one_driver_cannot_accept_two_active_orders(database_pool):
         assert active_count == 1
         await connection.execute("DELETE FROM orders WHERE id = ANY($1)", [order_a["id"], order_b["id"]])
         await connection.execute("DELETE FROM users WHERE id = ANY($1)", [passenger_a, passenger_b, driver])
+
+
+@pytest.mark.asyncio
+async def test_only_assigned_driver_can_advance_order(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "ownership-passenger")
+        assigned_driver = await _create_user(connection, "ownership-assigned")
+        other_driver = await _create_user(connection, "ownership-other")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], assigned_driver) is True
+
+        # A different authenticated driver and an unbound human actor cannot
+        # advance the order even when the expected status is correct.
+        assert await OrderRepository.update_status(
+            order["id"], "ARRIVED", "ACCEPTED",
+            actor_user_id=other_driver, actor_role="DRIVER",
+        ) is False
+        assert await OrderRepository.update_status(
+            order["id"], "ARRIVED", "ACCEPTED",
+            actor_role="DRIVER",
+        ) is False
+
+        async with database_pool.acquire() as connection:
+            status = await connection.fetchval(
+                "SELECT status FROM orders WHERE id=$1", order["id"]
+            )
+            event_count = await connection.fetchval(
+                "SELECT COUNT(*) FROM order_events WHERE order_id=$1", order["id"]
+            )
+        assert status == "ACCEPTED"
+        assert event_count == 2
+
+        assert await OrderRepository.update_status(
+            order["id"], "ARRIVED", "ACCEPTED",
+            actor_user_id=assigned_driver, actor_role="DRIVER",
+        ) is True
+        async with database_pool.acquire() as connection:
+            status = await connection.fetchval(
+                "SELECT status FROM orders WHERE id=$1", order["id"]
+            )
+            event_count = await connection.fetchval(
+                "SELECT COUNT(*) FROM order_events WHERE order_id=$1", order["id"]
+            )
+        assert status == "ARRIVED"
+        assert event_count == 3
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)",
+                [passenger_id, assigned_driver, other_driver],
+            )
