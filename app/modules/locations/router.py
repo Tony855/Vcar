@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from app.core.security import verify_driver_token
 from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.core import db
-from app.modules.locations.gps import is_newer_sample
+from app.modules.locations.gps import is_newer_sample, build_location_snapshot
 from app.modules.locations.redis_projection import publish_driver_location
 
 router = APIRouter(tags=["driver-location"])
@@ -120,6 +120,22 @@ async def driver_location_stream(websocket: WebSocket, ticket: str):
     pubsub = db.redis.pubsub()
     try:
         await pubsub.subscribe(f"driver:location:{telegram_id}")
+        # Subscribe first, then read PostgreSQL: updates committed during the
+        # snapshot query are queued by Redis and delivered after this snapshot.
+        async with db.pool.acquire() as conn:
+            latest = await conn.fetchrow(
+                """
+                SELECT ST_Y(position::geometry) AS latitude,
+                       ST_X(position::geometry) AS longitude,
+                       accuracy_m, heading_deg, speed_mps, recorded_at
+                FROM driver_locations
+                WHERE telegram_id=$1
+                """,
+                telegram_id,
+            )
+        snapshot = build_location_snapshot(latest, telegram_id)
+        if snapshot is not None:
+            await websocket.send_json(snapshot)
         while True:
             message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if message and message.get("type") == "message":
