@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -52,12 +53,30 @@ def is_fleet_location_event(payload: str) -> bool:
         event = json.loads(payload)
     except (TypeError, json.JSONDecodeError):
         return False
+    if not isinstance(event, dict):
+        return False
+
+    telegram_id = event.get("telegram_id")
+    latitude = event.get("latitude")
+    longitude = event.get("longitude")
+    recorded_at = event.get("recorded_at")
+
+    # bool is a subclass of int in Python, but is never a valid identity or
+    # geographic coordinate. Reject malformed/out-of-range frames explicitly.
     return (
-        isinstance(event, dict)
-        and isinstance(event.get("telegram_id"), int)
-        and isinstance(event.get("latitude"), (int, float))
-        and isinstance(event.get("longitude"), (int, float))
-        and isinstance(event.get("recorded_at"), str)
+        isinstance(telegram_id, int)
+        and not isinstance(telegram_id, bool)
+        and telegram_id > 0
+        and isinstance(latitude, (int, float))
+        and not isinstance(latitude, bool)
+        and math.isfinite(latitude)
+        and -90 <= latitude <= 90
+        and isinstance(longitude, (int, float))
+        and not isinstance(longitude, bool)
+        and math.isfinite(longitude)
+        and -180 <= longitude <= 180
+        and isinstance(recorded_at, str)
+        and bool(recorded_at.strip())
     )
 
 
