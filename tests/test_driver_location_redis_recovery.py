@@ -162,3 +162,30 @@ async def test_driver_location_stream_stays_available_when_redis_initial_subscri
     assert calls["pubsubs"] == 2
     assert calls["subscriptions"] == 2
     assert calls["reads"] == 2
+
+
+@pytest.mark.asyncio
+async def test_driver_location_stream_rejects_non_driver_ticket_before_accept(monkeypatch):
+    from app.modules.locations import router as locations_router
+
+    class WebSocket:
+        accepted = False
+        close_code = None
+
+        async def accept(self):
+            self.accepted = True
+
+        async def close(self, code):
+            self.close_code = code
+
+    async def passenger_ticket(ticket, scope):
+        assert scope == "driver-location"
+        return {"role": "passenger", "sub": "12345"}
+
+    websocket = WebSocket()
+    monkeypatch.setattr(locations_router, "consume_ws_ticket", passenger_ticket)
+
+    await locations_router.driver_location_stream(websocket, "wrong-role-ticket")
+
+    assert websocket.close_code == 4401
+    assert websocket.accepted is False
