@@ -201,18 +201,6 @@ app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
 
 
-@app.get("/{full_path:path}")
-async def serve_spa(full_path: str):
-    if full_path.startswith("api/"): return {"error": "API Not Found"}
-    file_path = os.path.join(static_dir, full_path)
-    if os.path.isfile(file_path):
-        return FileResponse(file_path)
-    # 强制禁止缓存 index.html
-    response = FileResponse(os.path.join(static_dir, "index.html"))
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
 
 @app.get("/api/admin/fleet", dependencies=[Depends(verify_token)])
 async def get_live_fleet():
@@ -252,3 +240,17 @@ async def health_ready():
         return {"status": "ready", "database": "ok", "postgis": postgis, "redis": "ok"}
     except Exception:
         raise HTTPException(status_code=503, detail="Required dependencies are not ready")
+
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    if full_path.startswith("api/"): return {"error": "API Not Found"}
+    file_path = os.path.join(static_dir, full_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    # 强制禁止缓存 index.html
+    response = FileResponse(os.path.join(static_dir, "index.html"))
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
