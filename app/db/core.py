@@ -14,11 +14,13 @@ async def init_connection(conn):
 class DB:
     def __init__(self): self.pool = None; self.redis = None
     async def init(self):
+        if not settings.database_url:
+            raise RuntimeError("DATABASE_URL must be configured; insecure built-in database credentials are disabled")
         self.pool = await asyncpg.create_pool(
             settings.database_url, 
             min_size=2, 
             max_size=10, 
             init=init_connection # 注入初始化转换器
         )
-        self.redis = redis.from_url("redis://127.0.0.1:6379/0", decode_responses=True)
+        self.redis = redis.from_url(settings.redis_url, decode_responses=True)
 db = DB()

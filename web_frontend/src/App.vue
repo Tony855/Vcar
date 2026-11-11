@@ -3,8 +3,8 @@
     <el-card class="login-card">
       <h2 style="text-align: center; margin-bottom: 20px;">🔒 Vcar 运营登录</h2>
       <el-form @submit.prevent="login">
-        <el-form-item><el-input v-model="loginForm.username" placeholder="账号 admin" /></el-form-item>
-        <el-form-item><el-input v-model="loginForm.password" type="password" placeholder="密码 vcar888" show-password /></el-form-item>
+        <el-form-item><el-input v-model="loginForm.username" placeholder="管理员账号" /></el-form-item>
+        <el-form-item><el-input v-model="loginForm.password" type="password" placeholder="管理员密码" show-password /></el-form-item>
         <el-button type="primary" native-type="submit" style="width: 100%" :loading="loading">登 录</el-button>
       </el-form>
     </el-card>

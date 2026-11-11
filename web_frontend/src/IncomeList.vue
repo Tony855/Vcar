@@ -24,7 +24,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
+import { createDriverApi } from './api/driver'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,16 +33,18 @@ const incomes = ref([])
 const loading = ref(true)
 
 const goBack = () => router.push(`/mini/${tgId}`)
-
-const totalIncome = computed(() => {
-  return incomes.value.reduce((sum, item) => sum + parseFloat(item.price || 0), 0)
-})
+const totalIncome = computed(() => incomes.value.reduce((sum, item) => sum + parseFloat(item.price || 0), 0))
 
 onMounted(async () => {
   try {
-    const res = await axios.get(`/api/driver/${tgId}/income`)
-    incomes.value = res.data
-  } catch (e) { console.error(e) } finally { loading.value = false }
+    const { api, tgId: authenticatedTgId } = await createDriverApi(tgId)
+    const response = await api.get(`/driver/${authenticatedTgId}/income`)
+    incomes.value = response.data
+  } catch (error) {
+    console.error('Driver income authentication/load failed:', error)
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 

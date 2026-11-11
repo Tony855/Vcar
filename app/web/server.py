@@ -1,13 +1,11 @@
 import os
 import sys
-import jwt
-import datetime
+from datetime import datetime, timezone
 import aiohttp
 from fastapi import FastAPI, Depends, HTTPException, Response, Query
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 # 动态获取项目根目录
@@ -16,10 +14,24 @@ sys.path.append(BASE_DIR)
 
 from app.core.config import settings
 from app.db.core import db
+from app.core.security import verify_token, verify_driver_token, create_access_token, verify_password
+from app.modules.routing.router import router as routing_router
+from app.modules.auth.router import router as auth_router
+from app.modules.locations.router import router as locations_router
+from app.modules.passengers.router import router as passengers_router
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
-security = HTTPBearer()
+app.include_router(routing_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api")
+app.include_router(locations_router, prefix="/api/v1")
+app.include_router(passengers_router, prefix="/api")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=bool(settings.cors_origins),
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 class LoginData(BaseModel): username: str; password: str
 class PriceUpdate(BaseModel): base_fare: float; per_km: float
@@ -28,11 +40,6 @@ class ReviewData(BaseModel): tg_id: int; status: str
 @app.on_event("startup")
 async def startup(): 
     await db.init()
-
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try: return jwt.decode(credentials.credentials, settings.secret_key, algorithms=["HS256"])
-    except: raise HTTPException(status_code=401)
-
 
 # 挂载静态文件
 static_dir = os.path.join(BASE_DIR, "app", "web", "static")
@@ -60,28 +67,26 @@ class SupportUpdate(BaseModel):
     username: str
 
 # ================= 1. 鉴权与登录 =================
-# 极简防御性的 verify_token，防止旧代码里没写或者写错
-def verify_token():
-    # 因为在 verify_token 作为 Depends 时会注入，为了兼容之前的代码，我们这里直接放行
-    # 如果你原本有 JWT 验证，可以在这里加回来，目前保证前端能通
-    return True
-
+# ================= 1. 鉴权与登录 =================
 @app.post("/api/login")
 async def login(data: LoginData):
-    if data.username == "admin" and data.password == "vcar888":
-        import time
-        return {"token": f"vcar_admin_{int(time.time())}"}
-    raise HTTPException(status_code=401, detail="账号或密码错误")
+    if not settings.admin_password_hash:
+        raise HTTPException(status_code=503, detail="管理员账号尚未初始化")
+    if data.username != settings.admin_username or not verify_password(data.password, settings.admin_password_hash):
+        raise HTTPException(status_code=401, detail="账号或密码错误")
+    return {"token": create_access_token(subject=settings.admin_username, role="admin")}
 
 # ================= 2. 管理后台接口 =================
 @app.get("/api/stats", dependencies=[Depends(verify_token)])
 async def get_stats():
     async with db.pool.acquire() as c:
+        online_since = __import__("time").time() - 120
+        online_drivers = await db.redis.zcount("driver:heartbeat", online_since, "+inf")
         return {
             "total_orders": await c.fetchval("SELECT COUNT(*) FROM orders"),
             "active_orders": await c.fetchval("SELECT COUNT(*) FROM orders WHERE status IN ('DISPATCHING','ACCEPTED','IN_PROGRESS')"),
             "total_users": await c.fetchval("SELECT COUNT(*) FROM users"),
-            "drivers_online": await c.fetchval("SELECT COUNT(*) FROM users WHERE driver_status='APPROVED'") # 简化统计
+            "drivers_online": online_drivers
         }
 
 @app.get("/api/orders", dependencies=[Depends(verify_token)])
@@ -90,7 +95,7 @@ async def get_admin_orders():
         rows = await c.fetch("SELECT o.id, o.status, o.distance_km, o.price_estimate, o.driver_id, du.plate_number as driver_plate FROM orders o LEFT JOIN users du ON o.driver_id=du.id ORDER BY o.id DESC LIMIT 50")
         return [dict(r) for r in rows]
 
-@app.get("/api/pricing")
+@app.get("/api/pricing", dependencies=[Depends(verify_token)])
 async def get_pricing():
     async with db.pool.acquire() as c:
         # 只查起步价和每公里，防止把客服字符串转 float 报错
@@ -111,7 +116,7 @@ async def set_pricing(price: PriceUpdate):
         await c.execute("UPDATE settings SET value=$1 WHERE key='per_km_rate'", str(price.per_km))
     return {"status": "ok"}
 
-@app.get("/api/config/support")
+@app.get("/api/config/support", dependencies=[Depends(verify_token)])
 async def get_support_config():
     async with db.pool.acquire() as c:
         val = await c.fetchval("SELECT value FROM settings WHERE key='support_username'")
@@ -129,7 +134,9 @@ async def set_support_config(data: SupportUpdate):
 
 # ================= 3. 司机小程序接口 =================
 @app.get("/api/driver/{tg_id}/profile")
-async def get_driver_profile(tg_id: int):
+async def get_driver_profile(tg_id: int, claims: dict = Depends(verify_driver_token)):
+    if str(tg_id) != str(claims["sub"]):
+        raise HTTPException(status_code=403, detail="Cannot access another driver profile")
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id, rating, plate_number FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return {"error": "Driver not found"}
@@ -150,7 +157,9 @@ async def get_driver_profile(tg_id: int):
         }
 
 @app.get("/api/driver/{tg_id}/reviews")
-async def get_driver_reviews(tg_id: int):
+async def get_driver_reviews(tg_id: int, claims: dict = Depends(verify_driver_token)):
+    if str(tg_id) != str(claims["sub"]):
+        raise HTTPException(status_code=403, detail="Cannot access another driver reviews")
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return []
@@ -158,7 +167,9 @@ async def get_driver_reviews(tg_id: int):
         return [dict(r) for r in rows]
 
 @app.get("/api/driver/{tg_id}/orders")
-async def get_driver_orders(tg_id: int):
+async def get_driver_orders(tg_id: int, claims: dict = Depends(verify_driver_token)):
+    if str(tg_id) != str(claims["sub"]):
+        raise HTTPException(status_code=403, detail="Cannot access another driver orders")
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return []
@@ -171,7 +182,9 @@ async def get_driver_orders(tg_id: int):
         return res
 
 @app.get("/api/driver/{tg_id}/income")
-async def get_driver_income(tg_id: int):
+async def get_driver_income(tg_id: int, claims: dict = Depends(verify_driver_token)):
+    if str(tg_id) != str(claims["sub"]):
+        raise HTTPException(status_code=403, detail="Cannot access another driver income")
     async with db.pool.acquire() as c:
         driver = await c.fetchrow("SELECT id FROM users WHERE telegram_id=$1", tg_id)
         if not driver: return []
@@ -186,6 +199,47 @@ if os.path.exists(os.path.join(static_dir, "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
 app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
+
+
+
+@app.get("/api/admin/fleet", dependencies=[Depends(verify_token)])
+async def get_live_fleet():
+    async with db.pool.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT u.id, u.telegram_id, u.first_name, u.phone, u.plate_number,
+                   u.rating, ST_Y(l.position::geometry) AS latitude,
+                   ST_X(l.position::geometry) AS longitude,
+                   l.accuracy_m, l.heading_deg, l.speed_mps,
+                   l.recorded_at, l.received_at
+            FROM users u
+            LEFT JOIN driver_locations l ON l.driver_id=u.id
+            WHERE u.driver_status='APPROVED'
+            ORDER BY l.received_at DESC NULLS LAST
+            """
+        )
+    return [
+        {**dict(row), "online": bool(row["received_at"] and
+          (datetime.now(timezone.utc) - row["received_at"]).total_seconds() <= 120)}
+        for row in rows
+    ]
+
+
+@app.get("/health/live")
+async def health_live():
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def health_ready():
+    try:
+        async with db.pool.acquire() as connection:
+            await connection.fetchval("SELECT 1")
+            postgis = await connection.fetchval("SELECT PostGIS_Version()")
+        await db.redis.ping()
+        return {"status": "ready", "database": "ok", "postgis": postgis, "redis": "ok"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Required dependencies are not ready")
 
 
 @app.get("/{full_path:path}")
