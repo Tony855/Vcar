@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.core.security import create_access_token, verify_telegram_webapp_init_data
 from app.db.core import db
+from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.repositories.order_repo import OrderRepository
 from app.services.pricing import PricingService
 from app.infrastructure.osrm.client import RoutingError
@@ -116,12 +117,9 @@ async def passenger_order_status(
 
 
 @router.websocket("/orders/{order_id}/stream")
-async def passenger_order_stream(websocket: WebSocket, order_id: int, token: str):
-    try:
-        claims = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
-        if claims.get("role") != "passenger" or not claims.get("sub"):
-            raise ValueError("invalid role")
-    except (jwt.PyJWTError, ValueError):
+async def passenger_order_stream(websocket: WebSocket, order_id: int, ticket: str):
+    claims = await consume_ws_ticket(ticket, f"passenger-order:{order_id}")
+    if not claims or claims.get("role") != "passenger":
         await websocket.close(code=4401)
         return
 
