@@ -89,3 +89,13 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - 数据库备份：`bash scripts/backup_database.sh`。脚本验证 dump 可读后才原子移动为正式备份，默认保留 14 天。
 - 数据库恢复：先验证备份文件，再执行 `CONFIRM_RESTORE=YES bash scripts/restore_database.sh /path/to/vcar-backup.dump`。恢复会停止 Bot/Web 服务并覆盖数据库对象，必须先另做当前库备份。
 - 以上脚本只备份 PostgreSQL 数据；媒体文件、上传目录、OSRM 地图数据和服务器密钥需要单独纳入主机级备份策略。
+
+
+## Runtime and dependency baseline (November 2026)
+
+- Python support target: 3.12–3.14; CI validates 3.13 and 3.14. Python dependencies are resolved in `uv.lock`; `requirements.txt` is an exported, fully pinned runtime install manifest.
+- Frontend build target: Node.js 26 LTS and npm 11; Vue 3.5, Vue Router 4, Element Plus 2.14, Vite 8 and `@vitejs/plugin-vue` 6. The npm lockfile is generated against the official npm registry.
+- CI uses current major versions of the official checkout/setup actions and PostGIS 3.7 on PostgreSQL 16.
+- PostgreSQL major-version upgrades are deliberately not performed automatically. Existing production databases require a separate backup/restore and compatibility rehearsal before any PostgreSQL or PostGIS major upgrade. Moving an existing PostGIS database from older Debian/glibc/PostGIS image families to PostGIS 3.7 requires a dump/restore plan; do not simply point a 3.7 image at an old data directory.
+- OSRM remains pinned to upstream v5.27.1 until route/table/match integration tests prove compatibility with a newer engine.
+- Production rollout requires staged dependency installation, database backup, migration dry-run, health checks and a rollback window. This repository change does not update any running host.
