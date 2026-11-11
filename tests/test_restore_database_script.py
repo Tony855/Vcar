@@ -14,6 +14,12 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False):
         "#!/usr/bin/env bash\nprintf 'systemctl %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n",
         encoding="utf-8",
     )
+    (bin_dir / "pg_dump").write_text(
+        "#!/usr/bin/env bash\\nprintf 'pg_dump %s\\\\n' \\\"$*\\\" >> \\\"$COMMAND_LOG\\\"\\n"
+        "while (($#)); do if [[ \\\"$1\\\" == --file=* ]]; then "
+        "printf 'pre-restore dump' > \\\"\${1#--file=}\\\"; fi; shift; done\\n",
+        encoding="utf-8",
+    )
     (bin_dir / "pg_restore").write_text(
         "#!/usr/bin/env bash\nprintf 'pg_restore %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n"
         "if [[ \"$1\" == --list ]]; then exit 0; fi\n"
@@ -30,6 +36,7 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False):
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "COMMAND_LOG": str(command_log),
         "VCAR_ENV_FILE": str(env_file),
+        "VCAR_BACKUP_DIR": str(tmp_path / "pre-restore-backups"),
         "CONFIRM_RESTORE": confirm,
         "FAIL_RESTORE": "1" if fail_restore else "0",
     }
@@ -64,6 +71,8 @@ def test_restore_uses_schema_owner_and_restarts_services_after_success(tmp_path)
     assert "pg_restore --clean" in log
     assert "owner:secret" in log
     assert "runtime:secret" not in log
+    assert "pg_dump" in log
+    assert log.index("pg_dump") < log.index("systemctl stop vcar-bot vcar-web")
     assert "systemctl stop vcar-bot vcar-web" in log
     assert "systemctl start vcar-web vcar-bot" in log
 
