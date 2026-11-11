@@ -1,7 +1,7 @@
 <template>
   <main class="navigation-page">
     <header><div><h2>司机导航</h2><p>{{ gpsState }}</p></div><button @click="startGps" :disabled="tracking">开始共享位置</button></header>
-    <p class="hint">允许定位后，当前位置会自动更新。点击地图设置目的地，再规划驾车路线。</p>
+    <p class="hint">允许定位后，当前位置会自动更新。点击地图设置目的地，系统会规划路线并检测偏航后自动重规划。</p>
     <div ref="mapElement" class="navigation-map"></div>
     <section class="route-summary">
       <span>目的地：{{ destination ? destination.lat.toFixed(5) + ', ' + destination.lng.toFixed(5) : '点击地图选择' }}</span>
@@ -31,15 +31,40 @@ const error = ref('')
 let map, currentMarker, destinationMarker, routeLine, watchId
 let api
 let lastSentAt = 0
+let offRouteSamples = 0
+let lastRerouteAt = 0
 
 function updateCurrent(point) {
   current.value = point
   if (currentMarker) currentMarker.setLatLng([point.lat, point.lng])
   else currentMarker = L.circleMarker([point.lat, point.lng], { radius: 8, color: '#2563eb', fillColor: '#60a5fa', fillOpacity: 1 }).addTo(map)
 }
+function checkRouteDeviation(point) {
+  const coordinates = routeInfo.value?.geometry?.coordinates
+  if (!coordinates?.length || !destination.value || routing.value) return
+  let nearestMeters = Infinity
+  for (const [lng, lat] of coordinates) {
+    const dx = (lng - point.lng) * 111320 * Math.cos(point.lat * Math.PI / 180)
+    const dy = (lat - point.lat) * 110540
+    nearestMeters = Math.min(nearestMeters, Math.hypot(dx, dy))
+  }
+  if (nearestMeters <= 100) {
+    offRouteSamples = 0
+    return
+  }
+  offRouteSamples += 1
+  if (offRouteSamples >= 3 && Date.now() - lastRerouteAt >= 30000) {
+    offRouteSamples = 0
+    lastRerouteAt = Date.now()
+    error.value = '检测到偏离路线，正在自动重新规划'
+    planRoute()
+  }
+}
+
 async function sendGps(position) {
   const point = { lat: position.coords.latitude, lng: position.coords.longitude }
   updateCurrent(point)
+  checkRouteDeviation(point)
   gpsState.value = '定位已连接'
   if (Date.now() - lastSentAt < 10000) return
   lastSentAt = Date.now()
