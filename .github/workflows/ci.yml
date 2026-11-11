@@ -39,8 +39,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app migrations tests
       - run: DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar alembic upgrade head --sql
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
-      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f app/db/schema.sql
+      - run: docker run --rm --network host -v "$GITHUB_WORKSPACE:/workspace" -w /workspace postgres:16 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f app/db/schema.sql
       - run: alembic upgrade head
       - run: pytest -q
 
