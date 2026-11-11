@@ -18,6 +18,7 @@ class Settings:
     osrm_timeout_seconds: float
     osrm_max_table_coordinates: int
     order_event_outbox_poll_interval: float
+    metrics_bearer_token: str
 
     @classmethod
     def from_env(cls):
@@ -41,6 +42,7 @@ class Settings:
             osrm_timeout_seconds=float(os.getenv("OSRM_TIMEOUT_SECONDS", "8")),
             osrm_max_table_coordinates=int(os.getenv("OSRM_MAX_TABLE_COORDINATES", "100")),
             order_event_outbox_poll_interval=max(0.1, float(os.getenv("ORDER_EVENT_OUTBOX_POLL_INTERVAL", "1.0"))),
+            metrics_bearer_token=os.getenv("METRICS_BEARER_TOKEN", "").strip(),
         )
 
 
