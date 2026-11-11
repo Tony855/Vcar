@@ -127,3 +127,6 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - The WebSocket load test sends real authenticated GPS updates and measures fan-out to connected clients. Start with 50, then 100, 250 and 500 clients while observing API CPU/memory, Redis memory/clients, PostgreSQL connections, event loop latency and reverse-proxy limits.
 - Do not run the 500-client test against production without a maintenance window and explicit authorization. The script deliberately requires a valid approved driver token and does not create fake driver accounts.
 - WebSocket JWTs are currently carried as short-lived query parameters because browser WebSocket APIs cannot attach arbitrary Authorization headers. Reverse proxies must redact query strings for these routes; replacing this with one-time WebSocket tickets remains a security follow-up.
+
+
+- The installer keeps the full `.env` (including `MIGRATION_DATABASE_URL`) as `root:root 0600`. It generates `.env.runtime` without the migration URL and points systemd services only at that sanitized file. ACLs explicitly deny the `vcar` service user access to the owner credential file.
