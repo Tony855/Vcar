@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 config = context.config
 
-database_url = os.getenv("DATABASE_URL", "")
+database_url = os.getenv("MIGRATION_DATABASE_URL") or os.getenv("DATABASE_URL", "")
 if database_url:
     if not context.is_offline_mode() and database_url.startswith("postgresql://"):
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
