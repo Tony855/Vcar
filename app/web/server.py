@@ -1,13 +1,10 @@
 import os
 import sys
-import jwt
-import datetime
 import aiohttp
 from fastapi import FastAPI, Depends, HTTPException, Response, Query
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 # 动态获取项目根目录
@@ -16,6 +13,7 @@ sys.path.append(BASE_DIR)
 
 from app.core.config import settings
 from app.db.core import db
+from app.core.security import verify_token, create_access_token, verify_password
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
@@ -28,11 +26,6 @@ class ReviewData(BaseModel): tg_id: int; status: str
 @app.on_event("startup")
 async def startup(): 
     await db.init()
-
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try: return jwt.decode(credentials.credentials, settings.secret_key, algorithms=["HS256"])
-    except: raise HTTPException(status_code=401)
-
 
 # 挂载静态文件
 static_dir = os.path.join(BASE_DIR, "app", "web", "static")
@@ -60,18 +53,14 @@ class SupportUpdate(BaseModel):
     username: str
 
 # ================= 1. 鉴权与登录 =================
-# 极简防御性的 verify_token，防止旧代码里没写或者写错
-def verify_token():
-    # 因为在 verify_token 作为 Depends 时会注入，为了兼容之前的代码，我们这里直接放行
-    # 如果你原本有 JWT 验证，可以在这里加回来，目前保证前端能通
-    return True
-
+# ================= 1. 鉴权与登录 =================
 @app.post("/api/login")
 async def login(data: LoginData):
-    if data.username == "admin" and data.password == "vcar888":
-        import time
-        return {"token": f"vcar_admin_{int(time.time())}"}
-    raise HTTPException(status_code=401, detail="账号或密码错误")
+    if not settings.admin_password_hash:
+        raise HTTPException(status_code=503, detail="管理员账号尚未初始化")
+    if data.username != settings.admin_username or not verify_password(data.password, settings.admin_password_hash):
+        raise HTTPException(status_code=401, detail="账号或密码错误")
+    return {"token": create_access_token(subject=settings.admin_username, role="admin")}
 
 # ================= 2. 管理后台接口 =================
 @app.get("/api/stats", dependencies=[Depends(verify_token)])
