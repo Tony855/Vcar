@@ -55,6 +55,8 @@ class WalletLedger:
 
         async with db.pool.acquire() as conn:
             async with conn.transaction():
+                # Serialize reuse of an idempotency key even when callers target different wallets.
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", idempotency_key)
                 previous = await conn.fetchrow(
                     "SELECT t.id, t.wallet_id, t.amount_minor, t.currency, t.kind, t.order_id, w.user_id FROM wallet_transactions t JOIN wallet_accounts w ON w.id=t.wallet_id WHERE t.idempotency_key=$1",
                     idempotency_key,
