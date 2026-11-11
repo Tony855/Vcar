@@ -58,8 +58,13 @@ if [[ -d web_frontend ]]; then
 fi
 
 echo "[6/7] Creating a restricted service identity..."
+if ! getent group vcar >/dev/null 2>&1; then
+  groupadd --system vcar
+fi
 if ! id vcar >/dev/null 2>&1; then
-  useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin vcar
+  useradd --system --gid vcar --home-dir /nonexistent --shell /usr/sbin/nologin vcar
+else
+  usermod -a -G vcar vcar
 fi
 # Permit traversal through the checkout's parent directories without granting
 # the service user interactive access to root's home.
