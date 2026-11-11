@@ -42,11 +42,11 @@ function setMarker(point, type) {
   if (type === 'pickup') {
     pickup.value = point
     if (pickupMarker) map.removeLayer(pickupMarker)
-    pickupMarker = L.marker([point.lat, point.lng]).addTo(map).bindPopup('上车点')
+    pickupMarker = L.circleMarker([point.lat, point.lng], { radius: 9, color: '#15803d', fillColor: '#22c55e', fillOpacity: 1 }).addTo(map).bindPopup('上车点')
   } else {
     dropoff.value = point
     if (dropoffMarker) map.removeLayer(dropoffMarker)
-    dropoffMarker = L.marker([point.lat, point.lng]).addTo(map).bindPopup('目的地')
+    dropoffMarker = L.circleMarker([point.lat, point.lng], { radius: 9, color: '#b91c1c', fillColor: '#ef4444', fillOpacity: 1 }).addTo(map).bindPopup('目的地')
   }
 }
 async function authenticate() {
