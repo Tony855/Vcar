@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -15,7 +13,6 @@ from app.db.core import db
 from app.modules.locations.gps import is_newer_sample
 from app.modules.locations.redis_projection import publish_driver_location
 
-logger = logging.getLogger(__name__)
 router = APIRouter(tags=["driver-location"])
 
 
