@@ -235,3 +235,20 @@ async def get_live_fleet():
           (datetime.now(timezone.utc) - row["received_at"]).total_seconds() <= 120)}
         for row in rows
     ]
+
+
+@app.get("/health/live")
+async def health_live():
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def health_ready():
+    try:
+        async with db.pool.acquire() as connection:
+            await connection.fetchval("SELECT 1")
+            postgis = await connection.fetchval("SELECT PostGIS_Version()")
+        await db.redis.ping()
+        return {"status": "ready", "database": "ok", "postgis": postgis, "redis": "ok"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Required dependencies are not ready")
