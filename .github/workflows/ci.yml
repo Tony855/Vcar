@@ -40,7 +40,7 @@ jobs:
       - run: python -m compileall -q app migrations tests
       - run: bash -n deploy/install.sh scripts/*.sh
       - run: DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar alembic upgrade head --sql
-      - run: docker run --rm --network host -v "$GITHUB_WORKSPACE:/workspace" -w /workspace postgis/postgis:16-3.4 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f app/db/schema.sql
+      - run: sed '/^\\\\restrict /d; /^\\\\unrestrict /d' app/db/schema.sql | docker run --rm -i --network host postgis/postgis:16-3.4 psql "$DATABASE_URL" -v ON_ERROR_STOP=1
       - run: alembic upgrade head
       - run: test "$(docker run --rm --network host postgis/postgis:16-3.4 psql "$DATABASE_URL" -Atc "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_name IN ('driver_locations','trip_tracks','wallet_accounts','wallet_transactions')) = 4 AND EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis')")" = "t"
       - run: alembic downgrade 20261111_0001 && alembic upgrade head
