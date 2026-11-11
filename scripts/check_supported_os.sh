@@ -12,7 +12,7 @@ fi
 
 version_at_least() {
   local actual="$1" minimum="$2"
-  [[ "$(printf '%s\\n' "$actual" "$minimum" | sort -V | head -n1)" == "$minimum" ]]
+  [[ "$(printf '%s\n' "$actual" "$minimum" | sort -V | head -n1)" == "$minimum" ]]
 }
 
 case "${ID:-}" in
