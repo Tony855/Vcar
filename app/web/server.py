@@ -16,8 +16,13 @@ from app.db.core import db
 from app.core.security import verify_token, create_access_token, verify_password
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
-security = HTTPBearer()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=bool(settings.cors_origins),
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 class LoginData(BaseModel): username: str; password: str
 class PriceUpdate(BaseModel): base_fare: float; per_km: float
