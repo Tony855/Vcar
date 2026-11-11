@@ -23,6 +23,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app migrations tests
+      - run: DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar alembic upgrade head --sql
       - run: pytest -q
 
   frontend:
