@@ -10,30 +10,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 export DEBIAN_FRONTEND=noninteractive
 
-if [[ ! -r /etc/os-release ]]; then
-  echo "Cannot identify this Linux distribution; supported systems are Ubuntu 24.04+ and Debian 13+." >&2
-  exit 1
-fi
-. /etc/os-release
-case "${ID:-}" in
-  ubuntu)
-    if [[ "$(printf '%s\\n' "${VERSION_ID:-0}" "24.04" | sort -V | head -n1)" != "24.04" ]]; then
-      echo "Ubuntu 24.04 or newer is required (detected ${VERSION_ID:-unknown})." >&2
-      exit 1
-    fi
-    ;;
-  debian)
-    if [[ "$(printf '%s\\n' "${VERSION_ID:-0}" "13" | sort -V | head -n1)" != "13" ]]; then
-      echo "Debian 13 or newer is required (detected ${VERSION_ID:-unknown})." >&2
-      exit 1
-    fi
-    ;;
-  *)
-    echo "Unsupported Linux distribution: ${ID:-unknown}. Use Ubuntu 24.04+ or Debian 13+." >&2
-    exit 1
-    ;;
-esac
-
+bash "$PROJECT_DIR/scripts/check_supported_os.sh" /etc/os-release
 echo "[1/7] Installing runtime dependencies..."
 apt-get update -qq
 curl -fsSL https://deb.nodesource.com/setup_26.x | bash - >/dev/null 2>&1
