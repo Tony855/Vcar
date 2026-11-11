@@ -20,5 +20,5 @@ class DB:
             max_size=10, 
             init=init_connection # 注入初始化转换器
         )
-        self.redis = redis.from_url("redis://127.0.0.1:6379/0", decode_responses=True)
+        self.redis = redis.from_url(settings.redis_url, decode_responses=True)
 db = DB()
