@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from app.core.security import verify_driver_token
 from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.core import db
+from app.modules.locations.gps import is_newer_sample
 
 router = APIRouter(tags=["driver-location"])
 
@@ -31,7 +32,7 @@ async def update_driver_location(
     claims: dict = Depends(verify_driver_token),
 ):
     recorded_at = payload.recorded_at
-    if recorded_at.tzinfo is None:
+    if recorded_at.tzinfo is None or recorded_at.utcoffset() is None:
         raise HTTPException(status_code=422, detail="recorded_at must include timezone")
     now = datetime.now(timezone.utc)
     if recorded_at > now + timedelta(seconds=30) or recorded_at < now - timedelta(minutes=5):
@@ -46,10 +47,10 @@ async def update_driver_location(
         if not driver:
             raise HTTPException(status_code=403, detail="Approved driver account required")
         latest = await conn.fetchval("SELECT recorded_at FROM driver_locations WHERE driver_id=$1", driver["id"])
-        if latest is not None and recorded_at <= latest:
-            raise HTTPException(status_code=409, detail="GPS sample is older than the last accepted sample")
+        if not is_newer_sample(recorded_at, latest):
+            raise HTTPException(status_code=409, detail="GPS sample is not newer than the last accepted sample")
         point = f"SRID=4326;POINT({payload.longitude} {payload.latitude})"
-        await conn.execute(
+        accepted_location = await conn.fetchrow(
             """
             INSERT INTO driver_locations
                 (driver_id, telegram_id, position, accuracy_m, heading_deg, speed_mps, recorded_at, received_at)
@@ -59,11 +60,14 @@ async def update_driver_location(
                 accuracy_m=EXCLUDED.accuracy_m, heading_deg=EXCLUDED.heading_deg,
                 speed_mps=EXCLUDED.speed_mps, recorded_at=EXCLUDED.recorded_at,
                 received_at=now()
-            WHERE driver_locations.recorded_at <= EXCLUDED.recorded_at
+            WHERE driver_locations.recorded_at < EXCLUDED.recorded_at
+            RETURNING driver_id
             """,
             driver["id"], telegram_id, point, payload.accuracy_m,
             payload.heading_deg, payload.speed_mps, recorded_at,
         )
+        if accepted_location is None:
+            raise HTTPException(status_code=409, detail="GPS sample was superseded by a newer update")
         active_order = await conn.fetchval(
             """
             SELECT id FROM orders
