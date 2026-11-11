@@ -84,11 +84,11 @@ async def test_driver_location_stream_rebuilds_redis_subscription_and_sends_snap
 
     await locations_router.driver_location_stream(websocket, "single-use")
 
-    assert len(websocket.sent) == 2
+    assert len(websocket.sent) == 3
     assert all(frame["snapshot"] is True for frame in websocket.sent)
     assert calls["pubsubs"] == 2
     assert calls["subscriptions"] == 2
-    assert calls["reads"] == 2
+    assert calls["reads"] == 3
 
 
 @pytest.mark.asyncio
