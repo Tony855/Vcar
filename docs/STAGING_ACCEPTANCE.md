@@ -58,7 +58,9 @@ server-side request rates alongside the generated client report. The script repo
 admin subscriber connection success, initial snapshot delivery, fleet event delivery, reconnect
 snapshot delivery, publish throughput and p50/p95/p99 connection/fan-out latency. Its exit gate
 requires connection, frame, initial snapshot and reconnect snapshot rates to meet the configured
-minimum and zero recorded failures. Client-side results alone do not establish server capacity.
+minimum and zero recorded failures. A run with `--reconnect-probes 0` (or no initial snapshot
+attempts) records a zero snapshot rate and cannot pass the corresponding acceptance gate; skipped
+probes are not counted as successful. Client-side results alone do not establish server capacity.
 
 Acceptance thresholds must be agreed before the run; suggested starting gates:
 - connection success >= 99%;
