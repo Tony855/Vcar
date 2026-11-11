@@ -157,17 +157,20 @@ async def driver_location_stream(websocket: WebSocket, ticket: str):
             )
         await load_snapshot()
         last_reconciliation = asyncio.get_running_loop().time()
+        reconnect_delay = 1.0
         while True:
             if pubsub is None:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(reconnect_delay)
                 try:
                     pubsub = await subscribe()
+                    reconnect_delay = 1.0
                 except Exception:
                     logger.warning(
                         "Driver location Pub/Sub resubscribe failed",
                         extra={"telegram_id": telegram_id},
                         exc_info=True,
                     )
+                    reconnect_delay = min(reconnect_delay * 2, 15.0)
                     await load_snapshot()
                     last_reconciliation = asyncio.get_running_loop().time()
                     continue
