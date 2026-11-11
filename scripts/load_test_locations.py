@@ -154,7 +154,7 @@ async def run(args: argparse.Namespace) -> int:
         if args.json_output:
             output = Path(args.json_output)
             output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(rendered + "\\n", encoding="utf-8")
+            output.write_text(rendered + "\n", encoding="utf-8")
         for ws in sockets:
             await ws.close()
     return 1 if failures or report["frame_delivery_rate"] < args.min_delivery_rate else 0
