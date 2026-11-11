@@ -26,7 +26,7 @@
 6. 如前后端使用不同源，设置 `CORS_ORIGINS` 为明确的可信来源列表；不要使用通配符。
 7. 启动服务：`systemctl restart vcar-bot vcar-web`。
 
-旧版本的硬编码管理员密码已移除。未配置 `SECRET_KEY` 和 `ADMIN_PASSWORD_HASH` 时，管理后台登录会拒绝服务；必须先完成密钥初始化再切换新版本。
+安装脚本会在导入现有基础 schema 后执行 Alembic 迁移，创建订单事件历史表。已有部署升级时，应先备份，再手动执行 `.venv/bin/alembic upgrade head`。\n\n旧版本的硬编码管理员密码已移除。未配置 `SECRET_KEY` 和 `ADMIN_PASSWORD_HASH` 时，管理后台登录会拒绝服务；必须先完成密钥初始化再切换新版本。
 
 ## OSRM（柬埔寨）部署
 
