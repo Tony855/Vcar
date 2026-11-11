@@ -13,11 +13,12 @@ class OrderRepository:
         connection, order_id, from_status, to_status,
         actor_user_id=None, actor_role="SYSTEM", metadata=None,
     ):
-        await connection.execute(
+        event = await connection.fetchrow(
             """
             INSERT INTO order_events
                 (order_id, actor_user_id, actor_role, from_status, to_status, metadata)
             VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+            RETURNING id, created_at
             """,
             order_id,
             actor_user_id,
@@ -26,6 +27,83 @@ class OrderRepository:
             to_status,
             json.dumps(metadata or {}),
         )
+        # The outbox row shares the caller's transaction with the state change
+        # and event history, so a committed transition is always replayable.
+        await connection.execute(
+            """
+            INSERT INTO order_event_outbox (event_id, order_id, payload)
+            VALUES ($1, $2, $3::jsonb)
+            """,
+            event["id"],
+            order_id,
+            json.dumps({
+                "event_id": event["id"],
+                "order_id": order_id,
+                "from_status": from_status,
+                "status": to_status,
+                "actor_role": actor_role,
+                "created_at": event["created_at"].isoformat(),
+            }),
+        )
+
+    @classmethod
+    async def claim_status_events(cls, limit=100):
+        """Claim undelivered status events for a dispatcher using SKIP LOCKED."""
+        batch_size = max(1, min(int(limit), 500))
+        async with db.pool.acquire() as connection:
+            async with connection.transaction():
+                rows = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT id FROM order_event_outbox
+                        WHERE delivered_at IS NULL
+                          AND available_at <= now()
+                          AND (locked_at IS NULL OR locked_at < now() - interval '5 minutes')
+                        ORDER BY id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $1
+                    )
+                    UPDATE order_event_outbox AS outbox
+                    SET locked_at=now(), attempts=attempts+1
+                    FROM candidates
+                    WHERE outbox.id=candidates.id
+                    RETURNING outbox.id, outbox.event_id, outbox.order_id, outbox.payload, outbox.attempts
+                    """,
+                    batch_size,
+                )
+            return [dict(row) for row in rows]
+
+    @classmethod
+    async def mark_status_event_delivered(cls, outbox_id):
+        async with db.pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                UPDATE order_event_outbox
+                SET delivered_at=now(), locked_at=NULL, last_error=NULL
+                WHERE id=$1 AND delivered_at IS NULL
+                """,
+                outbox_id,
+            )
+            return result == "UPDATE 1"
+
+    @classmethod
+    async def retry_status_event(cls, outbox_id, error):
+        """Release a failed claim with capped exponential backoff."""
+        safe_error = str(error).replace("\\x00", "")[:1000]
+        async with db.pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                UPDATE order_event_outbox
+                SET locked_at=NULL,
+                    available_at=now() + LEAST(interval '15 minutes',
+                        interval '5 seconds' * power(2, LEAST(attempts, 8))),
+                    last_error=$2
+                WHERE id=$1 AND delivered_at IS NULL
+                """,
+                outbox_id,
+                safe_error,
+            )
+            return result == "UPDATE 1"
 
     @staticmethod
     async def _publish_status(order_id, status):

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 
 import asyncpg
@@ -142,4 +143,64 @@ async def test_only_assigned_driver_can_advance_order(database_pool):
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)",
                 [passenger_id, assigned_driver, other_driver],
+            )
+
+
+@pytest.mark.asyncio
+async def test_order_status_outbox_is_transactional_and_retryable(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "outbox-passenger")
+        driver_id = await _create_user(connection, "outbox-driver")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        async with database_pool.acquire() as connection:
+            initial = await connection.fetchrow(
+                """
+                SELECT event_id, order_id, payload, attempts, delivered_at
+                FROM order_event_outbox WHERE order_id=$1
+                """,
+                order["id"],
+            )
+        assert initial is not None
+        assert initial["order_id"] == order["id"]
+        assert json.loads(initial["payload"])["status"] == "DISPATCHING"
+        assert initial["attempts"] == 0
+        assert initial["delivered_at"] is None
+
+        claimed = await OrderRepository.claim_status_events(limit=1)
+        assert len(claimed) == 1
+        assert claimed[0]["event_id"] == initial["event_id"]
+        assert claimed[0]["attempts"] == 1
+        assert await OrderRepository.mark_status_event_delivered(claimed[0]["id"]) is True
+        assert await OrderRepository.mark_status_event_delivered(claimed[0]["id"]) is False
+
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        claimed = await OrderRepository.claim_status_events(limit=10)
+        assert len(claimed) == 1
+        assert json.loads(claimed[0]["payload"])["status"] == "ACCEPTED"
+        assert await OrderRepository.retry_status_event(
+            claimed[0]["id"], "temporary Redis outage"
+        ) is True
+
+        async with database_pool.acquire() as connection:
+            retry = await connection.fetchrow(
+                """
+                SELECT attempts, locked_at, available_at, created_at, last_error, delivered_at
+                FROM order_event_outbox WHERE id=$1
+                """,
+                claimed[0]["id"],
+            )
+        assert retry["attempts"] == 1
+        assert retry["locked_at"] is None
+        assert retry["available_at"] > retry["created_at"]
+        assert retry["last_error"] == "temporary Redis outage"
+        assert retry["delivered_at"] is None
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
