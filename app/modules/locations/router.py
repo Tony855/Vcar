@@ -158,6 +158,23 @@ async def driver_location_stream(websocket: WebSocket, ticket: str):
         await load_snapshot()
         last_reconciliation = asyncio.get_running_loop().time()
         while True:
+            if pubsub is None:
+                await asyncio.sleep(1.0)
+                try:
+                    pubsub = await subscribe()
+                except Exception:
+                    logger.warning(
+                        "Driver location Pub/Sub resubscribe failed",
+                        extra={"telegram_id": telegram_id},
+                        exc_info=True,
+                    )
+                    await load_snapshot()
+                    last_reconciliation = asyncio.get_running_loop().time()
+                    continue
+                await load_snapshot()
+                last_reconciliation = asyncio.get_running_loop().time()
+                continue
+
             try:
                 message = await pubsub.get_message(
                     ignore_subscribe_messages=True, timeout=1.0
@@ -175,15 +192,6 @@ async def driver_location_stream(websocket: WebSocket, ticket: str):
                 except Exception:
                     logger.debug("Failed to close stale driver Pub/Sub", exc_info=True)
                 pubsub = None
-                await asyncio.sleep(1.0)
-                try:
-                    pubsub = await subscribe()
-                except Exception:
-                    logger.warning(
-                        "Driver location Pub/Sub resubscribe failed",
-                        extra={"telegram_id": telegram_id},
-                        exc_info=True,
-                    )
                 await load_snapshot()
                 last_reconciliation = asyncio.get_running_loop().time()
                 continue
