@@ -78,22 +78,33 @@ onMounted(async () => {
   connectFleetSocket()
   refreshTimer = window.setInterval(loadFleet, 15000)
 })
-function connectFleetSocket() {
+async function connectFleetSocket() {
   if (disposed) return
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  socket = new WebSocket(`${protocol}//${location.host}/api/v1/admin/fleet/stream?token=${encodeURIComponent(props.token)}`)
-  socket.onopen = () => { reconnectDelay = 1000; error.value = '' }
-  socket.onmessage = event => {
-    try { upsertDriver({ ...JSON.parse(event.data), online: true }) }
-    catch { /* Ignore malformed telemetry frame. */ }
-  }
-  socket.onclose = () => {
+  try {
+    const response = await axios.post('/api/ws-ticket', { scope: 'admin-fleet' }, {
+      headers: { Authorization: `Bearer ${props.token}` }
+    })
     if (disposed) return
-    error.value = '实时连接已断开，正在尝试重连；地图仍会定时刷新'
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    socket = new WebSocket(`${protocol}//${location.host}/api/v1/admin/fleet/stream?ticket=${encodeURIComponent(response.data.ticket)}`)
+    socket.onopen = () => { reconnectDelay = 1000; error.value = '' }
+    socket.onmessage = event => {
+      try { upsertDriver({ ...JSON.parse(event.data), online: true }) }
+      catch { /* Ignore malformed telemetry frame. */ }
+    }
+    socket.onclose = () => {
+      if (disposed) return
+      error.value = '实时连接已断开，正在尝试重连；地图仍会定时刷新'
+      reconnectTimer = window.setTimeout(connectFleetSocket, reconnectDelay)
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000)
+    }
+    socket.onerror = () => socket.close()
+  } catch {
+    if (disposed) return
+    error.value = '无法获取实时连接票据，地图将继续定时刷新'
     reconnectTimer = window.setTimeout(connectFleetSocket, reconnectDelay)
     reconnectDelay = Math.min(reconnectDelay * 2, 30000)
   }
-  socket.onerror = () => socket.close()
 }
 
 onUnmounted(() => {
