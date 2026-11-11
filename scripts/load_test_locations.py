@@ -31,15 +31,14 @@ async def run(args: argparse.Namespace) -> int:
     started = time.monotonic()
 
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-        async with session.post(base + "/api/ws-ticket", json={"scope": "driver-location"}, headers=headers) as response:
-            if response.status != 200:
-                raise SystemExit(f"Unable to obtain driver WebSocket ticket ({response.status})")
-            ticket_payload = await response.json()
-        ws_url = ws_base + "?ticket=" + quote(ticket_payload["ticket"], safe="")
-
         async def connect_one():
             nonlocal failures
             try:
+                async with session.post(base + "/api/ws-ticket", json={"scope": "driver-location"}, headers=headers) as response:
+                    if response.status != 200:
+                        raise RuntimeError(f"ticket endpoint returned {response.status}")
+                    ticket_payload = await response.json()
+                ws_url = ws_base + "?ticket=" + quote(ticket_payload["ticket"], safe="")
                 ws = await session.ws_connect(ws_url, heartbeat=20)
                 sockets.append(ws)
             except Exception as exc:
