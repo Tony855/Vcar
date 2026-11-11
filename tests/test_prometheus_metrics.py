@@ -78,6 +78,9 @@ async def test_metrics_returns_outbox_and_gps_gauges(monkeypatch):
     assert "vcar_order_event_outbox_oldest_age_seconds 42.500" in body
     assert "vcar_driver_locations_fresh 8" in body
     assert "vcar_driver_locations_stale 2" in body
+    assert "vcar_database_pool_connections 7" in body
+    assert "vcar_database_pool_idle_connections 3" in body
+    assert "vcar_redis_available 1" in body
     assert body.endswith("\n")
 
 
