@@ -24,6 +24,31 @@ def percentile(values: list[float], quantile: float) -> float:
     return ordered[index]
 
 
+def fleet_websocket_url(base_url: str, ticket: str) -> str:
+    ws_base = base_url.rstrip("/")
+    if ws_base.startswith("https://"):
+        ws_base = "wss://" + ws_base[len("https://"):]
+    elif ws_base.startswith("http://"):
+        ws_base = "ws://" + ws_base[len("http://"):]
+    else:
+        raise ValueError("base URL must use http or https")
+    return ws_base + "/api/v1/admin/fleet/stream?ticket=" + quote(ticket, safe="")
+
+
+def is_fleet_location_event(payload: str) -> bool:
+    try:
+        event = json.loads(payload)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(event, dict)
+        and isinstance(event.get("telegram_id"), int)
+        and isinstance(event.get("latitude"), (int, float))
+        and isinstance(event.get("longitude"), (int, float))
+        and isinstance(event.get("recorded_at"), str)
+    )
+
+
 def build_report(
     *, requested_connections: int, connected: int, messages_sent: int,
     frames_received: int, connect_latencies_ms: list[float],
@@ -63,8 +88,6 @@ async def run(args: argparse.Namespace) -> int:
     connector = aiohttp.TCPConnector(limit=max(args.connections + 20, 100))
     timeout = aiohttp.ClientTimeout(total=20, connect=10, sock_read=15)
     base = args.base_url.rstrip("/")
-    ws_base = base.replace("https://", "wss://").replace("http://", "ws://")
-    ws_base += "/api/v1/admin/fleet/stream"
     driver_headers = {"Authorization": f"Bearer {driver_token}"}
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     sockets: list[aiohttp.ClientWebSocketResponse] = []
@@ -91,7 +114,7 @@ async def run(args: argparse.Namespace) -> int:
                 ticket = ticket_payload.get("ticket")
                 if not isinstance(ticket, str) or not ticket:
                     raise RuntimeError("ticket endpoint returned no ticket")
-                ws_url = ws_base + "?ticket=" + quote(ticket, safe="")
+                ws_url = fleet_websocket_url(base, ticket)
                 ws = await session.ws_connect(ws_url, heartbeat=20)
                 sockets.append(ws)
                 connect_latencies.append((time.monotonic() - connect_started) * 1000)
@@ -129,7 +152,7 @@ async def run(args: argparse.Namespace) -> int:
                 nonlocal failures, frames_received
                 try:
                     message = await ws.receive(timeout=args.receive_timeout)
-                    if message.type == aiohttp.WSMsgType.TEXT:
+                    if message.type == aiohttp.WSMsgType.TEXT and is_fleet_location_event(message.data):
                         frames_received += 1
                     else:
                         failures += 1
