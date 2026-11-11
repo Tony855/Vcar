@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tests.test_fleet_snapshot import row
+def row(telegram_id, received_at):
+    return {"id": telegram_id, "telegram_id": telegram_id, "latitude": 11.5, "longitude": 104.9, "received_at": received_at}
 
 
 @pytest.mark.asyncio
