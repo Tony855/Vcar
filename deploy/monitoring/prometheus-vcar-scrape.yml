@@ -1,0 +1,19 @@
+# Merge this into the Prometheus server scrape_configs.
+# Replace staging addresses and the exporter address for your private network.
+scrape_configs:
+  - job_name: blackbox-vcar
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://127.0.0.1:8080/health/live
+          - http://127.0.0.1:8080/health/ready
+          - "http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?overview=false"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115

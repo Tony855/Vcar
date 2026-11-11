@@ -1,0 +1,11 @@
+# Blackbox Exporter configuration. Target URLs belong in Prometheus scrape config.
+# Keep the exporter private; do not expose health endpoints publicly.
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      follow_redirects: false

@@ -1,0 +1,68 @@
+import os
+import subprocess
+from pathlib import Path
+
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "backup_database.sh"
+
+
+def _run_backup(tmp_path, env_text):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    dump_log = tmp_path / "dump-args"
+    (bin_dir / "pg_dump").write_text(
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$DUMP_LOG\"\n"
+        "while (($#)); do if [[ \"$1\" == --file=* ]]; then "
+        "printf 'test dump' > \"${1#--file=}\"; fi; shift; done\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "pg_restore").write_text(
+        "#!/usr/bin/env bash\n[[ \"$1\" == --list && -s \"$2\" ]]\n",
+        encoding="utf-8",
+    )
+    for tool in bin_dir.iterdir():
+        tool.chmod(0o755)
+    env_file = tmp_path / ".env"
+    env_file.write_text(env_text, encoding="utf-8")
+    backup_dir = tmp_path / "backups"
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "DUMP_LOG": str(dump_log),
+        "VCAR_ENV_FILE": str(env_file),
+        "VCAR_BACKUP_DIR": str(backup_dir),
+    }
+    result = subprocess.run(
+        ["bash", str(SCRIPT)], env=env, text=True, capture_output=True, check=False
+    )
+    return result, backup_dir, dump_log
+
+
+def test_backup_prefers_migration_database_url_and_secures_verified_dump(tmp_path):
+    result, backup_dir, dump_log = _run_backup(
+        tmp_path,
+        "DATABASE_URL=postgresql://runtime:secret@localhost/vcar\n"
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
+    )
+    assert result.returncode == 0, result.stderr
+    args = dump_log.read_text(encoding="utf-8")
+    assert "owner:secret" in args
+    assert "runtime:secret" not in args
+    dumps = list(backup_dir.glob("vcar-*.dump"))
+    assert len(dumps) == 1
+    assert dumps[0].read_bytes() == b"test dump"
+    assert dumps[0].stat().st_mode & 0o777 == 0o600
+    assert not list(backup_dir.glob("*.tmp"))
+
+
+def test_backup_uses_legacy_database_url_only_when_migration_url_missing(tmp_path):
+    result, _, dump_log = _run_backup(
+        tmp_path, "DATABASE_URL=postgresql://legacy:secret@localhost/vcar\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "legacy:secret" in dump_log.read_text(encoding="utf-8")
+
+
+def test_backup_fails_closed_when_no_database_url_is_configured(tmp_path):
+    result, _, _ = _run_backup(tmp_path, "OTHER=value\n")
+    assert result.returncode == 1
+    assert "missing" in result.stderr
