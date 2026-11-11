@@ -15,9 +15,9 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False):
         encoding="utf-8",
     )
     (bin_dir / "pg_dump").write_text(
-        "#!/usr/bin/env bash\\nprintf 'pg_dump %s\\\\n' \\\"$*\\\" >> \\\"$COMMAND_LOG\\\"\\n"
-        "while (($#)); do if [[ \\\"$1\\\" == --file=* ]]; then "
-        "printf 'pre-restore dump' > \\\"\${1#--file=}\\\"; fi; shift; done\\n",
+        "#!/usr/bin/env bash\nprintf 'pg_dump %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n"
+        "while (($#)); do if [[ \"$1\" == --file=* ]]; then "
+        "printf 'pre-restore dump' > \"${1#--file=}\"; fi; shift; done\n",
         encoding="utf-8",
     )
     (bin_dir / "pg_restore").write_text(
