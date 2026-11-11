@@ -75,6 +75,15 @@ class WalletLedger:
                 )
                 if not wallet:
                     raise WalletError("Wallet account does not exist")
+                previous = await conn.fetchrow(
+                    "SELECT id, wallet_id, amount_minor, currency FROM wallet_transactions WHERE idempotency_key=$1",
+                    idempotency_key,
+                )
+                if previous:
+                    if (previous["wallet_id"] != wallet["id"] or previous["amount_minor"] != amount_minor or previous["currency"] != currency.upper()):
+                        raise IdempotencyConflict("Idempotency key was already used for a different payment")
+                    balance = await conn.fetchval("SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet["id"])
+                    return LedgerResult(previous["id"], wallet["id"], balance, True)
                 if wallet["currency"] != currency.upper():
                     raise WalletError("Wallet currency mismatch")
                 updated = await conn.fetchrow(
