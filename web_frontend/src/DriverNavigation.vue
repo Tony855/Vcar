@@ -88,7 +88,7 @@ onMounted(async () => {
   map.on('click', event => {
     destination.value = event.latlng
     if (destinationMarker) destinationMarker.setLatLng(event.latlng)
-    else destinationMarker = L.marker(event.latlng).addTo(map).bindPopup('导航目的地')
+    else destinationMarker = L.circleMarker(event.latlng, { radius: 9, color: '#b91c1c', fillColor: '#ef4444', fillOpacity: 1 }).addTo(map).bindPopup('导航目的地')
   })
   try {
     const session = await createDriverApi(route.params.tg_id)
