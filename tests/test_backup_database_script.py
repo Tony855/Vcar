@@ -72,16 +72,28 @@ def test_concurrent_backups_started_in_same_second_never_overwrite_each_other(tm
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "date").write_text(
-        "#!/usr/bin/env bash\\necho 20261112T120000Z\\n", encoding="utf-8"
+        """#!/usr/bin/env bash
+echo 20261112T120000Z
+""",
+        encoding="utf-8",
     )
     (bin_dir / "pg_dump").write_text(
-        "#!/usr/bin/env bash\\nsleep 0.2\\n"
-        "while (($#)); do if [[ \"$1\" == --file=* ]]; then "
-        "printf 'unique dump %s' \"$$\" > \"$(printf '%s' \"$1\" | cut -d= -f2-)\"; fi; shift; done\\n",
+        """#!/usr/bin/env bash
+sleep 0.2
+while (($#)); do
+  if [[ "$1" == --file=* ]]; then
+    output="$(printf '%s' "$1" | sed 's/^--file=//')"
+    printf 'unique dump %s' "$$" > "$output"
+  fi
+  shift
+done
+""",
         encoding="utf-8",
     )
     (bin_dir / "pg_restore").write_text(
-        "#!/usr/bin/env bash\\n[[ \"$1\" == --list && -s \"$2\" ]]\\n",
+        """#!/usr/bin/env bash
+[[ "$1" == --list && -s "$2" ]]
+""",
         encoding="utf-8",
     )
     for tool in bin_dir.iterdir():
