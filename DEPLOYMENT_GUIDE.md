@@ -59,3 +59,33 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - 旧的 `app/db/schema.sql` 在兼容迁移阶段继续保留。
 - Alembic 的生产迁移脚本必须经过审查，并在数据库副本上验证 upgrade/downgrade。
 - 司机 WebApp 私有资料接口需要由 Telegram WebApp initData 换取短期司机 JWT；不得仅凭 URL 中的 Telegram ID 访问。
+
+
+## 平台能力扩展（本批次）
+
+### PostGIS 与司机实时定位
+
+- 新迁移 `20261112_0002` 安装 PostGIS 扩展，并创建 `driver_locations`、`trip_tracks`、钱包和交易账本表。
+- 安装器会以 PostgreSQL 管理员身份启用 PostGIS；应用数据库账号仍为普通权限账号。
+- 司机使用 Telegram WebApp 换取的短期 JWT 调用 `POST /api/v1/driver/location`。采样必须包含时区，坐标、精度、方向、速度和时间范围均会校验。
+- 司机位置通过 Redis Pub/Sub 推送到 `/api/v1/driver/location/stream`。浏览器 WebSocket 目前通过短期 JWT query 参数认证；反向代理必须对该路径关闭 query-string 访问日志，避免记录令牌。
+- 管理后台可通过 `GET /api/admin/fleet` 获取司机位置和 120 秒在线判定。派单会清理超时心跳，避免长期离线司机继续进入候选集。
+
+### 乘客预约与司机导航
+
+- 乘客 Telegram WebApp 使用 `POST /api/passenger/session` 建立会话，预约接口为 `POST /api/passenger/orders`。
+- 司机导航接口为 `POST /api/v1/driver/navigation/route`，路线匹配接口为 `POST /api/v1/driver/navigation/match`。
+- 这些接口依赖 OSRM。启用 OSRM 前必须完成柬埔寨地图预处理、健康检查和 Route/Table 冒烟测试。
+
+### 钱包与支付边界
+
+- `wallet_accounts` 与 `wallet_transactions` 是最小账本基础；金额使用整数最小货币单位，交易带唯一幂等键，余额禁止透支。
+- 钱包账本服务尚未连接 ABA/Bakong 或其他支付渠道。不得把未验证的回调直接记账；必须先完成渠道签名/来源验证、金额与币种核对、订单状态核对，再调用账本服务。
+- 当前不包含真实支付收款、退款、提现、分账或会计对账流程。
+
+### 健康检查、备份与恢复
+
+- `GET /health/live` 是进程存活检查；`GET /health/ready` 同时检查 PostgreSQL、PostGIS 和 Redis。
+- 数据库备份：`bash scripts/backup_database.sh`。脚本验证 dump 可读后才原子移动为正式备份，默认保留 14 天。
+- 数据库恢复：先验证备份文件，再执行 `CONFIRM_RESTORE=YES bash scripts/restore_database.sh /path/to/vcar-backup.dump`。恢复会停止 Bot/Web 服务并覆盖数据库对象，必须先另做当前库备份。
+- 以上脚本只备份 PostgreSQL 数据；媒体文件、上传目录、OSRM 地图数据和服务器密钥需要单独纳入主机级备份策略。
