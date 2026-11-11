@@ -101,7 +101,7 @@ async def passenger_order_status(
     async with db.pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, status, price_estimate, distance_km, created_at
+            SELECT id, status, price_estimate, distance_km
             FROM orders
             WHERE id=$1 AND customer_id=(SELECT id FROM users WHERE telegram_id=$2)
             """,
