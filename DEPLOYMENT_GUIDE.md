@@ -99,3 +99,22 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - PostgreSQL major-version upgrades are deliberately not performed automatically. Existing production databases require a separate backup/restore and compatibility rehearsal before any PostgreSQL or PostGIS major upgrade. Moving an existing PostGIS database from older Debian/glibc/PostGIS image families to PostGIS 3.7 requires a dump/restore plan; do not simply point a 3.7 image at an old data directory.
 - OSRM remains pinned to upstream v5.27.1 until route/table/match integration tests prove compatibility with a newer engine.
 - Production rollout requires staged dependency installation, database backup, migration dry-run, health checks and a rollback window. This repository change does not update any running host.
+
+
+## Least-privilege database credentials
+
+- `DATABASE_URL` is the application runtime connection and must use the restricted `vcar_app` login.
+- `MIGRATION_DATABASE_URL` is reserved for the schema owner `vcar` and is used only by Alembic and installer schema import.
+- The installer upgrades legacy `DATABASE_URL=...vcar...` configurations by preserving that owner URL as `MIGRATION_DATABASE_URL`, generating a separate runtime login, and applying table/sequence grants plus default privileges for future Alembic objects.
+- The application role receives SELECT/INSERT/UPDATE/DELETE and sequence privileges but no table ownership or schema DDL privileges. CI verifies it can query application data but cannot create tables.
+- Do not put the migration-owner URL in application-only containers or expose it to web workers. Keep it only in the protected installer/migration environment.
+- Existing deployments must take a database backup before running the updated installer. The installer does not run automatically against a live production host as part of this repository change.
+
+## New map and wallet APIs
+
+- Passenger WebApp: `/passenger`; it uses Telegram WebApp identity, map clicks for pickup/drop-off, `POST /api/passenger/orders`, and reads only the authenticated passenger's own order status.
+- Driver WebApp: `/mini/{telegram_id}/navigation`; GPS sharing requires an approved driver session and route planning uses OSRM. Location updates are throttled client-side to one per 10 seconds.
+- Admin console: the `实时车队` tab reads `/api/admin/fleet` and subscribes to `/api/v1/admin/fleet/stream`; it falls back to periodic refresh and bounded WebSocket reconnect.
+- Wallet: `/api/v1/wallet/me` opens/returns a single USD or KHR wallet, `/api/v1/wallet/me/transactions` lists the caller's own ledger, and `/api/v1/wallet/admin/adjust` provides an auditable idempotent admin adjustment.
+- No real payment-provider adapter is enabled. ABA/Bakong callbacks, settlement, refunds, withdrawals and reconciliation must remain disabled until official provider specifications and sandbox credentials are available.
+- OSRM real-map smoke checks: set `OSRM_BASE_URL` and run `python scripts/smoke_osrm.py`. The script checks Nearest, Route, Table and Match endpoints against the configured Cambodia map server.
