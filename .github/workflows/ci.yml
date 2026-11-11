@@ -53,11 +53,12 @@ jobs:
       - run: uv run --no-sync pip-audit -r requirements.txt
       - name: Verify restricted runtime database role
         run: |
+          OWNER_BOOTSTRAP_URL="$DATABASE_URL"
           python deploy/bootstrap_env.py --env-file /tmp/vcar-ci.env --write-role-sql /tmp/vcar-ci-roles.sql
           set -a
           . /tmp/vcar-ci.env
           set +a
-          docker run --rm --network host -v /tmp/vcar-ci-roles.sql:/roles.sql postgis/postgis:16-3.7 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f /roles.sql
+          docker run --rm --network host -v /tmp/vcar-ci-roles.sql:/roles.sql postgis/postgis:16-3.7 psql "$OWNER_BOOTSTRAP_URL" -v ON_ERROR_STOP=1 -f /roles.sql
           docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT 1 FROM users LIMIT 1"
           if docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE TABLE public.runtime_role_must_not_create(id integer)"; then
             echo "Runtime role unexpectedly has DDL privileges" >&2
