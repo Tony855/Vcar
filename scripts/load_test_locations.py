@@ -61,6 +61,17 @@ def is_fleet_location_event(payload: str) -> bool:
     )
 
 
+def meets_acceptance_thresholds(report: dict, minimum_rate: float) -> bool:
+    """Return whether every measured delivery/recovery gate passed."""
+    return (
+        report.get("failures", 0) == 0
+        and report.get("connection_success_rate", 0.0) >= minimum_rate
+        and report.get("frame_delivery_rate", 0.0) >= minimum_rate
+        and report.get("initial_snapshot_rate", 0.0) >= minimum_rate
+        and report.get("reconnect_snapshot_rate", 0.0) >= minimum_rate
+    )
+
+
 def build_report(
     *, requested_connections: int, connected: int, messages_sent: int,
     frames_received: int, connect_latencies_ms: list[float],
@@ -254,12 +265,7 @@ async def run(args: argparse.Namespace) -> int:
             output.write_text(rendered + "\n", encoding="utf-8")
         for ws in sockets:
             await ws.close()
-    return 1 if (
-        failures
-        or report["frame_delivery_rate"] < args.min_delivery_rate
-        or report["initial_snapshot_rate"] < args.min_delivery_rate
-        or report["reconnect_snapshot_rate"] < args.min_delivery_rate
-    ) else 0
+    return 0 if meets_acceptance_thresholds(report, args.min_delivery_rate) else 1
 
 
 def main() -> int:
