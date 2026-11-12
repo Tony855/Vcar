@@ -631,6 +631,17 @@ async def test_order_cancellation_binds_actor_role_to_the_matching_participant(d
     try:
         assert await OrderRepository.accept(order["id"], driver_id) is True
 
+        for invalid_order_id, invalid_actor_id in (
+            (0, passenger_id),
+            (2**63, passenger_id),
+            (order["id"], 0),
+            (order["id"], 2**63),
+            (order["id"], True),
+        ):
+            assert await OrderRepository.cancel_with_fee(
+                invalid_order_id, invalid_actor_id, "PASSENGER", 1.0
+            ) is False
+
         assert await OrderRepository.cancel_with_fee(
             order["id"], passenger_id, "DRIVER", 1.0
         ) is False
