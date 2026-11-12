@@ -176,7 +176,7 @@ async def test_order_status_outbox_is_transactional_and_retryable(database_pool)
         assert claimed[0]["event_id"] == initial["event_id"]
         assert claimed[0]["attempts"] == 1
         assert await OrderRepository.mark_status_event_delivered(claimed[0]["id"], claimed[0]["lock_token"]) is True
-        assert await OrderRepository.mark_status_event_delivered(claimed[0]["id"]) is False
+        assert await OrderRepository.mark_status_event_delivered(claimed[0]["id"], claimed[0]["lock_token"]) is False
 
         assert await OrderRepository.accept(order["id"], driver_id) is True
         claimed = await OrderRepository.claim_status_events(limit=10)
