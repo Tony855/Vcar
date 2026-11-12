@@ -37,6 +37,33 @@ groups:
           summary: Vcar Redis dependency is unavailable
           description: Vcar metrics can still be scraped, but Redis PING has failed for more than two minutes.
 
+      - alert: VcarDriverPresenceReconciliationFailing
+        expr: vcar_driver_presence_reconciliation_consecutive_failures >= 3
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar driver presence reconciliation is failing
+          description: PostgreSQL-to-Redis driver presence repair has failed at least three consecutive cycles.
+
+      - alert: VcarDriverPresenceReconciliationStalled
+        expr: vcar_driver_presence_reconciliation_last_success_timestamp == 0 or (vcar_driver_presence_reconciliation_last_success_timestamp > 0 and time() - vcar_driver_presence_reconciliation_last_success_timestamp > 120)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Vcar driver presence reconciliation is stale
+          description: The PostgreSQL-to-Redis driver presence repair has never succeeded or has not completed successfully for more than two minutes.
+
+      - alert: VcarOrderOutboxHighRetry
+        expr: vcar_order_event_outbox_high_retry > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Vcar order events are repeatedly failing delivery
+          description: One or more undelivered order events have reached at least eight delivery attempts.
+
       - alert: VcarDatabasePoolSaturated
         expr: vcar_database_pool_max_connections > 0 and (vcar_database_pool_connections - vcar_database_pool_idle_connections) / vcar_database_pool_max_connections > 0.85
         for: 5m

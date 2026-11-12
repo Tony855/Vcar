@@ -20,6 +20,9 @@ def test_prometheus_alert_rules_parse_and_cover_redis_pool_and_outbox():
     assert {
         "VcarMetricsTargetDown",
         "VcarRedisUnavailable",
+        "VcarDriverPresenceReconciliationFailing",
+        "VcarDriverPresenceReconciliationStalled",
+        "VcarOrderOutboxHighRetry",
         "VcarDatabasePoolSaturated",
         "VcarOrderOutboxBacklog",
         "VcarOrderOutboxDeliveryStalled",
@@ -27,6 +30,9 @@ def test_prometheus_alert_rules_parse_and_cover_redis_pool_and_outbox():
         "VcarBackupLastSuccessStale",
     } <= by_name.keys()
     assert "vcar_redis_available" in by_name["VcarRedisUnavailable"]["expr"]
+    assert "vcar_driver_presence_reconciliation_consecutive_failures" in by_name["VcarDriverPresenceReconciliationFailing"]["expr"]
+    assert "vcar_driver_presence_reconciliation_last_success_timestamp" in by_name["VcarDriverPresenceReconciliationStalled"]["expr"]
+    assert "vcar_order_event_outbox_high_retry" in by_name["VcarOrderOutboxHighRetry"]["expr"]
     assert "vcar_database_pool_max_connections" in by_name["VcarDatabasePoolSaturated"]["expr"]
     assert "vcar_database_pool_idle_connections" in by_name["VcarDatabasePoolSaturated"]["expr"]
     assert "vcar_backup_last_run_success" in by_name["VcarBackupLastRunFailed"]["expr"]
