@@ -25,7 +25,10 @@ return removed
 
 _SET_DRIVER_ONLINE = """
 local current = redis.call('GET', KEYS[3])
-if current and tonumber(current) > tonumber(ARGV[5]) then
+-- Normal delayed operations remain generation-fenced. A fresh go_online
+-- transition may reconcile a stale Redis marker while holding the
+-- authoritative PostgreSQL user-row lock through this script.
+if current and tonumber(current) > tonumber(ARGV[5]) and ARGV[6] ~= '1' then
     return 0
 end
 redis.call('SET', KEYS[3], ARGV[5], 'EX', 2592000)
@@ -83,26 +86,42 @@ class DispatchService:
 
     @staticmethod
     async def go_online(driver_tid, lng, lat):
+        # Keep the durable row lock until Redis has applied the new generation.
+        # This serializes concurrent online/offline/GPS transitions and allows
+        # PostgreSQL to replace a stale higher Redis marker after DB restore.
         async with db.pool.acquire() as connection:
-            row = await connection.fetchrow(
-                """
-                UPDATE users
-                SET driver_is_online=TRUE,
-                    driver_presence_generation=driver_presence_generation+1
-                WHERE telegram_id=$1 AND driver_status='APPROVED'
-                  AND driver_presence_generation < 9223372036854775807
-                RETURNING driver_presence_generation
-                """,
-                int(driver_tid),
-            )
-        if not row:
-            return False
-        generation = int(row["driver_presence_generation"])
-        applied = await db.redis.eval(
-            _SET_DRIVER_ONLINE, 3,
-            "driver:online", "driver:heartbeat", f"driver:presence:generation:{driver_tid}",
-            float(lng), float(lat), str(driver_tid), __import__("time").time(), generation,
-        )
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    UPDATE users
+                    SET driver_is_online=TRUE,
+                        driver_presence_generation=driver_presence_generation+1
+                    WHERE telegram_id=$1 AND driver_status='APPROVED'
+                      AND driver_presence_generation < 9223372036854775807
+                    RETURNING driver_presence_generation
+                    """,
+                    int(driver_tid),
+                )
+                if not row:
+                    return False
+                generation = int(row["driver_presence_generation"])
+                try:
+                    applied = await db.redis.eval(
+                        _SET_DRIVER_ONLINE, 3,
+                        "driver:online", "driver:heartbeat",
+                        f"driver:presence:generation:{driver_tid}",
+                        float(lng), float(lat), str(driver_tid),
+                        __import__("time").time(), generation, 1,
+                    )
+                except Exception:
+                    # PostgreSQL remains authoritative; the reconciliation
+                    # worker repairs Redis after a transient projection failure.
+                    logging.warning(
+                        "Driver online state committed with degraded Redis projection",
+                        extra={"telegram_id": int(driver_tid), "generation": generation},
+                        exc_info=True,
+                    )
+                    return False
         return applied == 1
 
     @staticmethod

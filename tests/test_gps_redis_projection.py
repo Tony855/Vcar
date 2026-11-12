@@ -269,8 +269,16 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
             int(telegram_id),
         )
         generation_key = f"driver:presence:generation:{telegram_id}"
+        # Simulate Redis retaining a generation from before a PostgreSQL restore.
+        await redis.set(generation_key, 99, ex=2592000)
         await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
         online_generation = int(await redis.get(generation_key))
+        db_generation = await pool.fetchval(
+            "SELECT driver_presence_generation FROM users WHERE telegram_id=$1",
+            int(telegram_id),
+        )
+        assert online_generation == db_generation
+        assert online_generation < 99
         db_state = await pool.fetchrow(
             "SELECT driver_is_online, driver_presence_generation FROM users WHERE telegram_id=$1",
             int(telegram_id),
@@ -432,4 +440,73 @@ async def test_offline_transition_fences_an_in_flight_gps_projection(sample, mon
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.delete(generation_key)
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_online_and_offline_transitions_serialize_redis_projection(monkeypatch):
+    """An Offline request cannot overtake an in-flight Online projection."""
+    import asyncio
+    import os
+    import uuid
+
+    from redis.asyncio import Redis
+
+    from app.db.core import db
+    from app.services.dispatch import DispatchService, _SET_DRIVER_ONLINE
+
+    import asyncpg
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+    telegram_id = f"4{uuid.uuid4().int % 900000000}"
+    entered_projection = asyncio.Event()
+    release_projection = asyncio.Event()
+
+    class BlockingRedis:
+        async def eval(self, script, *args):
+            if script == _SET_DRIVER_ONLINE:
+                entered_projection.set()
+                await release_projection.wait()
+            return await redis.eval(script, *args)
+
+    try:
+        await pool.execute(
+            "INSERT INTO users (telegram_id, driver_status) VALUES ($1, 'APPROVED')",
+            int(telegram_id),
+        )
+        monkeypatch.setattr(db, "pool", pool)
+        monkeypatch.setattr(db, "redis", BlockingRedis())
+
+        online_task = asyncio.create_task(
+            DispatchService.go_online(telegram_id, 104.9282, 11.5564)
+        )
+        await asyncio.wait_for(entered_projection.wait(), timeout=5)
+        offline_task = asyncio.create_task(DispatchService.go_offline(telegram_id))
+
+        done, pending = await asyncio.wait({offline_task}, timeout=0.05)
+        assert not done, "Offline must wait for the in-flight Online row lock"
+        assert offline_task in pending
+
+        release_projection.set()
+        assert await asyncio.wait_for(online_task, timeout=5) is True
+        assert await asyncio.wait_for(offline_task, timeout=5) is True
+
+        db_state = await pool.fetchrow(
+            "SELECT driver_is_online, driver_presence_generation FROM users WHERE telegram_id=$1",
+            int(telegram_id),
+        )
+        generation_key = f"driver:presence:generation:{telegram_id}"
+        assert db_state["driver_is_online"] is False
+        assert int(await redis.get(generation_key)) == db_state["driver_presence_generation"]
+        assert await redis.zscore("driver:heartbeat", telegram_id) is None
+        assert await redis.geopos("driver:online", telegram_id) == [None]
+    finally:
+        release_projection.set()
+        await redis.zrem("driver:heartbeat", telegram_id)
+        await redis.zrem("driver:location:version", telegram_id)
+        await redis.zrem("driver:online", telegram_id)
+        await redis.delete(f"driver:presence:generation:{telegram_id}")
+        await pool.execute("DELETE FROM users WHERE telegram_id=$1", int(telegram_id))
+        await pool.close()
         await redis.aclose()
