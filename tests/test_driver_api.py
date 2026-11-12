@@ -86,7 +86,12 @@ def driver_client(monkeypatch):
         inserted={"driver_id": 11},
     )
     monkeypatch.setattr(db, "pool", FakePool(connection))
-    monkeypatch.setattr(db, "redis", object())
+
+    class FakeRedis:
+        async def eval(self, *args):
+            return "online:1"
+
+    monkeypatch.setattr(db, "redis", FakeRedis())
     token = jwt.encode(
         {"sub": "7002002", "role": "driver", "exp": int(time.time()) + 300},
         secret,
