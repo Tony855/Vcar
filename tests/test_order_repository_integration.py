@@ -1551,7 +1551,34 @@ async def test_offline_transition_rechecks_active_trip_after_waiting_for_driver_
         passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
     )
     offline_task = None
+    lock_query_started = asyncio.Event()
     monkeypatch.setattr(db, "redis", object())
+
+    class ObservedConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        async def fetchrow(self, query, *args):
+            if "driver_status='APPROVED'" in query and "FOR UPDATE" in query:
+                lock_query_started.set()
+            return await self.connection.fetchrow(query, *args)
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+    class ObservedAcquire:
+        async def __aenter__(self):
+            self.connection = await database_pool.acquire()
+            return ObservedConnection(self.connection)
+
+        async def __aexit__(self, exc_type, exc, tb):
+            await database_pool.release(self.connection)
+
+    class ObservedPool:
+        def acquire(self):
+            return ObservedAcquire()
+
+    monkeypatch.setattr(db, "pool", ObservedPool())
     try:
         # Hold the same user-row lock used by accept() and go_offline().
         # Start go_offline while it is blocked, then commit an active trip
@@ -1565,22 +1592,10 @@ async def test_offline_transition_rechecks_active_trip_after_waiting_for_driver_
                 offline_task = asyncio.create_task(
                     DispatchService.go_offline(str(telegram_id))
                 )
-                deadline = asyncio.get_running_loop().time() + 5
-                waiting = False
-                while asyncio.get_running_loop().time() < deadline:
-                    waiting = await lock_connection.fetchval(
-                        """
-                        SELECT EXISTS(
-                            SELECT 1 FROM pg_stat_activity
-                            WHERE wait_event_type='Lock'
-                              AND query ILIKE '%SELECT id%FROM users%FOR UPDATE%'
-                        )
-                        """
-                    )
-                    if waiting:
-                        break
-                    await asyncio.sleep(0.02)
-                assert waiting, "go_offline did not reach the driver-row lock"
+                await asyncio.wait_for(lock_query_started.wait(), timeout=5)
+                # Give asyncpg time to submit the observed SELECT and block on
+                # the row lock before the order becomes active.
+                await asyncio.sleep(0.05)
 
                 await lock_connection.execute(
                     "UPDATE orders SET driver_id=$1, status='ACCEPTED' WHERE id=$2",
