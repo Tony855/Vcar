@@ -128,6 +128,8 @@ async def test_passenger_stream_replays_and_deduplicates_pubsub_overlap(monkeypa
             self.frames = [
                 {"type": "message", "data": json.dumps({"event_id": 5, "status": "IN_PROGRESS"})},
                 {"type": "message", "data": json.dumps({"event_id": 6, "status": "ARRIVED"})},
+                # At-least-once outbox delivery may publish the same event again.
+                {"type": "message", "data": json.dumps({"event_id": 6, "status": "ARRIVED"})},
                 {"type": "message", "data": json.dumps({"event_id": 7, "status": "COMPLETED"})},
             ]
 
