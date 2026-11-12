@@ -44,6 +44,7 @@ def test_pricing_parser_handles_both_configured_values():
         {"base_fare": 1, "per_km": -0.5},
         {"base_fare": float("nan"), "per_km": 0.5},
         {"base_fare": 1, "per_km": float("inf")},
+        {"base_fare": True, "per_km": 0.5},
     ],
 )
 def test_price_update_rejects_negative_and_non_finite_values(payload):
