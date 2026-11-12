@@ -171,3 +171,8 @@ passenger UI end-to-end run.
 | 5 Installer VM matrix | NOT RUN on disposable VMs | | | |
 | 6 Monitoring | TEMPLATE ONLY | | | |
 | 7 E2E | NOT RUN on staging | | | |
+
+
+### Batch execution helper
+
+Use `bash scripts/run_staging_load_profiles.sh` to execute the 50, 100, 250 and 500 subscriber tiers sequentially. It requires `VCAR_STAGING_ACK=I_CONFIRM_ISOLATED_STAGING`, `VCAR_BASE_URL`, and short-lived `DRIVER_TOKEN` / `ADMIN_TOKEN` environment variables; tokens are never command-line arguments or printed. Each tier writes a JSON report under `artifacts/gps-load/` (directory mode 0700), waits 30 seconds by default, and stops immediately if a tier fails. Tune `VCAR_LOAD_COOLDOWN_SECONDS`, `VCAR_LOAD_MESSAGES`, `VCAR_RECONNECT_PROBES`, `VCAR_MIN_DELIVERY_RATE`, and `VCAR_LOAD_OUTPUT_DIR` as needed. This helper automates the sequence only; it does not run staging tests itself or claim that any tier has passed.
