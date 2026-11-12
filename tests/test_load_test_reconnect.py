@@ -88,3 +88,46 @@ def test_build_report_includes_reconnect_snapshot_recovery():
     assert report["reconnect_attempts"] == 5
     assert report["reconnect_snapshots"] == 5
     assert report["reconnect_snapshot_rate"] == 1.0
+
+
+from scripts.load_test_locations import meets_acceptance_thresholds
+
+
+def _passing_load_report():
+    return {
+        "connection_success_rate": 1.0,
+        "frame_delivery_rate": 1.0,
+        "initial_snapshot_rate": 1.0,
+        "reconnect_snapshot_rate": 1.0,
+        "failures": 0,
+    }
+
+
+def test_load_acceptance_requires_every_delivery_and_recovery_gate():
+    assert meets_acceptance_thresholds(_passing_load_report(), 0.99)
+
+
+def test_load_acceptance_rejects_missing_or_degraded_reconnect_recovery():
+    report = _passing_load_report()
+    report["reconnect_snapshot_rate"] = 0.0
+    assert not meets_acceptance_thresholds(report, 0.99)
+
+
+def test_load_acceptance_rejects_malformed_and_non_finite_report_values():
+    import math
+
+    for invalid in (True, math.nan, math.inf, -0.01, 1.01, "1.0", None):
+        report = _passing_load_report()
+        report["frame_delivery_rate"] = invalid
+        assert not meets_acceptance_thresholds(report, 0.99)
+
+    report = _passing_load_report()
+    report["failures"] = True
+    assert not meets_acceptance_thresholds(report, 0.99)
+
+
+def test_load_acceptance_rejects_invalid_thresholds():
+    import math
+
+    for threshold in (True, math.nan, math.inf, -0.1, 1.1, "0.99"):
+        assert not meets_acceptance_thresholds(_passing_load_report(), threshold)
