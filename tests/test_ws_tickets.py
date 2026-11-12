@@ -66,6 +66,8 @@ async def test_ticket_issuer_rejects_wrong_role_and_invalid_scope(fake_redis):
         await ws_tickets.issue_ws_ticket(token(secret, role="driver"), "admin-fleet")
     with pytest.raises(ValueError):
         await ws_tickets.issue_ws_ticket(token(secret), "unrestricted")
+    with pytest.raises(ValueError):
+        await ws_tickets.issue_ws_ticket(token(secret, role="passenger"), "passenger-order:9223372036854775808")
 
 
 @pytest.mark.asyncio
