@@ -207,3 +207,41 @@ async def test_reconciliation_never_moves_a_newer_online_heartbeat_backwards():
     assert result == {"database_fresh": 1, "repaired": 1, "stale_removed": 0}
     assert redis.heartbeat["1005"] == pytest.approx(online_at.timestamp())
     assert redis.versions["1005"] == pytest.approx(recorded_at.timestamp())
+
+
+@pytest.mark.asyncio
+async def test_real_redis_reconciliation_preserves_newer_online_heartbeat():
+    import os
+    import uuid
+
+    from redis.asyncio import Redis
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    now = datetime.now(timezone.utc)
+    telegram_id = str(2_000_000_000 + (uuid.uuid4().int % 8_000_000_000))
+    recorded_at = now - timedelta(seconds=12)
+    received_at = now - timedelta(seconds=10)
+    online_at = now - timedelta(seconds=1)
+    try:
+        await redis.geoadd("driver:online", (104.9282, 11.5564, telegram_id))
+        await redis.zadd("driver:heartbeat", {telegram_id: online_at.timestamp()})
+        await redis.zadd("driver:location:version", {telegram_id: recorded_at.timestamp()})
+
+        result = await reconcile_driver_presence(
+            redis,
+            FakeConnection([driver_row(int(telegram_id), now, age=10, recorded_age=12)]),
+            now=now,
+        )
+
+        assert result["repaired"] == 1
+        assert await redis.zscore("driver:heartbeat", telegram_id) == pytest.approx(
+            online_at.timestamp()
+        )
+        assert await redis.zscore("driver:location:version", telegram_id) == pytest.approx(
+            recorded_at.timestamp()
+        )
+    finally:
+        await redis.zrem("driver:heartbeat", telegram_id)
+        await redis.zrem("driver:location:version", telegram_id)
+        await redis.zrem("driver:online", telegram_id)
+        await redis.aclose()
