@@ -784,3 +784,59 @@ async def test_concurrent_order_cancellation_emits_exactly_one_event(database_po
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_order_completion_emits_one_terminal_event(database_pool):
+    """Repeated finish callbacks must produce one completion transition and outbox row."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "duplicate-finish-passenger")
+        driver_id = await _create_user(connection, "duplicate-finish-driver")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        assert await OrderRepository.update_status(
+            order["id"], "ARRIVED", "ACCEPTED",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+        assert await OrderRepository.update_status(
+            order["id"], "IN_PROGRESS", "ARRIVED",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+
+        outcomes = await asyncio.gather(
+            OrderRepository.update_status(
+                order["id"], "COMPLETED", "IN_PROGRESS",
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ),
+            OrderRepository.update_status(
+                order["id"], "COMPLETED", "IN_PROGRESS",
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ),
+        )
+        assert sorted(outcomes) == [False, True]
+
+        async with database_pool.acquire() as connection:
+            status = await connection.fetchval(
+                "SELECT status FROM orders WHERE id=$1", order["id"]
+            )
+            completed_events = await connection.fetchval(
+                "SELECT count(*) FROM order_events WHERE order_id=$1 AND to_status='COMPLETED'",
+                order["id"],
+            )
+            completed_outbox = await connection.fetchval(
+                "SELECT count(*) FROM order_event_outbox WHERE order_id=$1 AND payload->>'status'='COMPLETED'",
+                order["id"],
+            )
+        assert status == "COMPLETED"
+        assert completed_events == 1
+        assert completed_outbox == 1
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
