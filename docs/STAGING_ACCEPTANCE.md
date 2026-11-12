@@ -176,3 +176,8 @@ passenger UI end-to-end run.
 ### Batch execution helper
 
 Use `bash scripts/run_staging_load_profiles.sh` to execute the 50, 100, 250 and 500 subscriber tiers sequentially. It requires `VCAR_STAGING_ACK=I_CONFIRM_ISOLATED_STAGING`, `VCAR_BASE_URL`, and short-lived `DRIVER_TOKEN` / `ADMIN_TOKEN` environment variables; tokens are never command-line arguments or printed. Each tier writes a JSON report under `artifacts/gps-load/` (directory mode 0700), waits 30 seconds by default, and stops immediately if a tier fails. Tune `VCAR_LOAD_COOLDOWN_SECONDS`, `VCAR_LOAD_MESSAGES`, `VCAR_RECONNECT_PROBES`, `VCAR_MIN_DELIVERY_RATE`, and `VCAR_LOAD_OUTPUT_DIR` as needed. This helper automates the sequence only; it does not run staging tests itself or claim that any tier has passed.
+
+
+### Backup freshness and failure telemetry
+
+The backup script can publish node_exporter textfile metrics when `VCAR_BACKUP_METRICS_FILE` points to a file inside the configured textfile collector directory. It atomically writes `vcar_backup_last_success_timestamp_seconds` and `vcar_backup_last_run_success`; a failed run sets the latter to 0 while preserving the last verified backup timestamp. Prometheus rules alert when a backup run fails or the last verified backup is older than 24 hours. Configure the environment variable in the scheduled backup job, ensure node_exporter reads the containing directory, and verify the textfile is readable by the exporter. CI tests success/failure metric behavior and evaluates both alert rules; actual scheduled-job and Alertmanager delivery still require staging setup.
