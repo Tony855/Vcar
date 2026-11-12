@@ -1,5 +1,6 @@
 import math
 import json
+from decimal import Decimal, InvalidOperation
 
 from app.db.core import db
 from app.modules.orders.state_machine import validate_transition, InvalidOrderTransition
@@ -238,10 +239,14 @@ class OrderRepository:
         # participant is not sufficient to claim the other participant's role.
         if role not in {"PASSENGER", "DRIVER"}:
             return False
+        if isinstance(fee, bool) or not isinstance(fee, (int, float, Decimal)):
+            return False
         try:
-            if not math.isfinite(float(fee)) or fee < 0:
+            fee_decimal = Decimal(str(fee))
+            fee_value = float(fee_decimal)
+            if not fee_decimal.is_finite() or fee_decimal < 0 or not math.isfinite(fee_value):
                 return False
-        except (TypeError, ValueError, OverflowError):
+        except (InvalidOperation, TypeError, ValueError, OverflowError):
             return False
 
         async with db.pool.acquire() as connection:
@@ -269,14 +274,14 @@ class OrderRepository:
                     WHERE id=$3 AND status=$4
                     RETURNING id
                     """,
-                    role, fee, oid, current_status,
+                    role, fee_value, oid, current_status,
                 )
                 if not row:
                     return False
                 await cls._append_event(
                     connection, oid, current_status, "CANCELLED",
                     actor_user_id=uid, actor_role=role,
-                    metadata={"cancel_fee": float(fee)},
+                    metadata={"cancel_fee": fee_value},
                 )
             return True
 
