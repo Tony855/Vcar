@@ -125,3 +125,57 @@ async def test_real_redis_projection_updates_geo_presence_and_delivers_pubsub(sa
         await redis.zrem("driver:heartbeat", str(telegram_id))
         await redis.zrem("driver:online", str(telegram_id))
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_real_redis_client_recovers_after_connection_pool_disconnect(sample):
+    """A dropped Redis socket must be re-established by the production client."""
+    import os
+    import uuid
+
+    from redis.asyncio import Redis
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    key = f"vcar:redis-reconnect:{uuid.uuid4().hex}"
+    try:
+        assert await redis.ping() is True
+        await redis.set(key, "before-disconnect")
+        await redis.connection_pool.disconnect(inuse_connections=True)
+
+        # The next command must establish a fresh connection transparently.
+        assert await redis.ping() is True
+        assert await redis.get(key) == "before-disconnect"
+        await redis.set(key, "after-disconnect")
+        assert await redis.get(key) == "after-disconnect"
+    finally:
+        await redis.delete(key)
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeypatch):
+    """Expired heartbeats must remove both presence and the GEO candidate."""
+    import os
+    import time
+    import uuid
+
+    from redis.asyncio import Redis
+
+    from app.db.core import db
+    from app.services.dispatch import DispatchService
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    telegram_id = f"9{uuid.uuid4().int % 900000000}"
+    try:
+        await redis.geoadd("driver:online", (104.9282, 11.5564, telegram_id))
+        await redis.zadd("driver:heartbeat", {telegram_id: time.time() - 600})
+        monkeypatch.setattr(db, "redis", redis)
+
+        nearby = await DispatchService.get_nearby_drivers(104.9282, 11.5564)
+        assert telegram_id not in {str(item[0]) for item in nearby}
+        assert await redis.zscore("driver:heartbeat", telegram_id) is None
+        assert await redis.geopos("driver:online", telegram_id) == [None]
+    finally:
+        await redis.zrem("driver:heartbeat", telegram_id)
+        await redis.zrem("driver:online", telegram_id)
+        await redis.aclose()
