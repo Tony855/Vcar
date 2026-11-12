@@ -13,6 +13,7 @@ class DispatchService:
         if expired:
             await db.redis.zrem("driver:heartbeat", *expired)
             await db.redis.zrem("driver:online", *expired)
+            await db.redis.zrem("driver:location:version", *expired)
         return await db.redis.geosearch(
             "driver:online",
             longitude=float(lng),
@@ -37,6 +38,7 @@ class DispatchService:
     async def go_offline(driver_tid):
         await db.redis.zrem("driver:online", str(driver_tid))
         await db.redis.zrem("driver:heartbeat", str(driver_tid))
+        await db.redis.zrem("driver:location:version", str(driver_tid))
 
     @classmethod
     async def smart_dispatch(cls, pickup_lng, pickup_lat, top_n=3):
@@ -55,7 +57,7 @@ class DispatchService:
             busy_rows = await connection.fetch(
                 """
                 SELECT DISTINCT driver_id FROM orders
-                WHERE status IN ('ACCEPTED', 'ARRIVED', 'IN_PROGRESS')
+                WHERE status IN ('ACCEPTED','ARRIVED','IN_PROGRESS')
                   AND driver_id IS NOT NULL
                 """
             )
@@ -130,7 +132,6 @@ class DispatchService:
         for candidate in candidates:
             eta_seconds = eta_by_driver.get(candidate["tg_id"])
             if table_result_available and eta_seconds is None:
-                # OSRM confirmed there is no usable road route to this pickup.
                 continue
 
             if eta_seconds is not None:
@@ -140,7 +141,7 @@ class DispatchService:
 
             rating_score = (candidate["rating"] / 5.0) * 40.0
             scored_drivers.append({
-                "tg_id": candidate["tg_id"],
+                "tg_id": telegram_id,
                 "dist": candidate["dist"],
                 "eta_seconds": round(eta_seconds, 1) if eta_seconds is not None else None,
                 "rating": candidate["rating"],
