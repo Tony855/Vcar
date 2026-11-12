@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import pytest
 
@@ -48,15 +49,18 @@ async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(s
     script, key_count, *values = redis.calls[0]
     assert "ZSCORE" in script and "GEOADD" in script
     assert "ZREMRANGEBYSCORE" in script and script.count("PUBLISH") == 2
-    assert key_count == 4
-    assert values[:4] == [
+    assert key_count == 5
+    assert values[:5] == [
         "driver:online",
         "driver:heartbeat",
+        "driver:location:version",
         "driver:location:12345",
         "fleet:locations",
     ]
-    assert values[4:8] == [104.9282, 11.5564, "12345", 1794460000.0]
-    assert json.loads(values[8]) == sample
+    assert values[5:8] == [104.9282, 11.5564, "12345"]
+    assert values[8] == datetime.fromisoformat(sample["recorded_at"]).timestamp()
+    assert values[9] == 1794460000.0
+    assert json.loads(values[10]) == sample
 
 
 @pytest.mark.asyncio
@@ -77,8 +81,8 @@ async def test_redis_failure_is_reported_as_degraded_projection_not_exception(sa
 
 
 @pytest.mark.asyncio
-async def test_real_redis_projection_is_atomic_and_rejects_late_older_updates(sample):
-    """An older request completing late must not overwrite newer Redis state."""
+async def test_real_redis_projection_rejects_late_older_samples(sample):
+    """A late older sample cannot overwrite newer GPS state or emit a frame."""
     import asyncio
     import os
     import uuid
@@ -95,15 +99,25 @@ async def test_real_redis_projection_is_atomic_and_rejects_late_older_updates(sa
             pubsub.get_message(ignore_subscribe_messages=False, timeout=1), 2
         )
 
-        newer = {**sample, "telegram_id": telegram_id, "latitude": 11.557}
-        older = {**sample, "telegram_id": telegram_id, "latitude": 11.555}
+        newer = {
+            **sample,
+            "telegram_id": telegram_id,
+            "latitude": 11.557,
+            "recorded_at": "2026-11-12T05:00:02+00:00",
+        }
+        older = {
+            **sample,
+            "telegram_id": telegram_id,
+            "latitude": 11.555,
+            "recorded_at": "2026-11-12T05:00:01+00:00",
+        }
         assert await publish_driver_location(
             redis, telegram_id=telegram_id, longitude=104.9282,
             latitude=11.557, heartbeat_at=1794460002.0, event=newer,
         )
         assert await publish_driver_location(
             redis, telegram_id=telegram_id, longitude=104.9282,
-            latitude=11.555, heartbeat_at=1794460001.0, event=older,
+            latitude=11.555, heartbeat_at=1794460003.0, event=older,
         )
 
         message = await asyncio.wait_for(
@@ -111,15 +125,17 @@ async def test_real_redis_projection_is_atomic_and_rejects_late_older_updates(sa
         )
         assert json.loads(message["data"])["latitude"] == 11.557
         assert await redis.zscore("driver:heartbeat", str(telegram_id)) == 1794460002.0
+        assert await redis.zscore("driver:location:version", str(telegram_id)) == pytest.approx(
+            datetime.fromisoformat(newer["recorded_at"]).timestamp()
+        )
         position = await redis.geopos("driver:online", str(telegram_id))
         assert position[0] is not None
         assert position[0][1] == pytest.approx(11.557, abs=0.00001)
-
-        # No second Pub/Sub frame should be emitted for the stale request.
         assert await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.05) is None
     finally:
         await pubsub.aclose()
         await redis.zrem("driver:heartbeat", str(telegram_id))
+        await redis.zrem("driver:location:version", str(telegram_id))
         await redis.zrem("driver:online", str(telegram_id))
         await redis.aclose()
 
@@ -172,5 +188,6 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
         assert await redis.geopos("driver:online", telegram_id) == [None]
     finally:
         await redis.zrem("driver:heartbeat", telegram_id)
+        await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.aclose()
