@@ -1176,6 +1176,12 @@ async def test_completed_order_settlement_snapshot_is_atomic_and_idempotent(data
         if isinstance(persisted_components, str):
             persisted_components = json.loads(persisted_components)
         assert persisted_components == {"driver_earning": 800, "platform_fee": 200}
+        with pytest.raises(asyncpg.PostgresError, match="snapshot is immutable"):
+            async with database_pool.acquire() as connection:
+                await connection.execute(
+                    "UPDATE order_settlements SET components='{}'::jsonb WHERE order_id=$1",
+                    order["id"],
+                )
     finally:
         async with database_pool.acquire() as connection:
             await connection.execute("DELETE FROM order_settlements WHERE order_id=$1", order["id"])
