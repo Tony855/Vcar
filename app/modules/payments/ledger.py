@@ -296,7 +296,7 @@ class WalletLedger:
 
                 keys = [leg["idempotency_key"] for leg in normalized]
                 existing = await conn.fetch(
-                    """SELECT t.id, t.wallet_id, t.amount_minor, t.currency, t.kind,
+                    """SELECT t.id, t.wallet_id, t.idempotency_key, t.amount_minor, t.currency, t.kind,
                               t.order_id, t.provider_reference, t.metadata, w.user_id
                        FROM wallet_transactions t
                        JOIN wallet_accounts w ON w.id=t.wallet_id
@@ -313,10 +313,10 @@ class WalletLedger:
                         existing_by_key[row["idempotency_key"]] = row
                     # Query aliases the key explicitly below for compatibility with asyncpg Records.
                     results = []
-                    for leg in normalized:
+                    for index, leg in enumerate(normalized):
                         previous = existing_by_key.get(leg["idempotency_key"])
                         expected_metadata = {**leg["metadata"], "_batch_key": idempotency_key,
-                                             "_batch_index": keys.index(leg["idempotency_key"])}
+                                             "_batch_index": index}
                         if (
                             not previous
                             or previous["user_id"] != leg["user_id"]
