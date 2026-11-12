@@ -1551,6 +1551,7 @@ async def test_offline_transition_rechecks_active_trip_after_waiting_for_driver_
         passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
     )
     offline_task = None
+    monkeypatch.setattr(db, "redis", object())
     try:
         # Hold the same user-row lock used by accept() and go_offline().
         # Start go_offline while it is blocked, then commit an active trip
@@ -1590,7 +1591,6 @@ async def test_offline_transition_rechecks_active_trip_after_waiting_for_driver_
                     actor_user_id=driver_id, actor_role="DRIVER",
                 )
 
-        monkeypatch.setattr(db, "redis", object())
         assert await asyncio.wait_for(offline_task, timeout=5) is False
         offline_task = None
         async with database_pool.acquire() as connection:
