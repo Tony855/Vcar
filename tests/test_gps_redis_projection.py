@@ -303,7 +303,7 @@ async def test_dispatch_expiry_cleanup_bounds_redis_script_batches(monkeypatch):
                 return await redis.zrangebyscore(*args, **kwargs)
 
             async def eval(self, script, key_count, *args):
-                self.script_sizes.append(len(args) - 3)
+                self.script_sizes.append(len(args) - 4)
                 return await redis.eval(script, key_count, *args)
 
             async def geosearch(self, *args, **kwargs):
