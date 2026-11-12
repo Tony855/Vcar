@@ -17,6 +17,17 @@ _PASSWORD_ITERATIONS = 310_000
 _bearer = HTTPBearer(auto_error=False)
 
 
+def is_valid_telegram_subject(subject: object) -> bool:
+    """Return whether a JWT subject is a positive Telegram ID fitting BIGINT."""
+    return (
+        isinstance(subject, str)
+        and subject.isascii()
+        and subject.isdecimal()
+        and len(subject) <= 19
+        and 0 < int(subject) <= 2**63 - 1
+    )
+
+
 def hash_password(password: str, *, salt: str | None = None) -> str:
     if not password or len(password) < 12:
         raise ValueError("Password must contain at least 12 characters")
@@ -107,7 +118,12 @@ def verify_telegram_webapp_init_data(
     now = int(time.time())
     if auth_date > now + 60 or now - auth_date > max_age_seconds:
         raise ValueError("Telegram initData has expired")
-    if not isinstance(user, dict) or not isinstance(user.get("id"), int):
+    telegram_id = user.get("id") if isinstance(user, dict) else None
+    if (
+        not isinstance(telegram_id, int)
+        or isinstance(telegram_id, bool)
+        or not 0 < telegram_id <= 2**63 - 1
+    ):
         raise ValueError("Telegram initData user is invalid")
     return {"user": user, "auth_date": auth_date}
 
@@ -126,6 +142,6 @@ async def verify_driver_token(
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token",
                             headers={"WWW-Authenticate": "Bearer"})
-    if not payload.get("sub") or payload.get("role") != "driver":
+    if payload.get("role") != "driver" or not is_valid_telegram_subject(payload.get("sub")):
         raise HTTPException(status_code=403, detail="Driver permissions required")
     return payload
