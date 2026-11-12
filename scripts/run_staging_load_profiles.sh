@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-ROOT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOAD_SCRIPT="$ROOT_DIR/scripts/load_test_locations.py"
-BASE_URL="\${VCAR_BASE_URL:-}"
-OUTPUT_DIR="\${VCAR_LOAD_OUTPUT_DIR:-$ROOT_DIR/artifacts/gps-load}"
-PYTHON_BIN="\${PYTHON_BIN:-python3}"
-MESSAGES="\${VCAR_LOAD_MESSAGES:-3}"
-RECONNECT_PROBES="\${VCAR_RECONNECT_PROBES:-5}"
-MIN_RATE="\${VCAR_MIN_DELIVERY_RATE:-0.99}"
-COOLDOWN="\${VCAR_LOAD_COOLDOWN_SECONDS:-30}"
+BASE_URL="${VCAR_BASE_URL:-}"
+OUTPUT_DIR="${VCAR_LOAD_OUTPUT_DIR:-$ROOT_DIR/artifacts/gps-load}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+MESSAGES="${VCAR_LOAD_MESSAGES:-3}"
+RECONNECT_PROBES="${VCAR_RECONNECT_PROBES:-5}"
+MIN_RATE="${VCAR_MIN_DELIVERY_RATE:-0.99}"
+COOLDOWN="${VCAR_LOAD_COOLDOWN_SECONDS:-30}"
 
-if [[ "\${VCAR_STAGING_ACK:-}" != "I_CONFIRM_ISOLATED_STAGING" ]]; then
+if [[ "${VCAR_STAGING_ACK:-}" != "I_CONFIRM_ISOLATED_STAGING" ]]; then
   echo "Refusing load test: set VCAR_STAGING_ACK=I_CONFIRM_ISOLATED_STAGING only for isolated staging." >&2
   exit 2
 fi
@@ -18,7 +18,7 @@ if [[ -z "$BASE_URL" || ! "$BASE_URL" =~ ^https?:// ]]; then
   echo "Set VCAR_BASE_URL to the isolated staging HTTP(S) base URL." >&2
   exit 2
 fi
-if [[ -z "\${DRIVER_TOKEN:-}" || -z "\${ADMIN_TOKEN:-}" ]]; then
+if [[ -z "${DRIVER_TOKEN:-}" || -z "${ADMIN_TOKEN:-}" ]]; then
   echo "DRIVER_TOKEN and ADMIN_TOKEN must be short-lived staging JWTs." >&2
   exit 2
 fi
@@ -33,7 +33,7 @@ printf 'Starting staged GPS/WebSocket load profiles against %s\n' "$BASE_URL"
 printf 'Reports: %s\n' "$OUTPUT_DIR"
 
 for connections in 50 100 250 500; do
-  report="$OUTPUT_DIR/gps-\${connections}.json"
+  report="$OUTPUT_DIR/gps-${connections}.json"
   printf '\n=== %s concurrent admin fleet subscribers ===\n' "$connections"
   "$PYTHON_BIN" "$LOAD_SCRIPT" \
     --base-url "$BASE_URL" \
