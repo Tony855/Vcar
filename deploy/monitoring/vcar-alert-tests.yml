@@ -20,6 +20,8 @@ tests:
         values: '3+0x10'
       - series: 'vcar_driver_presence_reconciliation_last_success_timestamp'
         values: '1+0x1500'
+      - series: 'vcar_driver_presence_reconciliation_last_success_timestamp{instance="never"}'
+        values: '0+0x10'
       - series: 'vcar_order_event_outbox_high_retry'
         values: '1+0x10'
       - series: 'vcar_backup_last_run_success'
@@ -39,6 +41,15 @@ tests:
             exp_annotations:
               summary: Vcar driver presence reconciliation is failing
               description: PostgreSQL-to-Redis driver presence repair has failed at least three consecutive cycles.
+      - eval_time: 3m
+        alertname: VcarDriverPresenceReconciliationStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: never
+            exp_annotations:
+              summary: Vcar driver presence reconciliation is stale
+              description: The PostgreSQL-to-Redis driver presence repair has never succeeded or has not completed successfully for more than two minutes.
       - eval_time: 6m
         alertname: VcarDriverPresenceReconciliationStalled
         exp_alerts:
@@ -46,7 +57,7 @@ tests:
               severity: warning
             exp_annotations:
               summary: Vcar driver presence reconciliation is stale
-              description: No successful PostgreSQL-to-Redis driver presence repair has completed for more than two minutes.
+              description: The PostgreSQL-to-Redis driver presence repair has never succeeded or has not completed successfully for more than two minutes.
       - eval_time: 6m
         alertname: VcarOrderOutboxHighRetry
         exp_alerts:
