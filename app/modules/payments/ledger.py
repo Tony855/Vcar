@@ -145,8 +145,9 @@ class WalletLedger:
                     return LedgerResult(previous["id"], previous["wallet_id"], balance, True)
 
                 wallet = await conn.fetchrow(
-                    "SELECT id, currency, balance_minor FROM wallet_accounts WHERE user_id=$1 FOR UPDATE",
+                    "SELECT id, currency, balance_minor FROM wallet_accounts WHERE user_id=$1 AND currency=$2 FOR UPDATE",
                     user_id,
+                    currency.upper(),
                 )
                 if not wallet:
                     raise WalletError("Wallet account does not exist")
@@ -171,8 +172,6 @@ class WalletLedger:
                         raise IdempotencyConflict("Idempotency key was already used for a different payment")
                     balance = await conn.fetchval("SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet["id"])
                     return LedgerResult(previous["id"], wallet["id"], balance, True)
-                if wallet["currency"] != currency.upper():
-                    raise WalletError("Wallet currency mismatch")
                 # PostgreSQL BIGINT is signed 64-bit. Reject a credit that
                 # would overflow before issuing arithmetic in the UPDATE.
                 if amount_minor > 0 and wallet["balance_minor"] > bigint_max - amount_minor:
