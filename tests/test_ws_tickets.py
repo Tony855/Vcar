@@ -1,3 +1,4 @@
+import json
 import time
 from types import SimpleNamespace
 
@@ -22,9 +23,9 @@ class FakeRedis:
         return self.values.pop(key, None)
 
 
-def token(secret, role="admin"):
+def token(secret, role="admin", subject="12345"):
     return jwt.encode(
-        {"sub": "12345", "role": role, "exp": int(time.time()) + 300},
+        {"sub": subject, "role": role, "exp": int(time.time()) + 300},
         secret,
         algorithm="HS256",
     )
@@ -65,6 +66,52 @@ async def test_ticket_issuer_rejects_wrong_role_and_invalid_scope(fake_redis):
         await ws_tickets.issue_ws_ticket(token(secret, role="driver"), "admin-fleet")
     with pytest.raises(ValueError):
         await ws_tickets.issue_ws_ticket(token(secret), "unrestricted")
+    with pytest.raises(ValueError):
+        await ws_tickets.issue_ws_ticket(token(secret, role="passenger"), "passenger-order:9223372036854775808")
+
+
+@pytest.mark.asyncio
+async def test_ticket_issuer_rejects_malformed_driver_and_passenger_subjects(fake_redis):
+    _, secret = fake_redis
+    for role, scope in (
+        ("driver", "driver-location"),
+        ("passenger", "passenger-order:42"),
+    ):
+        for subject in ("not-a-number", "", "-12", "0", "9" * 20):
+            with pytest.raises(PermissionError):
+                await ws_tickets.issue_ws_ticket(
+                    token(secret, role=role, subject=subject), scope
+                )
+
+
+@pytest.mark.asyncio
+async def test_ticket_issuer_accepts_valid_driver_and_passenger_subjects(fake_redis):
+    _, secret = fake_redis
+    driver_ticket = await ws_tickets.issue_ws_ticket(
+        token(secret, role="driver", subject="12345"), "driver-location"
+    )
+    passenger_ticket = await ws_tickets.issue_ws_ticket(
+        token(secret, role="passenger", subject="67890"), "passenger-order:42"
+    )
+    assert driver_ticket and passenger_ticket
+
+
+@pytest.mark.asyncio
+async def test_ticket_consumer_rejects_non_object_json(fake_redis):
+    redis, _ = fake_redis
+    ticket = "malformed-json-object"
+    redis.values[ws_tickets._ticket_key(ticket)] = json.dumps(["not", "an", "object"])
+    assert await ws_tickets.consume_ws_ticket(ticket, "admin-fleet") is None
+
+
+@pytest.mark.asyncio
+async def test_ticket_consumer_rejects_malformed_telegram_subject(fake_redis):
+    redis, _ = fake_redis
+    ticket = "malformed-driver-subject"
+    redis.values[ws_tickets._ticket_key(ticket)] = json.dumps({
+        "sub": "not-a-number", "role": "driver", "scope": "driver-location"
+    })
+    assert await ws_tickets.consume_ws_ticket(ticket, "driver-location") is None
 
 
 @pytest.mark.asyncio
