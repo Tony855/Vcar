@@ -52,6 +52,7 @@ for connections in 50 100 250 500; do
     --messages "$MESSAGES" \
     --reconnect-probes "$RECONNECT_PROBES" \
     --min-delivery-rate "$MIN_RATE" \
+    "${LATENCY_ARGS[@]}" \
     --json-output "$report"
   if [[ ! -s "$report" ]]; then
     echo "Load profile $connections did not produce a report; stopping." >&2
