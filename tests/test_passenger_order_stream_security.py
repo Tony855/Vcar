@@ -124,3 +124,21 @@ async def test_order_stream_rejects_order_owned_by_another_passenger(monkeypatch
     assert websocket.close_code == 4403
     assert websocket.accepted is False
     assert connection.fetchval_calls[0][1] == (987, 1001)
+
+
+@pytest.mark.asyncio
+async def test_order_stream_rejects_driver_ticket_before_database_access(monkeypatch):
+    websocket = FakeWebSocket()
+    connection = FakeConnection(owned_order=987)
+    monkeypatch.setattr(passenger_router.db, "pool", FakePool(connection))
+
+    async def driver_ticket(ticket, scope):
+        assert scope == "passenger-order:987"
+        return {"sub": "1002", "role": "driver"}
+
+    monkeypatch.setattr(passenger_router, "consume_ws_ticket", driver_ticket)
+    await passenger_router.passenger_order_stream(websocket, 987, "driver-ticket")
+
+    assert websocket.close_code == 4401
+    assert websocket.accepted is False
+    assert connection.fetchval_calls == []

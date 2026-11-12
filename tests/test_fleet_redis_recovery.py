@@ -83,3 +83,30 @@ async def test_admin_fleet_stream_falls_back_to_database_snapshot_when_redis_fai
 
 async def _noop():
     return None
+
+
+@pytest.mark.asyncio
+async def test_admin_fleet_stream_rejects_non_admin_ticket_before_accept(monkeypatch):
+    from app.modules.locations import router as locations_router
+
+    class WebSocket:
+        accepted = False
+        close_code = None
+
+        async def accept(self):
+            self.accepted = True
+
+        async def close(self, code):
+            self.close_code = code
+
+    async def driver_ticket(ticket, scope):
+        assert scope == "admin-fleet"
+        return {"role": "driver", "sub": "1002"}
+
+    websocket = WebSocket()
+    monkeypatch.setattr(locations_router, "consume_ws_ticket", driver_ticket)
+
+    await locations_router.admin_fleet_stream(websocket, "wrong-role-ticket")
+
+    assert websocket.close_code == 4401
+    assert websocket.accepted is False

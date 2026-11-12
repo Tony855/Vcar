@@ -55,8 +55,12 @@ DRIVER_TOKEN='(inject securely)' ADMIN_TOKEN='(inject securely)' python scripts/
 Repeat at 100, 250 and 500 connections, allowing the host to recover between runs.
 Record host CPU, RSS, Redis memory, DB pool saturation, event-loop lag, disconnects and
 server-side request rates alongside the generated client report. The script reports
-admin subscriber connection success, fleet event delivery, publish throughput and p50/p95/p99 connection/fan-out
-latency. Client-side results alone do not establish server capacity.
+admin subscriber connection success, initial snapshot delivery, fleet event delivery, reconnect
+snapshot delivery, publish throughput and p50/p95/p99 connection/fan-out latency. Its exit gate
+requires connection, frame, initial snapshot and reconnect snapshot rates to meet the configured
+minimum and zero recorded failures. A run with `--reconnect-probes 0` (or no initial snapshot
+attempts) records a zero snapshot rate and cannot pass the corresponding acceptance gate; skipped
+probes are not counted as successful. Client-side results alone do not establish server capacity.
 
 Acceptance thresholds must be agreed before the run; suggested starting gates:
 - connection success >= 99%;
@@ -66,8 +70,9 @@ Acceptance thresholds must be agreed before the run; suggested starting gates:
 - clean disconnect and reconnect behavior.
 
 The admin fleet stream periodically reconciles from PostgreSQL and falls back to a durable
-snapshot if Redis Pub/Sub fails. CI covers the Redis exception fallback; run a Redis restart
-exercise in staging and verify the browser remains populated while Redis recovers.
+snapshot if Redis Pub/Sub fails. Driver and administrator stream recovery paths have automated
+Redis-failure/re-subscription coverage. Run a Redis restart exercise in staging and verify the
+browser remains populated while Redis recovers.
 
 The administrator fleet WebSocket now sends a durable PostgreSQL snapshot immediately after
 subscribing to Redis, including on reconnect. If a Pub/Sub connection fails, it rebuilds the
@@ -88,9 +93,10 @@ remain NOT RUN and are not implied by the code change.
 - [ ] Record restore duration and RPO/RTO; prove rollback before any production change.
 
 The backup script validates the custom-format archive before publishing it. Concurrent backup
-runs receive unique temporary and final archive names, avoiding same-second overwrite. A successful
-archive listing is not a full restore rehearsal. Restore now aborts before stopping services if
-the pre-restore backup command fails; CI covers this fail-closed path.
+runs receive unique temporary and final archive names, avoiding same-second overwrite. Restore
+rejects an unreadable/invalid archive before creating the pre-restore backup or stopping services,
+and aborts before service stop if the pre-restore backup command fails. CI covers these fail-closed
+paths. A successful archive listing is not a full restore rehearsal.
 
 ## 5. Installer and upgrade matrix
 
@@ -101,7 +107,10 @@ the pre-restore backup command fails; CI covers this fail-closed path.
 - [ ] Verify services start, survive reboot, restart on failure and pass readiness checks.
 - [ ] Verify failed install/upgrade rollback and rerun idempotency.
 
-CI syntax checks are not a substitute for these VM runs. The installer publishes frontend assets
+The supported-OS gate is now isolated in `scripts/check_supported_os.sh` and covered for
+Ubuntu 22.04 rejection, Ubuntu 24.04 acceptance, Debian 12 rejection, and Debian 13 acceptance.
+CI syntax checks and this preflight test are not a substitute for the full disposable-VM runs.
+The installer publishes frontend assets
 through a staged directory and restores the previous assets if the final directory swap fails;
 CI covers publish success, incomplete build rejection, and swap-failure rollback. This does not
 replace the Ubuntu/Debian VM upgrade matrix.
@@ -116,12 +125,14 @@ replace the Ubuntu/Debian VM upgrade matrix.
 - [ ] Ensure probes and logs never expose secrets or WebSocket tickets.
 
 The app now exposes `/metrics` only when `METRICS_BEARER_TOKEN` is configured and a matching
-Bearer token is supplied. Metrics include pending outbox count/age and fresh/stale driver counts.
-Prometheus reads the token from `/etc/prometheus/secrets/vcar-metrics-token`; provision this file
-with restrictive permissions and the same random value as the app environment. Load
-`deploy/monitoring/vcar-alert-rules.yml` through Prometheus `rule_files`. Test alert delivery and
-acknowledgement in staging. The supplied scrape and alert files are templates, not an installed
-monitoring stack.
+Bearer token is supplied. Metrics include pending outbox count/age, fresh/stale driver counts,
+asyncpg pool current/idle/maximum connections, and Redis PING availability. The scrape remains
+available during a Redis outage so the Redis alert can fire. Alert rules cover metrics scrape
+failure, Redis unavailability, sustained DB pool saturation, and outbox backlog/age. CI validates
+the alert rules with Prometheus `promtool`. Prometheus reads the token from
+`/etc/prometheus/secrets/vcar-metrics-token`; provision this file with restrictive permissions
+and the same random value as the app environment. Test alert delivery and acknowledgement in
+staging. The supplied scrape and alert files are templates, not an installed monitoring stack.
 
 ## 7. Passenger / driver / admin end-to-end
 

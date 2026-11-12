@@ -37,6 +37,9 @@ class Pool:
     def get_idle_size(self):
         return 3
 
+    def get_max_size(self):
+        return 10
+
 
 class HealthyRedis:
     async def ping(self):
@@ -80,6 +83,7 @@ async def test_metrics_returns_outbox_and_gps_gauges(monkeypatch):
     assert "vcar_driver_locations_stale 2" in body
     assert "vcar_database_pool_connections 7" in body
     assert "vcar_database_pool_idle_connections 3" in body
+    assert "vcar_database_pool_max_connections 10" in body
     assert "vcar_redis_available 1" in body
     assert body.endswith("\n")
 

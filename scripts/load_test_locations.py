@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -52,12 +53,41 @@ def is_fleet_location_event(payload: str) -> bool:
         event = json.loads(payload)
     except (TypeError, json.JSONDecodeError):
         return False
+    if not isinstance(event, dict):
+        return False
+
+    telegram_id = event.get("telegram_id")
+    latitude = event.get("latitude")
+    longitude = event.get("longitude")
+    recorded_at = event.get("recorded_at")
+
+    # bool is a subclass of int in Python, but is never a valid identity or
+    # geographic coordinate. Reject malformed/out-of-range frames explicitly.
     return (
-        isinstance(event, dict)
-        and isinstance(event.get("telegram_id"), int)
-        and isinstance(event.get("latitude"), (int, float))
-        and isinstance(event.get("longitude"), (int, float))
-        and isinstance(event.get("recorded_at"), str)
+        isinstance(telegram_id, int)
+        and not isinstance(telegram_id, bool)
+        and telegram_id > 0
+        and isinstance(latitude, (int, float))
+        and not isinstance(latitude, bool)
+        and -90 <= latitude <= 90
+        and math.isfinite(latitude)
+        and isinstance(longitude, (int, float))
+        and not isinstance(longitude, bool)
+        and -180 <= longitude <= 180
+        and math.isfinite(longitude)
+        and isinstance(recorded_at, str)
+        and bool(recorded_at.strip())
+    )
+
+
+def meets_acceptance_thresholds(report: dict, minimum_rate: float) -> bool:
+    """Return whether every measured delivery/recovery gate passed."""
+    return (
+        report.get("failures", 0) == 0
+        and report.get("connection_success_rate", 0.0) >= minimum_rate
+        and report.get("frame_delivery_rate", 0.0) >= minimum_rate
+        and report.get("initial_snapshot_rate", 0.0) >= minimum_rate
+        and report.get("reconnect_snapshot_rate", 0.0) >= minimum_rate
     )
 
 
@@ -80,10 +110,10 @@ def build_report(
         "failures": failures,
         "initial_snapshot_attempts": initial_snapshot_attempts,
         "initial_snapshots": initial_snapshots,
-        "initial_snapshot_rate": round(initial_snapshots / initial_snapshot_attempts, 4) if initial_snapshot_attempts else 1.0,
+        "initial_snapshot_rate": round(initial_snapshots / initial_snapshot_attempts, 4) if initial_snapshot_attempts else 0.0,
         "reconnect_attempts": reconnect_attempts,
         "reconnect_snapshots": reconnect_snapshots,
-        "reconnect_snapshot_rate": round(reconnect_snapshots / reconnect_attempts, 4) if reconnect_attempts else 1.0,
+        "reconnect_snapshot_rate": round(reconnect_snapshots / reconnect_attempts, 4) if reconnect_attempts else 0.0,
         "connect_latency_ms": {
             "p50": round(percentile(connect_latencies_ms, 0.50), 2),
             "p95": round(percentile(connect_latencies_ms, 0.95), 2),
@@ -254,12 +284,7 @@ async def run(args: argparse.Namespace) -> int:
             output.write_text(rendered + "\n", encoding="utf-8")
         for ws in sockets:
             await ws.close()
-    return 1 if (
-        failures
-        or report["frame_delivery_rate"] < args.min_delivery_rate
-        or report["initial_snapshot_rate"] < args.min_delivery_rate
-        or report["reconnect_snapshot_rate"] < args.min_delivery_rate
-    ) else 0
+    return 0 if meets_acceptance_thresholds(report, args.min_delivery_rate) else 1
 
 
 def main() -> int:

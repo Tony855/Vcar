@@ -22,6 +22,8 @@ if [[ -z "$BACKUP_DATABASE_URL" ]]; then
 fi
 
 install -d -m 700 "$BACKUP_DIR"
+# install -d does not change permissions when the directory already exists.
+chmod 700 "$BACKUP_DIR"
 umask 077
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 # mktemp makes concurrent backups unique even when both start in the same second.

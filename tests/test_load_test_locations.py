@@ -1,4 +1,4 @@
-from scripts.load_test_locations import build_report, percentile
+from scripts.load_test_locations import build_report, meets_acceptance_thresholds, percentile
 
 
 def test_percentile_handles_empty_and_small_samples():
@@ -80,3 +80,113 @@ def test_build_report_includes_initial_and_reconnect_snapshot_rates():
     )
     assert report["initial_snapshot_rate"] == 0.95
     assert report["reconnect_snapshot_rate"] == 1.0
+
+
+def test_load_acceptance_requires_connection_frame_and_both_snapshot_rates():
+    passing = {
+        "failures": 0,
+        "connection_success_rate": 0.99,
+        "frame_delivery_rate": 0.99,
+        "initial_snapshot_rate": 1.0,
+        "reconnect_snapshot_rate": 1.0,
+    }
+    assert meets_acceptance_thresholds(passing, 0.99)
+
+    for key in (
+        "connection_success_rate",
+        "frame_delivery_rate",
+        "initial_snapshot_rate",
+        "reconnect_snapshot_rate",
+    ):
+        failing = passing | {key: 0.98}
+        assert not meets_acceptance_thresholds(failing, 0.99), key
+
+    assert not meets_acceptance_thresholds(passing | {"failures": 1}, 0.99)
+
+
+def test_fleet_event_validation_rejects_boolean_identity_and_coordinates():
+    import json
+
+    valid = {
+        "telegram_id": 123,
+        "latitude": 11.5,
+        "longitude": 104.9,
+        "recorded_at": "2026-11-12T00:00:00+00:00",
+    }
+    for field, value in (
+        ("telegram_id", True),
+        ("telegram_id", 0),
+        ("latitude", True),
+        ("latitude", 91),
+        ("longitude", False),
+        ("longitude", 181),
+        ("recorded_at", ""),
+    ):
+        malformed = {**valid, field: value}
+        assert not is_fleet_location_event(json.dumps(malformed)), (field, value)
+
+
+def test_fleet_event_validation_rejects_non_finite_coordinates():
+    import json
+
+    event = {
+        "telegram_id": 123,
+        "latitude": float("nan"),
+        "longitude": 104.9,
+        "recorded_at": "2026-11-12T00:00:00+00:00",
+    }
+    assert not is_fleet_location_event(json.dumps(event))
+
+
+
+def test_fleet_event_validation_rejects_unbounded_integer_coordinates():
+    import json
+
+    event = {
+        "telegram_id": 123,
+        "latitude": 10**1000,
+        "longitude": 104.9,
+        "recorded_at": "2026-11-12T00:00:00+00:00",
+    }
+    assert not is_fleet_location_event(json.dumps(event))
+
+
+
+def test_build_report_does_not_treat_skipped_snapshot_probes_as_success():
+    report = build_report(
+        requested_connections=10,
+        connected=10,
+        messages_sent=1,
+        frames_received=10,
+        connect_latencies_ms=[10],
+        fanout_latencies_ms=[5],
+        failures=0,
+        elapsed_seconds=1,
+        initial_snapshot_attempts=0,
+        initial_snapshots=0,
+        reconnect_attempts=0,
+        reconnect_snapshots=0,
+    )
+    assert report["initial_snapshot_rate"] == 0.0
+    assert report["reconnect_snapshot_rate"] == 0.0
+    assert not meets_acceptance_thresholds(report, 0.99)
+
+
+def test_build_report_keeps_success_rate_when_all_snapshot_probes_pass():
+    report = build_report(
+        requested_connections=10,
+        connected=10,
+        messages_sent=1,
+        frames_received=10,
+        connect_latencies_ms=[10],
+        fanout_latencies_ms=[5],
+        failures=0,
+        elapsed_seconds=1,
+        initial_snapshot_attempts=10,
+        initial_snapshots=10,
+        reconnect_attempts=3,
+        reconnect_snapshots=3,
+    )
+    assert report["initial_snapshot_rate"] == 1.0
+    assert report["reconnect_snapshot_rate"] == 1.0
+    assert meets_acceptance_thresholds(report, 0.99)

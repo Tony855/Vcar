@@ -291,6 +291,7 @@ async def prometheus_metrics(authorization: str | None = Header(default=None)):
 
     pool_size = getattr(db.pool, "get_size", lambda: 0)()
     pool_idle_size = getattr(db.pool, "get_idle_size", lambda: 0)()
+    pool_max_size = getattr(db.pool, "get_max_size", lambda: 0)()
     redis_available = 0
     try:
         if db.redis is not None:
@@ -319,6 +320,9 @@ async def prometheus_metrics(authorization: str | None = Header(default=None)):
         "# HELP vcar_database_pool_idle_connections Idle asyncpg pool connections.",
         "# TYPE vcar_database_pool_idle_connections gauge",
         f"vcar_database_pool_idle_connections {int(pool_idle_size)}",
+        "# HELP vcar_database_pool_max_connections Configured asyncpg pool maximum size.",
+        "# TYPE vcar_database_pool_max_connections gauge",
+        f"vcar_database_pool_max_connections {int(pool_max_size)}",
         "# HELP vcar_redis_available Whether Redis responds to PING.",
         "# TYPE vcar_redis_available gauge",
         f"vcar_redis_available {redis_available}",

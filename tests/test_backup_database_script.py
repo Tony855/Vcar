@@ -6,12 +6,12 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "backup_database.sh"
 
 
-def _run_backup(tmp_path, env_text):
+def _run_backup(tmp_path, env_text, *, fail_list=False, preexisting_backup_dir_mode=None):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     dump_log = tmp_path / "dump-args"
     (bin_dir / "pg_dump").write_text(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$DUMP_LOG\"\n"
+        "#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > \"$DUMP_LOG\"\n"
         "while (($#)); do if [[ \"$1\" == --file=* ]]; then "
         "printf 'test dump' > \"${1#--file=}\"; fi; shift; done\n",
         encoding="utf-8",
@@ -25,6 +25,14 @@ def _run_backup(tmp_path, env_text):
     env_file = tmp_path / ".env"
     env_file.write_text(env_text, encoding="utf-8")
     backup_dir = tmp_path / "backups"
+    if preexisting_backup_dir_mode is not None:
+        backup_dir.mkdir()
+        backup_dir.chmod(preexisting_backup_dir_mode)
+    if fail_list:
+        (bin_dir / "pg_restore").write_text(
+            "#!/usr/bin/env bash\nexit 7\n", encoding="utf-8"
+        )
+        (bin_dir / "pg_restore").chmod(0o755)
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "DUMP_LOG": str(dump_log),
@@ -100,7 +108,7 @@ done
         tool.chmod(0o755)
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\\n",
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
         encoding="utf-8",
     )
     backup_dir = tmp_path / "backups"
@@ -126,4 +134,26 @@ done
     dumps = list(backup_dir.glob("vcar-20261112T120000Z-*.dump"))
     assert len(dumps) == 2
     assert len({dump.read_bytes() for dump in dumps}) == 2
+    assert not list(backup_dir.glob("*.tmp"))
+
+
+
+def test_backup_restricts_permissions_on_preexisting_backup_directory(tmp_path):
+    result, backup_dir, _ = _run_backup(
+        tmp_path,
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
+        preexisting_backup_dir_mode=0o755,
+    )
+    assert result.returncode == 0, result.stderr
+    assert backup_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_backup_does_not_publish_archive_when_integrity_listing_fails(tmp_path):
+    result, backup_dir, _ = _run_backup(
+        tmp_path,
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
+        fail_list=True,
+    )
+    assert result.returncode == 7
+    assert not list(backup_dir.glob("vcar-*.dump"))
     assert not list(backup_dir.glob("*.tmp"))
