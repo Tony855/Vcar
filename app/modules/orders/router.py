@@ -1,7 +1,7 @@
 """Authenticated driver order lifecycle endpoints."""
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel
 
 from app.core.security import verify_driver_token
@@ -27,7 +27,10 @@ async def _approved_driver(telegram_id: int) -> int:
 
 
 @router.post("/{order_id}/accept")
-async def accept_driver_order(order_id: int, claims: dict = Depends(verify_driver_token)):
+async def accept_driver_order(
+    order_id: int = Path(gt=0, le=2**63 - 1),
+    claims: dict = Depends(verify_driver_token),
+):
     driver_id = await _approved_driver(int(claims["sub"]))
     accepted = await OrderRepository.accept(order_id, driver_id)
     if not accepted:
@@ -37,8 +40,8 @@ async def accept_driver_order(order_id: int, claims: dict = Depends(verify_drive
 
 @router.patch("/{order_id}/status")
 async def update_driver_order_status(
-    order_id: int,
-    request: DriverOrderStatusUpdate,
+    order_id: int = Path(gt=0, le=2**63 - 1),
+    request: DriverOrderStatusUpdate = ...,
     claims: dict = Depends(verify_driver_token),
 ):
     driver_id = await _approved_driver(int(claims["sub"]))
