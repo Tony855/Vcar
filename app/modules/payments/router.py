@@ -35,7 +35,7 @@ class WalletOpenRequest(BaseModel):
 class AdminAdjustment(BaseModel):
     user_id: int = Field(gt=0)
     currency: str = Field(pattern="^(USD|KHR)$")
-    amount_minor: int
+    amount_minor: int = Field(strict=True)
     reason: str = Field(min_length=8, max_length=300)
     idempotency_key: str = Field(min_length=12, max_length=128)
 
