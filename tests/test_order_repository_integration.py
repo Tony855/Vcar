@@ -1172,7 +1172,10 @@ async def test_completed_order_settlement_snapshot_is_atomic_and_idempotent(data
             )
         assert len(rows) == 1
         assert rows[0]["status"] == "PREPARED"
-        assert rows[0]["components"] == {"driver_earning": 800, "platform_fee": 200}
+        persisted_components = rows[0]["components"]
+        if isinstance(persisted_components, str):
+            persisted_components = json.loads(persisted_components)
+        assert persisted_components == {"driver_earning": 800, "platform_fee": 200}
     finally:
         async with database_pool.acquire() as connection:
             await connection.execute("DELETE FROM order_settlements WHERE order_id=$1", order["id"])
