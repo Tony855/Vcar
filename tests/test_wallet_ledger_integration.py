@@ -1,3 +1,4 @@
+import json
 import asyncio
 import os
 import uuid
@@ -471,7 +472,8 @@ async def test_balanced_wallet_batch_is_atomic_and_idempotent(database_pool):
             )
         assert [row["balance_minor"] for row in rows] == [3750, 1250]
         assert [row["amount_minor"] for row in txs] == [-1250, 1250]
-        assert all(row["metadata"]["_batch_key"] == key for row in txs)
+        metadata_values = [json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"] for row in txs]
+        assert all(metadata["_batch_key"] == key for metadata in metadata_values)
         with pytest.raises(IdempotencyConflict):
             await WalletLedger.post_balanced_batch(
                 currency="USD",
