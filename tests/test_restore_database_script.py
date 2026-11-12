@@ -6,12 +6,12 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "restore_database.sh"
 
 
-def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False, fail_dump=False, fail_list=False):
+def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False, fail_dump=False, fail_list=False, fail_stop=False):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     command_log = tmp_path / "commands.log"
     (bin_dir / "systemctl").write_text(
-        "#!/usr/bin/env bash\nprintf 'systemctl %s\\n' \"$*\" >> \"$COMMAND_LOG\"\n",
+        "#!/usr/bin/env bash\nprintf 'systemctl %s\\n' \"$*\" >> \"$COMMAND_LOG\"\nif [[ \"$FAIL_STOP\" == 1 && \"$1\" == stop ]]; then exit 6; fi\n",
         encoding="utf-8",
     )
     (bin_dir / "pg_dump").write_text(
@@ -42,6 +42,7 @@ def _run_restore(tmp_path, *, env_text, confirm="YES", fail_restore=False, fail_
         "FAIL_RESTORE": "1" if fail_restore else "0",
         "FAIL_DUMP": "1" if fail_dump else "0",
         "FAIL_LIST": "7" if fail_list else "0",
+        "FAIL_STOP": "1" if fail_stop else "0",
     }
     result = subprocess.run(
         ["bash", str(SCRIPT), str(dump)],
@@ -123,3 +124,15 @@ def test_restore_rejects_invalid_archive_before_backup_or_service_stop(tmp_path)
     assert "pg_restore --list" in log
     assert "pg_dump" not in log
     assert "systemctl stop" not in log
+
+
+def test_restore_restarts_services_when_service_stop_fails(tmp_path):
+    result, log = _run_restore(
+        tmp_path,
+        env_text="MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\\n",
+        fail_stop=True,
+    )
+    assert result.returncode == 6
+    assert "systemctl stop vcar-bot vcar-web" in log
+    assert "systemctl start vcar-web vcar-bot" in log
+    assert "pg_restore --clean" not in log
