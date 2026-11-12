@@ -28,7 +28,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_order_settlements_status_created", "order_settlements", ["status", "created_at"])
     op.execute("""
-        CREATE FUNCTION protect_order_settlement_snapshot() RETURNS trigger AS $
+        CREATE FUNCTION protect_order_settlement_snapshot() RETURNS trigger AS '
         BEGIN
             IF NEW.order_id IS DISTINCT FROM OLD.order_id
                OR NEW.currency IS DISTINCT FROM OLD.currency
@@ -36,15 +36,15 @@ def upgrade() -> None:
                OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
                OR NEW.components IS DISTINCT FROM OLD.components
                OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
-                RAISE EXCEPTION 'order settlement snapshot is immutable';
+                RAISE EXCEPTION ''order settlement snapshot is immutable'';
             END IF;
             IF NEW.status IS DISTINCT FROM OLD.status
-               AND NOT (OLD.status = 'PREPARED' AND NEW.status IN ('POSTED', 'FAILED')) THEN
-                RAISE EXCEPTION 'invalid order settlement status transition';
+               AND NOT (OLD.status = ''PREPARED'' AND NEW.status IN (''POSTED'', ''FAILED'')) THEN
+                RAISE EXCEPTION ''invalid order settlement status transition'';
             END IF;
             RETURN NEW;
         END;
-        $ LANGUAGE plpgsql
+        ' LANGUAGE plpgsql
     """)
     op.execute("""
         CREATE TRIGGER trg_order_settlement_snapshot_immutable
