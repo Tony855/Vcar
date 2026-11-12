@@ -123,3 +123,11 @@ async def test_driver_token_rejects_non_telegram_or_out_of_range_subject(monkeyp
     with pytest.raises(HTTPException) as exc:
         await verify_driver_token(credentials)
     assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("telegram_id", [0, -1, 2**63, True])
+def test_telegram_init_data_rejects_invalid_signed_bigint_user_ids(telegram_id):
+    token = "test-bot-token"
+    data = _telegram_init_data(token, telegram_id, int(time.time()))
+    with pytest.raises(ValueError, match="user is invalid"):
+        verify_telegram_webapp_init_data(data, token)
