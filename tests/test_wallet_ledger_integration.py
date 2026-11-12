@@ -543,3 +543,74 @@ async def test_balanced_wallet_batch_rolls_back_every_leg_on_late_failure(databa
             await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id=ANY($1::bigint[])", wallet_ids)
             await conn.execute("DELETE FROM wallet_accounts WHERE id=ANY($1::bigint[])", wallet_ids)
             await conn.execute("DELETE FROM users WHERE id=ANY($1::bigint[])", user_ids)
+
+
+
+@pytest.mark.asyncio
+async def test_overlapping_balanced_batches_lock_wallets_in_stable_order(database_pool):
+    """Opposite caller leg order must not deadlock on the same wallet pair."""
+    async with database_pool.acquire() as conn:
+        user_ids = []
+        wallet_ids = []
+        for initial in (2000, 2000):
+            telegram_id = int(uuid.uuid4().int % 8_000_000_000) + 1
+            user_id = await conn.fetchval(
+                "INSERT INTO users (telegram_id, first_name) VALUES ($1, 'wallet-batch-lock-order') RETURNING id",
+                telegram_id,
+            )
+            wallet_id = await conn.fetchval(
+                "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', $2) RETURNING id",
+                user_id, initial,
+            )
+            user_ids.append(user_id)
+            wallet_ids.append(wallet_id)
+
+    key_a = f"wallet-lock-order-a-{uuid.uuid4()}"
+    key_b = f"wallet-lock-order-b-{uuid.uuid4()}"
+    batches = [
+        [
+            {"user_id": user_ids[0], "amount_minor": -500, "kind": "TRANSFER_OUT"},
+            {"user_id": user_ids[1], "amount_minor": 500, "kind": "TRANSFER_IN"},
+        ],
+        [
+            {"user_id": user_ids[1], "amount_minor": -300, "kind": "TRANSFER_OUT"},
+            {"user_id": user_ids[0], "amount_minor": 300, "kind": "TRANSFER_IN"},
+        ],
+    ]
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                WalletLedger.post_balanced_batch(
+                    currency="USD", legs=batches[0], idempotency_key=key_a
+                ),
+                WalletLedger.post_balanced_batch(
+                    currency="USD", legs=batches[1], idempotency_key=key_b
+                ),
+            ),
+            timeout=15,
+        )
+        assert all(not result.replayed for result in results)
+        async with database_pool.acquire() as conn:
+            balances = await conn.fetch(
+                "SELECT user_id, balance_minor FROM wallet_accounts "
+                "WHERE id=ANY($1::bigint[]) ORDER BY user_id",
+                wallet_ids,
+            )
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM wallet_transactions "
+                "WHERE idempotency_key=ANY($1::text[])",
+                [f"{key_a}:0", f"{key_a}:1", f"{key_b}:0", f"{key_b}:1"],
+            )
+        assert [row["balance_minor"] for row in balances] == [2000, 2000]
+        assert count == 4
+    finally:
+        async with database_pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM wallet_transactions WHERE wallet_id=ANY($1::bigint[])",
+                wallet_ids,
+            )
+            await conn.execute(
+                "DELETE FROM wallet_accounts WHERE id=ANY($1::bigint[])",
+                wallet_ids,
+            )
+            await conn.execute("DELETE FROM users WHERE id=ANY($1::bigint[])", user_ids)
