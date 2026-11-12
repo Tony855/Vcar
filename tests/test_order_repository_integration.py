@@ -1191,6 +1191,40 @@ async def test_completed_order_settlement_snapshot_is_atomic_and_idempotent(data
 
 
 @pytest.mark.asyncio
+async def test_dispatching_cancellation_uses_locked_status_and_remains_free(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "dispatching-cancel-passenger")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        # A stale caller may have observed ACCEPTED and requested a fee, but
+        # the repository must use the status it locks for the cancellation.
+        assert await OrderRepository.cancel_with_fee(
+            order["id"], passenger_id, "PASSENGER", 1.0
+        ) is True
+        async with database_pool.acquire() as connection:
+            row = await connection.fetchrow(
+                "SELECT status, cancel_fee FROM orders WHERE id=$1", order["id"]
+            )
+            event_metadata = await connection.fetchval(
+                "SELECT metadata FROM order_events WHERE order_id=$1 "
+                "AND to_status='CANCELLED' ORDER BY id DESC LIMIT 1",
+                order["id"],
+            )
+        assert row["status"] == "CANCELLED"
+        assert row["cancel_fee"] == Decimal("0")
+        if isinstance(event_metadata, str):
+            event_metadata = json.loads(event_metadata)
+        assert event_metadata["cancel_fee"] == "0"
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute("DELETE FROM users WHERE id=$1", passenger_id)
+
+
+@pytest.mark.asyncio
 async def test_cancellation_fee_preserves_exact_decimal_without_float_rounding(database_pool):
     async with database_pool.acquire() as connection:
         passenger_id = await _create_user(connection, "decimal-cancel-passenger")
