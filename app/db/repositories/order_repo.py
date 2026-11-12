@@ -374,9 +374,9 @@ class OrderRepository:
     async def add_rating_comment(cls, oid, passenger_user_id, comment):
         """Attach a bounded comment only to the passenger's own completed-order rating."""
         if (
-            not isinstance(oid, int) or isinstance(oid, bool) or oid <= 0
+            not isinstance(oid, int) or isinstance(oid, bool) or not 0 < oid <= 2**63 - 1
             or not isinstance(passenger_user_id, int)
-            or isinstance(passenger_user_id, bool) or passenger_user_id <= 0
+            or isinstance(passenger_user_id, bool) or not 0 < passenger_user_id <= 2**63 - 1
             or not isinstance(comment, str) or not comment.strip()
             or len(comment) > 1000
         ):
@@ -393,6 +393,7 @@ class OrderRepository:
                   AND order_row.id=rating.order_id
                   AND order_row.customer_id=$3
                   AND order_row.status='COMPLETED'
+                  AND (rating.comment IS NULL OR rating.comment='')
                 """,
                 comment.strip(), oid, passenger_user_id,
             )
