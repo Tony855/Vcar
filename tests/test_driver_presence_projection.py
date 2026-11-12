@@ -219,6 +219,7 @@ async def test_real_redis_reconciliation_repairs_500_drivers_and_prunes_orphans(
         await redis.zrem("driver:heartbeat", *members)
         await redis.zrem("driver:location:version", *members)
         await redis.zrem("driver:online", *members)
+        await redis.delete(*(f"driver:presence:generation:{member}" for member in members))
         await redis.aclose()
 
 
@@ -274,6 +275,7 @@ async def test_real_redis_reconciliation_preserves_newer_online_heartbeat():
         await redis.zrem("driver:heartbeat", telegram_id)
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
+        await redis.delete(f"driver:presence:generation:{telegram_id}")
         await redis.aclose()
 
 
