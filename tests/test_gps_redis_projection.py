@@ -338,7 +338,7 @@ async def test_dispatch_expiry_cleanup_bounds_redis_script_batches(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_offline_transition_fences_an_in_flight_gps_projection(sample):
+async def test_offline_transition_fences_an_in_flight_gps_projection(sample, monkeypatch):
     import os
     import uuid
 
