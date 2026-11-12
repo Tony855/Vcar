@@ -214,3 +214,47 @@ async def test_outbox_worker_continues_when_retry_schedule_itself_fails():
     assert lock_token == "claim-token-22"
     assert isinstance(error, ConnectionError)
     repository.mark_status_event_delivered.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("poll_interval", [0, -1, True, float("nan"), float("inf"), "1"])
+async def test_outbox_worker_rejects_invalid_poll_intervals(poll_interval):
+    from app.services.order_event_outbox import run_order_event_outbox_worker
+
+    with pytest.raises(ValueError, match="poll_interval"):
+        await run_order_event_outbox_worker(
+            stop_event=type("Stop", (), {"is_set": lambda self: True})(),
+            poll_interval=poll_interval,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch_size", [0, -1, 501, True, 1.5, "10"])
+async def test_outbox_worker_rejects_invalid_batch_sizes(batch_size):
+    from app.services.order_event_outbox import run_order_event_outbox_worker
+
+    with pytest.raises(ValueError, match="batch_size"):
+        await run_order_event_outbox_worker(
+            stop_event=type("Stop", (), {"is_set": lambda self: True})(),
+            batch_size=batch_size,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -1, 501, True, 1.5, "10"])
+async def test_outbox_dispatch_rejects_invalid_batch_limits(limit):
+    from app.services.order_event_outbox import dispatch_order_event_batch
+
+    repository = type("Repository", (), {})()
+    repository.claim_status_events = AsyncMock()
+    with pytest.raises(ValueError, match="batch limit"):
+        await dispatch_order_event_batch(object(), repository, limit=limit)
+    repository.claim_status_events.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_accepts_maximum_supported_batch_size():
+    from app.services.order_event_outbox import run_order_event_outbox_worker
+
+    stop = type("Stop", (), {"is_set": lambda self: True})()
+    await run_order_event_outbox_worker(stop, poll_interval=0.01, batch_size=500)
