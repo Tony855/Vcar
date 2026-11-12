@@ -56,6 +56,17 @@ jobs:
       - run: uv run --no-sync alembic upgrade head
       - run: test "$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -Atc "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_name IN ('driver_locations','trip_tracks','wallet_accounts','wallet_transactions')) = 4 AND EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis')")" = "t"
       - run: uv run --no-sync alembic downgrade 20261111_0001 && uv run --no-sync alembic upgrade head
+      - name: Rehearse full PostGIS backup and restore
+        if: matrix.python-version == '3.13'
+        run: |
+          RESTORE_DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar_restore
+          docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE vcar_restore"
+          mkdir -p /tmp/vcar-restore-rehearsal
+          docker run --rm --network host -v /tmp/vcar-restore-rehearsal:/backup postgis/postgis:16-3.7 pg_dump --format=custom --no-owner --no-acl --file=/backup/vcar.dump "$DATABASE_URL"
+          test -s /tmp/vcar-restore-rehearsal/vcar.dump
+          docker run --rm --network host -v /tmp/vcar-restore-rehearsal:/backup postgis/postgis:16-3.7 pg_restore --list /backup/vcar.dump >/dev/null
+          docker run --rm --network host -v /tmp/vcar-restore-rehearsal:/backup postgis/postgis:16-3.7 pg_restore --exit-on-error --single-transaction --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL" /backup/vcar.dump
+          test "$(docker run --rm --network host postgis/postgis:16-3.7 psql "$RESTORE_DATABASE_URL" -Atc "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('driver_locations','trip_tracks','wallet_accounts','wallet_transactions')) = 4 AND EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis')")" = "t"
       - run: uv run --no-sync pytest -q
       - run: uv run --no-sync pip-audit -r requirements.txt
       - name: Verify restricted runtime database role
