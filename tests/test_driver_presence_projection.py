@@ -18,7 +18,7 @@ class FakeRedis:
 
     async def eval(self, script, key_count, *args):
         if script == _REMOVE_STALE_DRIVER:
-            member, cutoff = args
+            _keys, member, cutoff = args[:3], args[3], args[4]
             current = self.heartbeat.get(member)
             if member in self.newer_members or (current is not None and current > float(cutoff)):
                 return 0
@@ -26,7 +26,7 @@ class FakeRedis:
             self.online.discard(member)
             self.versions.pop(member, None)
             return 1
-        longitude, latitude, member, recorded, received = args
+        _keys, longitude, latitude, member, recorded, received = args[:3], *args[3:]
         previous = self.versions.get(member)
         if previous is not None and previous > float(recorded):
             return 0
