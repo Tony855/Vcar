@@ -30,9 +30,8 @@ class FakeRedis:
             return 1
         if script == _REPAIR_DRIVER:
             _keys, longitude, latitude, member, recorded, received, generation = args[:4], *args[4:]
-            current_generation = self.generations.get(member)
-            if current_generation is not None and current_generation > int(generation):
-                return 0
+            # The reconciliation caller has revalidated the exact durable
+            # generation while holding the PostgreSQL driver-row lock.
             self.generations[member] = int(generation)
         else:
             raise AssertionError("unexpected Redis script")
@@ -317,3 +316,18 @@ async def test_reconciliation_skips_a_generation_changed_after_candidate_scan():
     assert result == {"database_fresh": 0, "repaired": 0, "stale_removed": 1}
     assert "1011" not in redis.online
     assert redis.repaired == []
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_replaces_a_stale_higher_redis_generation_after_db_restore():
+    now = datetime.now(timezone.utc)
+    redis = FakeRedis()
+    redis.generations["1012"] = 99
+    connection = FakeConnection([driver_row(1012, now)])
+    connection.states[1012]["driver_presence_generation"] = 1
+
+    result = await reconcile_driver_presence(redis, connection, now=now)
+
+    assert result == {"database_fresh": 1, "repaired": 1, "stale_removed": 0}
+    assert redis.generations["1012"] == 1
+    assert "1012" in redis.online
