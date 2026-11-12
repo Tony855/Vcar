@@ -458,3 +458,33 @@ async def test_outbox_worker_reclaims_claim_abandoned_by_crashed_process(databas
         async with database_pool.acquire() as connection:
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute("DELETE FROM users WHERE id=$1", passenger_id)
+
+
+@pytest.mark.asyncio
+async def test_outbox_retry_sanitizes_nul_and_truncates_error_text(database_pool):
+    """PostgreSQL text cannot contain NUL bytes; retry metadata must stay writable."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "outbox-error-passenger")
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        claimed = await OrderRepository.claim_status_events(limit=1)
+        assert len(claimed) == 1
+        error_text = "redis error\x00" + ("x" * 1200)
+        assert await OrderRepository.retry_status_event(
+            claimed[0]["id"], error_text
+        ) is True
+        async with database_pool.acquire() as connection:
+            stored = await connection.fetchval(
+                "SELECT last_error FROM order_event_outbox WHERE id=$1",
+                claimed[0]["id"],
+            )
+        assert stored is not None
+        assert "\x00" not in stored
+        assert len(stored) == 1000
+        assert stored.startswith("redis error")
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute("DELETE FROM users WHERE id=$1", passenger_id)
