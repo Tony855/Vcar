@@ -182,3 +182,109 @@ async def test_passenger_stream_replays_and_deduplicates_pubsub_overlap(monkeypa
     assert order.index("subscribe") < order.index("database_snapshot")
     assert [event["event_id"] for event in websocket.sent] == [4, 5, 6, 7]
     assert websocket.sent[-1]["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_passenger_stream_uses_durable_outbox_when_redis_is_unavailable_at_connect(monkeypatch):
+    from fastapi import WebSocketDisconnect
+
+    from app.modules.passengers import router as passenger_router
+
+    bootstrap_calls = []
+
+    class Connection:
+        async def fetchval(self, query, *args):
+            if "SELECT id FROM orders" in query:
+                return 8
+            if "COUNT(*)" in query:
+                return 1
+            raise AssertionError(query)
+
+        async def fetchrow(self, query, *args):
+            bootstrap_calls.append("bootstrap")
+            if len(bootstrap_calls) == 1:
+                return {"status": "IN_PROGRESS", "latest_event_id": 3}
+            return {"status": "COMPLETED", "latest_event_id": 4}
+
+        async def fetch(self, query, *args):
+            return [{"payload": {
+                "event_id": 4, "order_id": 8, "status": "COMPLETED"
+            }}]
+
+    class Acquire:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class Pool:
+        def acquire(self):
+            return Acquire()
+
+    class PubSub:
+        async def subscribe(self, channel):
+            raise RuntimeError("Redis unavailable")
+
+        async def unsubscribe(self, channel):
+            pass
+
+        async def aclose(self):
+            pass
+
+    class RecoveredPubSub:
+        async def subscribe(self, channel):
+            pass
+
+        async def get_message(self, **kwargs):
+            raise WebSocketDisconnect(code=1000)
+
+        async def unsubscribe(self, channel):
+            pass
+
+        async def aclose(self):
+            pass
+
+    class Redis:
+        def __init__(self):
+            self.calls = 0
+
+        def pubsub(self):
+            self.calls += 1
+            return PubSub() if self.calls == 1 else RecoveredPubSub()
+
+    class WebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def accept(self):
+            pass
+
+        async def close(self, code):
+            self.close_code = code
+
+        async def send_json(self, payload):
+            self.sent.append(payload)
+
+    async def valid_ticket(ticket, scope):
+        return {"sub": "1001", "role": "passenger"}
+
+    async def no_wait(_seconds):
+        pass
+
+    websocket = WebSocket()
+    redis = Redis()
+    monkeypatch.setattr(passenger_router, "consume_ws_ticket", valid_ticket)
+    monkeypatch.setattr(passenger_router.db, "pool", Pool())
+    monkeypatch.setattr(passenger_router.db, "redis", redis)
+    monkeypatch.setattr(passenger_router.asyncio, "sleep", no_wait)
+
+    await passenger_router.passenger_order_stream(
+        websocket, 8, "single-use-ticket", last_event_id=3
+    )
+
+    assert redis.calls == 2
+    assert [frame["type"] if "type" in frame else frame["status"] for frame in websocket.sent] == [
+        "snapshot", "COMPLETED"
+    ]
+    assert websocket.sent[-1]["event_id"] == 4
