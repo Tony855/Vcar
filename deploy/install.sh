@@ -34,7 +34,10 @@ echo "[2/7] Preparing persistent per-install secrets..."
 if [[ ! -f .env ]]; then
   install -m 600 .env.example .env
 fi
-DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-db-password --write-role-sql /tmp/vcar-role-bootstrap.sql)"
+umask 077
+BOOTSTRAP_SQL="$(mktemp /tmp/vcar-role-bootstrap.XXXXXX.sql)"
+trap 'rm -f "$BOOTSTRAP_SQL"' EXIT
+DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-db-password --write-role-sql "$BOOTSTRAP_SQL")"
 MIGRATION_DB_PASSWORD="$(python3 deploy/bootstrap_env.py --env-file .env --print-migration-db-password)"
 DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2-)"
 MIGRATION_DATABASE_URL="$(grep '^MIGRATION_DATABASE_URL=' .env | cut -d= -f2-)"
@@ -46,13 +49,14 @@ chown root:root .env
 chmod 600 .env
 
 echo "[3/7] Provisioning the local database without a repository default password..."
-chown postgres:postgres /tmp/vcar-role-bootstrap.sql
-chmod 600 /tmp/vcar-role-bootstrap.sql
+chown postgres:postgres "$BOOTSTRAP_SQL"
+chmod 600 "$BOOTSTRAP_SQL"
 if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='vcar'\"" | grep -q 1; then
   su - postgres -c "createuser vcar"
 fi
-su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -f /tmp/vcar-role-bootstrap.sql"
-rm -f /tmp/vcar-role-bootstrap.sql
+su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -f "$BOOTSTRAP_SQL""
+rm -f "$BOOTSTRAP_SQL"
+trap - EXIT
 su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='vcar'\"" | grep -q 1 || su - postgres -c "createdb -O vcar vcar"
 su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -c \"CREATE EXTENSION IF NOT EXISTS postgis\""
 
