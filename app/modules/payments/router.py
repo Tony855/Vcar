@@ -33,7 +33,7 @@ class WalletOpenRequest(BaseModel):
 
 
 class AdminAdjustment(BaseModel):
-    user_id: int = Field(gt=0)
+    user_id: int = Field(strict=True, gt=0)
     currency: str = Field(pattern="^(USD|KHR)$")
     amount_minor: int = Field(strict=True)
     reason: str = Field(min_length=8, max_length=300)
@@ -45,6 +45,13 @@ class AdminAdjustment(BaseModel):
         if value == 0:
             raise ValueError("amount_minor must not be zero")
         return value
+
+    @field_validator("reason", "idempotency_key", mode="before")
+    @classmethod
+    def reject_blank_audit_fields(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("audit fields must not be blank")
+        return value.strip()
 
 
 @router.post("/me", status_code=200)
