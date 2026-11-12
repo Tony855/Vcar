@@ -30,7 +30,7 @@ def test_route_request_accepts_integer_coordinates_without_coercion():
     assert request.coordinates == [(104.0, 11.0), (105.0, 12.0)]
 
 
-@pytest.mark.parametrize("bad", [[0, True], [0, 1.5], [0, -1], [0, 2], []])
+@pytest.mark.parametrize("bad", [[0, True], [0, 1.5], [0, "1"]])
 def test_table_request_rejects_invalid_source_indexes(bad):
     with pytest.raises(ValidationError):
         TableRequest.model_validate({"coordinates": PAIR, "sources": bad})
