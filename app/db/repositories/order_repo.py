@@ -233,15 +233,26 @@ class OrderRepository:
 
     @classmethod
     async def cancel_with_fee(cls, oid, uid, role, fee=0.0):
+        # The actor role is part of the authorization boundary: being either
+        # participant is not sufficient to claim the other participant's role.
+        if role not in {"PASSENGER", "DRIVER"}:
+            return False
+        if fee < 0:
+            return False
+
         async with db.pool.acquire() as connection:
             async with connection.transaction():
                 order = await connection.fetchrow(
                     """
                     SELECT status FROM orders
-                    WHERE id=$1 AND (customer_id=$2 OR driver_id=$2)
+                    WHERE id=$1
+                      AND (
+                        ($3='PASSENGER' AND customer_id=$2)
+                        OR ($3='DRIVER' AND driver_id=$2)
+                      )
                     FOR UPDATE
                     """,
-                    oid, uid,
+                    oid, uid, role,
                 )
                 if not order or order["status"] not in ("DISPATCHING", "ACCEPTED", "ARRIVED"):
                     return False
