@@ -2,9 +2,9 @@ import math
 
 import pytest
 
-from pydantic import ValidationError
+from fastapi import HTTPException
 
-from app.web.server import PriceUpdate, _parse_pricing_settings
+from app.web.server import _parse_pricing_settings, _validate_price_update_values
 
 
 @pytest.mark.parametrize(
@@ -48,11 +48,10 @@ def test_pricing_parser_handles_both_configured_values():
     ],
 )
 def test_price_update_rejects_negative_and_non_finite_values(payload):
-    with pytest.raises(ValidationError):
-        PriceUpdate(**payload)
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_price_update_values(payload["base_fare"], payload["per_km"])
+    assert exc_info.value.status_code == 422
 
 
 def test_price_update_accepts_zero_and_positive_fares():
-    parsed = PriceUpdate(base_fare=0, per_km=0.75)
-    assert parsed.base_fare == 0
-    assert parsed.per_km == 0.75
+    _validate_price_update_values(0.0, 0.75)
