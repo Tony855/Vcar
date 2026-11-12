@@ -105,3 +105,26 @@ async def test_outbox_worker_uses_canonical_database_event_and_order_ids():
     assert payload["status"] == "IN_PROGRESS"
     repository.mark_status_event_delivered.assert_awaited_once_with(10)
     repository.retry_status_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_does_not_count_unacknowledged_publish_as_delivered():
+    event = {
+        "id": 11,
+        "event_id": 51,
+        "order_id": 13,
+        "payload": {"status": "COMPLETED"},
+    }
+    repository = type("Repository", (), {})()
+    repository.claim_status_events = AsyncMock(return_value=[event])
+    repository.mark_status_event_delivered = AsyncMock(return_value=False)
+    repository.retry_status_event = AsyncMock()
+    redis_client = type("Redis", (), {})()
+    redis_client.publish = AsyncMock(return_value=1)
+
+    delivered = await dispatch_order_event_batch(redis_client, repository)
+
+    assert delivered == 0
+    redis_client.publish.assert_awaited_once()
+    repository.mark_status_event_delivered.assert_awaited_once_with(11)
+    repository.retry_status_event.assert_not_awaited()
