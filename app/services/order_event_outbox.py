@@ -31,8 +31,16 @@ async def dispatch_order_event_batch(redis_client, repository=OrderRepository, l
                 f"order:status:{event['order_id']}",
                 json.dumps(payload, separators=(",", ":")),
             )
-            await repository.mark_status_event_delivered(outbox_id)
-            delivered += 1
+            acknowledged = await repository.mark_status_event_delivered(outbox_id)
+            if acknowledged:
+                delivered += 1
+            else:
+                # A concurrent worker or recovery path may have changed the claim.
+                # The publish happened, but this worker did not confirm durable ack.
+                logger.warning(
+                    "Order status event was published but not acknowledged by this worker",
+                    extra={"outbox_id": outbox_id, "event_id": event.get("event_id")},
+                )
         except Exception as exc:
             logger.exception(
                 "Order status outbox delivery failed",
