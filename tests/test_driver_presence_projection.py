@@ -27,6 +27,9 @@ class FakeRedis:
             self.versions.pop(member, None)
             return 1
         longitude, latitude, member, recorded, received = args
+        previous = self.versions.get(member)
+        if previous is not None and previous > float(recorded):
+            return 0
         self.online.add(member)
         self.heartbeat[member] = float(received)
         self.versions[member] = float(recorded)
@@ -126,7 +129,5 @@ async def test_reconciliation_does_not_overwrite_a_newer_redis_gps_version():
 
     result = await reconcile_driver_presence(redis, connection, now=now)
 
-    # The Lua script's real Redis behavior is version-fenced; this fake models
-    # the result code and verifies the caller does not count an unapplied row.
-    assert result["database_fresh"] == 1
-    assert result["repaired"] == 1
+    assert result == {"database_fresh": 1, "repaired": 0, "stale_removed": 0}
+    assert redis.versions["1004"] == (now - timedelta(seconds=5)).timestamp()
