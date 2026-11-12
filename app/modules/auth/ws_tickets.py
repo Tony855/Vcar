@@ -12,7 +12,7 @@ import secrets
 import jwt
 
 from app.core.config import settings
-from app.core.security import require_strong_secret_key
+from app.core.security import is_valid_telegram_subject, require_strong_secret_key
 from app.db.core import db
 
 
@@ -35,6 +35,12 @@ def _scope_role(scope: str) -> str | None:
     return None
 
 
+def _valid_subject_for_role(subject: object, role: str) -> bool:
+    if role in {"driver", "passenger"}:
+        return is_valid_telegram_subject(subject)
+    return isinstance(subject, str) and 0 < len(subject) <= 128
+
+
 async def issue_ws_ticket(access_token: str, scope: str) -> str:
     expected_role = _scope_role(scope)
     if expected_role is None:
@@ -47,12 +53,16 @@ async def issue_ws_ticket(access_token: str, scope: str) -> str:
         )
     except jwt.PyJWTError as exc:
         raise ValueError("Invalid or expired access token") from exc
-    if claims.get("role") != expected_role or not claims.get("sub"):
+    subject = claims.get("sub")
+    if (
+        claims.get("role") != expected_role
+        or not _valid_subject_for_role(subject, expected_role)
+    ):
         raise PermissionError("Access token cannot open this WebSocket scope")
 
     ticket = secrets.token_urlsafe(32)
     payload = json.dumps({
-        "sub": str(claims["sub"]),
+        "sub": subject,
         "role": expected_role,
         "scope": scope,
     })
@@ -72,8 +82,14 @@ async def consume_ws_ticket(ticket: str, expected_scope: str) -> dict | None:
         claims = json.loads(raw)
     except (TypeError, json.JSONDecodeError):
         return None
-    if claims.get("scope") != expected_scope or claims.get("role") != _scope_role(expected_scope):
+    if not isinstance(claims, dict):
         return None
-    if not claims.get("sub"):
+    expected_role = _scope_role(expected_scope)
+    if (
+        expected_role is None
+        or claims.get("scope") != expected_scope
+        or claims.get("role") != expected_role
+        or not _valid_subject_for_role(claims.get("sub"), expected_role)
+    ):
         return None
     return claims
