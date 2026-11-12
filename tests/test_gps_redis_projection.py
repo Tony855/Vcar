@@ -179,3 +179,93 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_expiry_cleanup_does_not_delete_a_concurrent_gps_heartbeat(monkeypatch):
+    """A fresh GPS update between the expiry scan and cleanup must survive."""
+    import os
+    import time
+    import uuid
+
+    from redis.asyncio import Redis
+
+    from app.db.core import db
+    from app.services.dispatch import DispatchService
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    telegram_id = f"7{uuid.uuid4().int % 900000000}"
+    fresh_heartbeat = time.time()
+    fresh_version = fresh_heartbeat - 1
+
+    class RacingRedis:
+        async def zrangebyscore(self, *args):
+            # Capture the stale member first, then simulate a GPS publisher
+            # completing before DispatchService starts its cleanup operation.
+            expired = await redis.zrangebyscore(*args)
+            await redis.geoadd("driver:online", (104.9282, 11.5564, telegram_id))
+            await redis.zadd("driver:heartbeat", {telegram_id: fresh_heartbeat})
+            await redis.zadd("driver:location:version", {telegram_id: fresh_version})
+            return expired
+
+        async def eval(self, *args):
+            return await redis.eval(*args)
+
+        async def geosearch(self, *args, **kwargs):
+            return await redis.geosearch(*args, **kwargs)
+
+    try:
+        await redis.geoadd("driver:online", (104.9282, 11.5564, telegram_id))
+        await redis.zadd("driver:heartbeat", {telegram_id: fresh_heartbeat - 600})
+        await redis.zadd("driver:location:version", {telegram_id: fresh_version - 600})
+        monkeypatch.setattr(db, "redis", RacingRedis())
+
+        nearby = await DispatchService.get_nearby_drivers(104.9282, 11.5564)
+
+        assert telegram_id in {str(item[0]) for item in nearby}
+        assert await redis.zscore("driver:heartbeat", telegram_id) == pytest.approx(fresh_heartbeat)
+        assert await redis.zscore("driver:location:version", telegram_id) == pytest.approx(fresh_version)
+        position = (await redis.geopos("driver:online", telegram_id))[0]
+        assert position is not None
+        assert position[0] == pytest.approx(104.9282, abs=0.0001)
+        assert position[1] == pytest.approx(11.5564, abs=0.0001)
+    finally:
+        await redis.zrem("driver:heartbeat", telegram_id)
+        await redis.zrem("driver:location:version", telegram_id)
+        await redis.zrem("driver:online", telegram_id)
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_driver_online_and_offline_transitions_update_presence_atomically(monkeypatch):
+    import os
+    import uuid
+
+    from redis.asyncio import Redis
+
+    from app.db.core import db
+    from app.services.dispatch import DispatchService
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    telegram_id = f"6{uuid.uuid4().int % 900000000}"
+    try:
+        monkeypatch.setattr(db, "redis", redis)
+        await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
+
+        assert await redis.zscore("driver:heartbeat", telegram_id) is not None
+        position = (await redis.geopos("driver:online", telegram_id))[0]
+        assert position is not None
+        assert position[0] == pytest.approx(104.9282, abs=0.0001)
+        assert position[1] == pytest.approx(11.5564, abs=0.0001)
+
+        await redis.zadd("driver:location:version", {telegram_id: 123.0})
+        await DispatchService.go_offline(telegram_id)
+
+        assert await redis.zscore("driver:heartbeat", telegram_id) is None
+        assert await redis.zscore("driver:location:version", telegram_id) is None
+        assert await redis.geopos("driver:online", telegram_id) == [None]
+    finally:
+        await redis.zrem("driver:heartbeat", telegram_id)
+        await redis.zrem("driver:location:version", telegram_id)
+        await redis.zrem("driver:online", telegram_id)
+        await redis.aclose()

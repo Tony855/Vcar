@@ -5,15 +5,53 @@ from app.db.core import db
 from app.infrastructure.osrm.client import OSRMClient, RoutingError
 
 
+# Remove an expired driver only if its heartbeat is still at or before the
+# cutoff observed by this dispatch pass. A concurrent GPS publish must win.
+_REMOVE_EXPIRED_DRIVERS = """
+local cutoff = tonumber(ARGV[1])
+local removed = 0
+for index = 2, #ARGV do
+    local member = ARGV[index]
+    local heartbeat = redis.call('ZSCORE', KEYS[1], member)
+    if not heartbeat or tonumber(heartbeat) <= cutoff then
+        redis.call('ZREM', KEYS[1], member)
+        redis.call('ZREM', KEYS[2], member)
+        redis.call('ZREM', KEYS[3], member)
+        removed = removed + 1
+    end
+end
+return removed
+"""
+
+_SET_DRIVER_ONLINE = """
+redis.call('GEOADD', KEYS[1], ARGV[1], ARGV[2], ARGV[3])
+redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3])
+return 1
+"""
+
+_SET_DRIVER_OFFLINE = """
+redis.call('ZREM', KEYS[1], ARGV[1])
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('ZREM', KEYS[3], ARGV[1])
+return 1
+"""
+
+
 class DispatchService:
     @staticmethod
     async def get_nearby_drivers(lng, lat, radius_km=20):
         now = __import__("time").time()
         expired = await db.redis.zrangebyscore("driver:heartbeat", "-inf", now - 120)
         if expired:
-            await db.redis.zrem("driver:heartbeat", *expired)
-            await db.redis.zrem("driver:online", *expired)
-            await db.redis.zrem("driver:location:version", *expired)
+            cutoff = now - 120
+            # Do not bulk-ZREM the scan result: a GPS heartbeat can be refreshed
+            # after ZRANGEBYSCORE but before cleanup. Recheck and remove each
+            # member atomically so a concurrent fresh publish is never deleted.
+            await db.redis.eval(
+                _REMOVE_EXPIRED_DRIVERS, 3,
+                "driver:heartbeat", "driver:online", "driver:location:version",
+                cutoff, *expired,
+            )
         return await db.redis.geosearch(
             "driver:online",
             longitude=float(lng),
@@ -31,14 +69,19 @@ class DispatchService:
 
     @staticmethod
     async def go_online(driver_tid, lng, lat):
-        await db.redis.geoadd("driver:online", (float(lng), float(lat), str(driver_tid)))
-        await db.redis.zadd("driver:heartbeat", {str(driver_tid): __import__("time").time()})
+        await db.redis.eval(
+            _SET_DRIVER_ONLINE, 2,
+            "driver:online", "driver:heartbeat",
+            float(lng), float(lat), str(driver_tid), __import__("time").time(),
+        )
 
     @staticmethod
     async def go_offline(driver_tid):
-        await db.redis.zrem("driver:online", str(driver_tid))
-        await db.redis.zrem("driver:heartbeat", str(driver_tid))
-        await db.redis.zrem("driver:location:version", str(driver_tid))
+        await db.redis.eval(
+            _SET_DRIVER_OFFLINE, 3,
+            "driver:online", "driver:heartbeat", "driver:location:version",
+            str(driver_tid),
+        )
 
     @classmethod
     async def smart_dispatch(cls, pickup_lng, pickup_lat, top_n=3):
