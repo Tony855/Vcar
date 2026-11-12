@@ -37,3 +37,44 @@ def test_run_checks_requires_all_osrm_responses_to_be_ok(monkeypatch, capsys):
         def read(self): return json.dumps({"code": "NoRoute"}).encode()
     monkeypatch.setattr(smoke_osrm.urllib.request, "urlopen", lambda *a, **k: BadResponse())
     assert smoke_osrm.run_checks("http://osrm", {"route": "/route"}) == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "payload"),
+    [
+        ("nearest", {"code": "Ok", "waypoints": [{"location": [104.9, 11.5]}]}),
+        ("route", {"code": "Ok", "routes": [{"distance": 100, "duration": 20}]}),
+        ("table", {"code": "Ok", "durations": [[0, 20], [20, 0]], "distances": [[0, 100], [100, 0]]}),
+        ("match", {"code": "Ok", "matchings": [{"distance": 100}], "tracepoints": [{}, {}]}),
+    ],
+)
+def test_validate_payload_accepts_complete_endpoint_results(name, payload):
+    assert smoke_osrm.validate_payload(name, payload)
+
+
+@pytest.mark.parametrize(
+    ("name", "payload"),
+    [
+        ("nearest", {"code": "Ok", "waypoints": []}),
+        ("route", {"code": "Ok", "routes": []}),
+        ("route", {"code": "Ok", "routes": [{"distance": 0, "duration": 0}]}),
+        ("table", {"code": "Ok", "durations": [[0, None], [None, 0]], "distances": [[0, None], [None, 0]]}),
+        ("match", {"code": "Ok", "matchings": [], "tracepoints": [None, None]}),
+        ("unknown", {"code": "Ok"}),
+        ("route", {"code": "NoRoute", "routes": []}),
+    ],
+)
+def test_validate_payload_rejects_success_envelopes_without_usable_routes(name, payload):
+    assert not smoke_osrm.validate_payload(name, payload)
+
+
+def test_run_checks_rejects_ok_envelope_with_empty_route_payload(monkeypatch, capsys):
+    class Response:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return json.dumps({"code": "Ok", "routes": []}).encode()
+
+    monkeypatch.setattr(smoke_osrm.urllib.request, "urlopen", lambda *a, **k: Response())
+    assert smoke_osrm.run_checks("http://osrm", {"route": "/route"}) == 1
+    assert "FAIL route" in capsys.readouterr().err
