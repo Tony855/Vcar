@@ -1,0 +1,135 @@
+"""Periodic PostgreSQL-to-Redis repair for dispatch presence after Redis loss."""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
+
+# Repair a driver's projection only when PostgreSQL's GPS sample is at least as
+# new as the currently projected sample. No Pub/Sub is emitted: WebSocket
+# consumers already reconcile from PostgreSQL snapshots.
+_REPAIR_DRIVER = """
+local previous = redis.call('ZSCORE', KEYS[3], ARGV[3])
+local incoming_sample = tonumber(ARGV[4])
+if previous and tonumber(previous) > incoming_sample then
+    return 0
+end
+redis.call('GEOADD', KEYS[1], ARGV[1], ARGV[2], ARGV[3])
+redis.call('ZADD', KEYS[2], tonumber(ARGV[5]), ARGV[3])
+redis.call('ZADD', KEYS[3], incoming_sample, ARGV[3])
+return 1
+"""
+
+# A driver may have sent a new GPS update after the database snapshot began.
+# Only remove stale Redis entries whose heartbeat has not advanced past the
+# reconciliation cutoff.
+_REMOVE_STALE_DRIVER = """
+local heartbeat = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if not heartbeat or tonumber(heartbeat) <= tonumber(ARGV[2]) then
+    redis.call('ZREM', KEYS[1], ARGV[1])
+    redis.call('ZREM', KEYS[2], ARGV[1])
+    redis.call('ZREM', KEYS[3], ARGV[1])
+    return 1
+end
+return 0
+"""
+
+FRESH_DRIVERS_QUERY = """
+    SELECT u.telegram_id,
+           ST_X(l.position::geometry) AS longitude,
+           ST_Y(l.position::geometry) AS latitude,
+           l.recorded_at,
+           l.received_at
+    FROM users u
+    JOIN driver_locations l ON l.driver_id=u.id
+    WHERE u.driver_status='APPROVED'
+      AND l.received_at >= $1
+      AND l.received_at <= $2
+      AND l.recorded_at <= $2 + interval '30 seconds'
+"""
+
+
+async def reconcile_driver_presence(redis_client, connection, *, now=None) -> dict:
+    """Repair fresh driver GEO/heartbeat/version keys from durable GPS rows."""
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    cutoff = current - timedelta(seconds=120)
+    cutoff_epoch = cutoff.timestamp()
+    scan_epoch = current.timestamp()
+
+    rows = await connection.fetch(FRESH_DRIVERS_QUERY, cutoff, current)
+    fresh_ids: set[str] = set()
+    repaired = 0
+    for row in rows:
+        telegram_id = row["telegram_id"]
+        if not isinstance(telegram_id, int) or isinstance(telegram_id, bool) or telegram_id <= 0:
+            continue
+        received_at = row["received_at"]
+        recorded_at = row["recorded_at"]
+        if (
+            not isinstance(received_at, datetime) or received_at.tzinfo is None
+            or received_at.utcoffset() is None or not cutoff <= received_at <= current
+            or not isinstance(recorded_at, datetime) or recorded_at.tzinfo is None
+            or recorded_at.utcoffset() is None
+        ):
+            continue
+        longitude, latitude = float(row["longitude"]), float(row["latitude"])
+        if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
+            continue
+        member = str(telegram_id)
+        fresh_ids.add(member)
+        applied = await redis_client.eval(
+            _REPAIR_DRIVER, 3,
+            "driver:online", "driver:heartbeat", "driver:location:version",
+            longitude, latitude, member, recorded_at.timestamp(), received_at.timestamp(),
+        )
+        repaired += int(applied == 1)
+
+    # Iterate both indexes: a partial Redis write or old deployment may leave
+    # GEO members without heartbeat scores, or heartbeat members without GEO.
+    indexed = set(await redis_client.zrange("driver:heartbeat", 0, -1))
+    indexed.update(await redis_client.zrange("driver:online", 0, -1))
+    stale_removed = 0
+    for member in indexed - fresh_ids:
+        stale_removed += int(await redis_client.eval(
+            _REMOVE_STALE_DRIVER, 3,
+            "driver:heartbeat", "driver:online", "driver:location:version",
+            member, scan_epoch,
+        ) == 1)
+
+    return {
+        "database_fresh": len(fresh_ids),
+        "repaired": repaired,
+        "stale_removed": stale_removed,
+    }
+
+
+async def run_driver_presence_reconciliation_worker(
+    stop_event: asyncio.Event, *, interval: float = 30.0
+) -> None:
+    """Keep Redis dispatch presence converged to PostgreSQL, tolerating outages."""
+    if interval < 1:
+        raise ValueError("interval must be at least one second")
+    while not stop_event.is_set():
+        try:
+            from app.db.core import db
+
+            if db.pool is not None and db.redis is not None:
+                async with db.pool.acquire() as connection:
+                    result = await reconcile_driver_presence(db.redis, connection)
+                logger.info("Driver presence Redis projection reconciled", extra=result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "Driver presence reconciliation failed; PostgreSQL remains authoritative",
+                exc_info=True,
+            )
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
