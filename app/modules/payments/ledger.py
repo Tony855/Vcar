@@ -77,11 +77,13 @@ class WalletLedger:
     ) -> LedgerResult:
         if not isinstance(amount_minor, int) or isinstance(amount_minor, bool) or amount_minor == 0:
             raise ValueError("amount_minor must be a non-zero integer")
-        if len(currency) != 3 or not currency.isalpha():
-            raise ValueError("currency must be a three-letter code")
-        if not idempotency_key or len(idempotency_key) > 128:
+        if not isinstance(user_id, int) or isinstance(user_id, bool) or user_id <= 0:
+            raise ValueError("user_id must be a positive integer")
+        if not isinstance(currency, str) or len(currency) != 3 or not currency.isascii() or not currency.isalpha():
+            raise ValueError("currency must be a three-letter ASCII code")
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key) > 128:
             raise ValueError("a valid idempotency_key is required")
-        if not kind or len(kind) > 32:
+        if not isinstance(kind, str) or not kind.strip() or len(kind) > 32:
             raise ValueError("a valid transaction kind is required")
 
         async with db.pool.acquire() as conn:
