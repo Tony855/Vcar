@@ -22,6 +22,7 @@ class FakeConnection:
             "created_at": datetime(2026, 11, 12, tzinfo=timezone.utc),
         }
         self.wallets = {self.wallet["currency"]: self.wallet}
+        self.wallet_rows = [self.wallet]
         self.transactions = transactions or []
         self.fetchval_calls = []
         self.execute_calls = []
@@ -44,6 +45,8 @@ class FakeConnection:
 
     async def fetch(self, query, *args):
         self.fetch_calls.append((query, args))
+        if "FROM wallet_accounts AS w" in query:
+            return self.wallet_rows
         return self.transactions
 
 
@@ -148,7 +151,7 @@ def test_wallet_transactions_are_scoped_to_authenticated_user_and_pagination(wal
     )
     assert response.status_code == 200
     assert response.json()[0]["id"] == 19
-    assert connection.fetch_calls[0][1] == (7003003, 20, 2)
+    assert connection.fetch_calls[0][1] == (7003003, 20, 2, None)
 
 
 def test_admin_wallet_adjustment_records_admin_identity_through_http(wallet_client, monkeypatch):
@@ -310,4 +313,39 @@ def test_wallet_transaction_cursor_accepts_maximum_signed_bigint(wallet_client):
         headers={"Authorization": f"Bearer {token()}"},
     )
     assert response.status_code == 200
-    assert connection.fetch_calls[0][1] == (7003003, 2**63 - 1, 50)
+    assert connection.fetch_calls[0][1] == (7003003, 2**63 - 1, 50, None)
+
+
+def test_wallet_list_returns_all_currency_accounts(wallet_client):
+    client, connection, token = wallet_client
+    connection.wallet_rows = [
+        {"id": 8, "currency": "KHR", "balance_minor": 50000, "created_at": datetime(2026, 11, 12, tzinfo=timezone.utc)},
+        connection.wallet,
+    ]
+    response = client.get(
+        "/api/v1/wallet/me",
+        headers={"Authorization": f"Bearer {token()}"},
+    )
+    assert response.status_code == 200
+    assert [wallet["currency"] for wallet in response.json()] == ["KHR", "USD"]
+    assert connection.fetch_calls[0][1] == (7003003,)
+
+
+def test_wallet_transaction_history_can_be_filtered_by_currency(wallet_client):
+    client, connection, token = wallet_client
+    response = client.get(
+        "/api/v1/wallet/me/transactions?currency=KHR",
+        headers={"Authorization": f"Bearer {token()}"},
+    )
+    assert response.status_code == 200
+    assert connection.fetch_calls[0][1] == (7003003, None, 50, "KHR")
+
+
+def test_wallet_transaction_history_rejects_unsupported_currency(wallet_client):
+    client, connection, token = wallet_client
+    response = client.get(
+        "/api/v1/wallet/me/transactions?currency=EUR",
+        headers={"Authorization": f"Bearer {token()}"},
+    )
+    assert response.status_code == 422
+    assert connection.fetch_calls == []

@@ -89,11 +89,31 @@ async def open_or_get_wallet(
     return dict(wallet)
 
 
+@router.get("/me")
+async def list_my_wallets(
+    authorization: str | None = Header(default=None),
+):
+    claims = _claims(authorization, {"driver", "passenger"})
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT w.id, w.currency, w.balance_minor, w.created_at
+            FROM wallet_accounts AS w
+            JOIN users AS u ON u.id=w.user_id
+            WHERE u.telegram_id=$1
+            ORDER BY w.currency
+            """,
+            int(claims["sub"]),
+        )
+    return [dict(row) for row in rows]
+
+
 @router.get("/me/transactions")
 async def my_wallet_transactions(
     authorization: str | None = Header(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     before_id: int | None = Query(default=None, gt=0, le=2**63 - 1),
+    currency: str | None = Query(default=None, pattern="^(USD|KHR)$"),
 ):
     claims = _claims(authorization, {"driver", "passenger"})
     async with db.pool.acquire() as conn:
@@ -104,10 +124,12 @@ async def my_wallet_transactions(
             FROM wallet_transactions t
             JOIN wallet_accounts w ON w.id=t.wallet_id
             JOIN users u ON u.id=w.user_id
-            WHERE u.telegram_id=$1 AND ($2::bigint IS NULL OR t.id<$2)
+            WHERE u.telegram_id=$1
+              AND ($2::bigint IS NULL OR t.id<$2)
+              AND ($4::text IS NULL OR t.currency=$4)
             ORDER BY t.id DESC LIMIT $3
             """,
-            int(claims["sub"]), before_id, limit,
+            int(claims["sub"]), before_id, limit, currency,
         )
     return [dict(row) for row in rows]
 
