@@ -179,4 +179,3 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.aclose()
-}
