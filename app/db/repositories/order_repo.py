@@ -86,7 +86,7 @@ class OrderRepository:
     @classmethod
     async def retry_status_event(cls, outbox_id, error):
         """Release a failed claim with capped exponential backoff."""
-        safe_error = str(error).replace("\\x00", "")[:1000]
+        safe_error = str(error).replace("\x00", "")[:1000]
         async with db.pool.acquire() as connection:
             result = await connection.execute(
                 """
