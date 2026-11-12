@@ -271,22 +271,31 @@ async def finish(call: CallbackQuery, passenger_bot):
 
 @router.callback_query(F.data.startswith('rate_drv:'))
 async def rate_driver_to_pax(call: CallbackQuery):
-    _, oid, score = call.data.split(':')
-    order = await OrderRepository.get(int(oid))
-    if order and order.get('c_tg'):
-        await UserRepository.update_user_rating(order['c_tg'], int(score))
-        
-        # 👇 新增：将评价写入 reviews 表 (为了数据库完整性，顺便把司机的评分也存一下)
+    try:
+        _, raw_oid, raw_score = call.data.split(':')
+        oid, score = int(raw_oid), int(raw_score)
+    except (TypeError, ValueError):
+        return await call.answer("评价参数无效", show_alert=True)
+    if not 1 <= score <= 5:
+        return await call.answer("评分必须在 1 到 5 星之间", show_alert=True)
+
+    user = await UserRepository.get_or_create(call.from_user.id)
+    if not await OrderRepository.submit_rating(oid, user['id'], 'DRIVER', score):
+        return await call.answer("无权评价、订单未完成或该订单已评价", show_alert=True)
+
+    order = await OrderRepository.get(oid)
+    if order:
         async with db.pool.acquire() as c:
-            exists = await c.fetchval("SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2", int(oid), order['driver_id'])
+            exists = await c.fetchval(
+                "SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2",
+                oid, order['driver_id'],
+            )
             if not exists:
                 await c.execute(
                     "INSERT INTO reviews (order_id, driver_id, passenger_id, rating) VALUES ($1, $2, $3, $4)",
-                    int(oid), order['driver_id'], order['customer_id'], int(score)
+                    oid, order['driver_id'], order['customer_id'], score,
                 )
-        # 👆
-        
-        await call.message.edit_text(t("driver.rated_pax", user, score=int(score)))
+        await call.message.edit_text(t("driver.rated_pax", user, score=score))
     await call.answer()
 
 @router.message(F.text | F.voice | F.photo)
