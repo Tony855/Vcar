@@ -4,14 +4,18 @@ from app.modules.payments import reconciliation
 
 
 class SettlementAuditConnection:
-    def __init__(self, rows):
+    def __init__(self, rows, orphan_rows=None):
         self.rows = rows
+        self.orphan_rows = orphan_rows or []
         self.queries = []
 
     async def fetch(self, query):
         self.queries.append(query)
         assert "order_settlements" in query
         assert "wallet_transactions" in query
+        if "WHERE t.metadata ? '_settlement_id'" in query:
+            assert "NOT EXISTS" in query
+            return self.orphan_rows
         assert "IS DISTINCT FROM" in query
         return self.rows
 
@@ -28,8 +32,8 @@ class Acquire:
 
 
 class Pool:
-    def __init__(self, rows):
-        self.connection = SettlementAuditConnection(rows)
+    def __init__(self, rows, orphan_rows=None):
+        self.connection = SettlementAuditConnection(rows, orphan_rows)
 
     def acquire(self):
         return Acquire(self.connection)
@@ -63,7 +67,7 @@ async def test_settlement_audit_accepts_complete_posted_batch(monkeypatch):
     monkeypatch.setattr(reconciliation.db, "pool", pool)
 
     assert await reconciliation.reconcile_order_settlements() == []
-    assert len(pool.connection.queries) == 1
+    assert len(pool.connection.queries) == 2
 
 
 @pytest.mark.asyncio
@@ -132,3 +136,35 @@ async def test_settlement_audit_does_not_treat_failed_snapshot_with_ledger_as_he
     findings = await reconciliation.reconcile_order_settlements()
 
     assert findings[0]["finding"] == "FAILED_WITH_LEDGER_ENTRIES"
+
+
+
+@pytest.mark.asyncio
+async def test_settlement_audit_flags_ledger_rows_without_snapshot(monkeypatch):
+    orphan = {
+        "settlement_id": "9999",
+        "ledger_count": 2,
+        "ledger_sum_minor": "0",
+        "currency_count": 1,
+        "order_count": 1,
+        "batch_keys": ["settlement:9999"],
+    }
+    pool = Pool([audit_row()], orphan_rows=[orphan])
+    monkeypatch.setattr(reconciliation.db, "pool", pool)
+
+    findings = await reconciliation.reconcile_order_settlements()
+
+    assert len(findings) == 1
+    assert findings[0] == {
+        "settlement_id": "9999",
+        "order_id": None,
+        "status": "MISSING_SNAPSHOT",
+        "currency": None,
+        "policy_version": None,
+        "ledger_count": 2,
+        "ledger_sum_minor": 0,
+        "finding": "ORPHAN_SETTLEMENT_LEDGER",
+        "currency_count": 1,
+        "order_count": 1,
+        "batch_keys": ["settlement:9999"],
+    }
