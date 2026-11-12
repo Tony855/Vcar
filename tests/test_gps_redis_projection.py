@@ -234,3 +234,38 @@ async def test_dispatch_expiry_cleanup_does_not_delete_a_concurrent_gps_heartbea
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_driver_online_and_offline_transitions_update_presence_atomically(monkeypatch):
+    import os
+    import uuid
+
+    from redis.asyncio import Redis
+
+    from app.db.core import db
+    from app.services.dispatch import DispatchService
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    telegram_id = f"6{uuid.uuid4().int % 900000000}"
+    try:
+        monkeypatch.setattr(db, "redis", redis)
+        await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
+
+        assert await redis.zscore("driver:heartbeat", telegram_id) is not None
+        position = (await redis.geopos("driver:online", telegram_id))[0]
+        assert position is not None
+        assert position[0] == pytest.approx(104.9282, abs=0.0001)
+        assert position[1] == pytest.approx(11.5564, abs=0.0001)
+
+        await redis.zadd("driver:location:version", {telegram_id: 123.0})
+        await DispatchService.go_offline(telegram_id)
+
+        assert await redis.zscore("driver:heartbeat", telegram_id) is None
+        assert await redis.zscore("driver:location:version", telegram_id) is None
+        assert await redis.geopos("driver:online", telegram_id) == [None]
+    finally:
+        await redis.zrem("driver:heartbeat", telegram_id)
+        await redis.zrem("driver:location:version", telegram_id)
+        await redis.zrem("driver:online", telegram_id)
+        await redis.aclose()
