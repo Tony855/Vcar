@@ -237,7 +237,16 @@ class OrderRepository:
     async def cancel_with_fee(cls, oid, uid, role, fee=0.0):
         # The actor role is part of the authorization boundary: being either
         # participant is not sufficient to claim the other participant's role.
-        if role not in {"PASSENGER", "DRIVER"}:
+        bigint_max = 2**63 - 1
+        if (
+            role not in {"PASSENGER", "DRIVER"}
+            or not isinstance(oid, int)
+            or isinstance(oid, bool)
+            or not 0 < oid <= bigint_max
+            or not isinstance(uid, int)
+            or isinstance(uid, bool)
+            or not 0 < uid <= bigint_max
+        ):
             return False
         if isinstance(fee, bool) or not isinstance(fee, (int, float, Decimal)):
             return False
