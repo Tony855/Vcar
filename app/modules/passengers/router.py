@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -20,6 +21,7 @@ from app.infrastructure.osrm.client import RoutingError
 from app.modules.orders.stream import load_order_stream_bootstrap
 
 router = APIRouter(prefix="/passenger", tags=["passenger"])
+logger = logging.getLogger(__name__)
 
 
 class TelegramSessionRequest(BaseModel):
@@ -162,50 +164,164 @@ async def passenger_order_stream(
 
     await websocket.accept()
     channel = f"order:status:{order_id}"
-    pubsub = db.redis.pubsub()
-    last_sent_event_id = max(0, int(last_event_id or 0))
-    try:
-        # Subscribe before replay/snapshot. Events published during the DB read
-        # remain queued; event_id filtering removes overlap with replay.
-        await pubsub.subscribe(channel)
+    pubsub = None
+    last_sent_event_id = last_event_id
+    reconnect_delay = 1.0
+    last_reconciliation = 0.0
+
+    async def subscribe():
+        subscriber = db.redis.pubsub()
+        try:
+            await subscriber.subscribe(channel)
+        except Exception:
+            try:
+                await subscriber.aclose()
+            except Exception:
+                logger.debug(
+                    "Failed to close unsuccessful passenger order Pub/Sub",
+                    extra={"order_id": order_id},
+                    exc_info=True,
+                )
+            raise
+        return subscriber
+
+    async def send_durable_updates():
+        """Replay committed outbox events to repair Pub/Sub gaps and restarts."""
+        nonlocal last_sent_event_id
         async with db.pool.acquire() as conn:
             bootstrap = await load_order_stream_bootstrap(
                 conn, order_id=order_id, last_event_id=last_sent_event_id
             )
         if bootstrap["type"] == "replay":
             for event in bootstrap["events"]:
-                event_id = int(event.get("event_id", 0))
-                if event_id <= last_sent_event_id:
+                if not isinstance(event, dict):
+                    continue
+                event_id = event.get("event_id")
+                if (
+                    not isinstance(event_id, int)
+                    or isinstance(event_id, bool)
+                    or not 0 < event_id <= 2**63 - 1
+                    or event_id <= last_sent_event_id
+                    or event.get("order_id") != order_id
+                ):
                     continue
                 await websocket.send_json(event)
                 last_sent_event_id = event_id
                 if event.get("status") in ("COMPLETED", "CANCELLED"):
-                    return
+                    return True
         else:
             await websocket.send_json(bootstrap)
             last_sent_event_id = int(bootstrap["last_event_id"])
+        return bootstrap.get("status") in ("COMPLETED", "CANCELLED")
 
-        if bootstrap.get("status") in ("COMPLETED", "CANCELLED"):
+    try:
+        # Subscribe before the durable bootstrap so events committed during the
+        # database read are queued and later deduplicated by event_id.
+        try:
+            pubsub = await subscribe()
+        except Exception:
+            logger.warning(
+                "Passenger order Pub/Sub unavailable at connect; using durable replay",
+                extra={"order_id": order_id},
+                exc_info=True,
+            )
+            pubsub = None
+        if await send_durable_updates():
             return
+        last_reconciliation = asyncio.get_running_loop().time()
 
         while True:
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if pubsub is None:
+                await asyncio.sleep(reconnect_delay)
+                try:
+                    pubsub = await subscribe()
+                    reconnect_delay = 1.0
+                except Exception:
+                    logger.warning(
+                        "Passenger order Pub/Sub resubscribe failed",
+                        extra={"order_id": order_id},
+                        exc_info=True,
+                    )
+                    pubsub = None
+                    reconnect_delay = min(reconnect_delay * 2, 15.0)
+                # Poll the durable outbox even while Redis is unavailable.
+                if await send_durable_updates():
+                    break
+                last_reconciliation = asyncio.get_running_loop().time()
+                continue
+
+            try:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=1.0
+                )
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                logger.warning(
+                    "Passenger order Pub/Sub unavailable; rebuilding subscription",
+                    extra={"order_id": order_id},
+                    exc_info=True,
+                )
+                try:
+                    await pubsub.aclose()
+                except Exception:
+                    logger.debug(
+                        "Failed to close stale passenger order Pub/Sub",
+                        extra={"order_id": order_id},
+                        exc_info=True,
+                    )
+                pubsub = None
+                reconnect_delay = 1.0
+                if await send_durable_updates():
+                    break
+                last_reconciliation = asyncio.get_running_loop().time()
+                continue
+
             if message and message.get("type") == "message":
                 try:
                     payload = json.loads(message["data"])
-                    event_id = int(payload.get("event_id", 0))
                 except (TypeError, ValueError, json.JSONDecodeError):
                     continue
-                if event_id <= last_sent_event_id:
+                if not isinstance(payload, dict):
+                    continue
+                event_id = payload.get("event_id")
+                if (
+                    not isinstance(event_id, int)
+                    or isinstance(event_id, bool)
+                    or not 0 < event_id <= 2**63 - 1
+                    or payload.get("order_id") != order_id
+                    or event_id <= last_sent_event_id
+                ):
                     continue
                 await websocket.send_json(payload)
                 last_sent_event_id = event_id
                 if payload.get("status") in ("COMPLETED", "CANCELLED"):
                     break
             else:
-                await asyncio.sleep(0.1)
+                now = asyncio.get_running_loop().time()
+                if now - last_reconciliation >= 15.0:
+                    # Pub/Sub is at-most-once. Periodic replay repairs a lost
+                    # publication even if the Redis connection stayed healthy.
+                    if await send_durable_updates():
+                        break
+                    last_reconciliation = now
     except WebSocketDisconnect:
         pass
     finally:
-        await pubsub.unsubscribe(channel)
-        await pubsub.aclose()
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe(channel)
+            except Exception:
+                logger.debug(
+                    "Failed to unsubscribe passenger order Pub/Sub",
+                    extra={"order_id": order_id},
+                    exc_info=True,
+                )
+            try:
+                await pubsub.aclose()
+            except Exception:
+                logger.debug(
+                    "Failed to close passenger order Pub/Sub",
+                    extra={"order_id": order_id},
+                    exc_info=True,
+                )
