@@ -100,3 +100,13 @@ def test_validate_payload_rejects_boolean_match_distance():
     assert not smoke_osrm.validate_payload(
         "match", {"code": "Ok", "matchings": [{"distance": True}], "tracepoints": [{}, {}]}
     )
+
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["nan,11.5", "inf,11.5", "-inf,11.5", "104.9,nan", "104.9,inf"],
+)
+def test_parse_coordinate_rejects_non_finite_values(value):
+    with pytest.raises(Exception):
+        smoke_osrm.parse_coordinate(value)
