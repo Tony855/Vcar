@@ -72,6 +72,7 @@ def test_restore_uses_schema_owner_and_restarts_services_after_success(tmp_path)
     )
     assert result.returncode == 0, result.stderr
     assert "pg_restore --clean" in log
+    assert "--single-transaction" in log
     assert "owner:secret" in log
     assert "runtime:secret" not in log
     assert "pg_dump" in log
