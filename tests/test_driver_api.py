@@ -39,7 +39,7 @@ class FakeConnection:
 
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query, args))
-        if "SELECT id FROM users" in query or "SELECT driver_status FROM users" in query:
+        if "FROM users" in query and ("driver_is_online" in query or "driver_status" in query):
             return self.driver
         if "INSERT INTO driver_locations" in query:
             return self.inserted
@@ -82,7 +82,7 @@ def driver_client(monkeypatch):
     secret = "driver-api-test-secret-" + "x" * 40
     monkeypatch.setenv("SECRET_KEY", secret)
     connection = FakeConnection(
-        driver={"id": 11},
+        driver={"id": 11, "driver_is_online": True, "driver_presence_generation": 1},
         inserted={"driver_id": 11},
     )
     monkeypatch.setattr(db, "pool", FakePool(connection))
@@ -231,4 +231,35 @@ def test_gps_api_rejects_stale_sample_without_insert_or_publish(driver_client, m
     assert response.status_code == 409
     assert len(connection.fetchrow_calls) == 1
     assert len(connection.fetchval_calls) == 1
+    assert published == []
+
+
+def test_gps_api_rejects_offline_driver_without_persisting_or_publishing(driver_client, monkeypatch):
+    client, connection, token, _ = driver_client
+    connection.driver = {
+        "id": 11,
+        "driver_is_online": False,
+        "driver_presence_generation": 2,
+    }
+    published = []
+
+    async def publish(*args, **kwargs):
+        published.append(kwargs)
+        return True
+
+    monkeypatch.setattr(location_router, "publish_driver_location", publish)
+    response = client.post(
+        "/api/v1/driver/location",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "latitude": 11.55,
+            "longitude": 104.92,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    assert response.status_code == 409
+    assert "Driver is offline" in response.text
+    assert len(connection.fetchrow_calls) == 1
+    assert connection.fetchval_calls == []
     assert published == []
