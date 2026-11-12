@@ -156,7 +156,9 @@ class DispatchService:
                 """
                 SELECT id, telegram_id, rating, locale
                 FROM users
-                WHERE telegram_id = ANY($1) AND driver_status='APPROVED'
+                WHERE telegram_id = ANY($1)
+                  AND driver_status='APPROVED'
+                  AND driver_is_online IS TRUE
                 """,
                 telegram_ids,
             )
