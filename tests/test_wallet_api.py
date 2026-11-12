@@ -313,7 +313,7 @@ def test_wallet_transaction_cursor_accepts_maximum_signed_bigint(wallet_client):
         headers={"Authorization": f"Bearer {token()}"},
     )
     assert response.status_code == 200
-    assert connection.fetch_calls[0][1] == (7003003, 2**63 - 1, 50)
+    assert connection.fetch_calls[0][1] == (7003003, 2**63 - 1, 50, None)
 
 
 def test_wallet_list_returns_all_currency_accounts(wallet_client):
