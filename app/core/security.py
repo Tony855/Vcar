@@ -50,11 +50,15 @@ def verify_password(password: str, encoded_hash: str) -> bool:
         return False
 
 
-def _secret_key() -> str:
-    key = os.getenv("SECRET_KEY", "")
-    if len(key.encode()) < 32 or key.startswith("REPLACE_"):
+def require_strong_secret_key(key: str) -> str:
+    """Reject missing or placeholder signing keys before any JWT verification."""
+    if not isinstance(key, str) or len(key.encode()) < 32 or key.startswith("REPLACE_"):
         raise HTTPException(status_code=503, detail="Authentication is not configured")
     return key
+
+
+def _secret_key() -> str:
+    return require_strong_secret_key(os.getenv("SECRET_KEY", ""))
 
 
 def create_access_token(subject: str, role: str = "admin", expires_minutes: int = 30) -> str:
