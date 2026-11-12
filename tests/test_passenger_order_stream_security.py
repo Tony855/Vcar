@@ -142,3 +142,35 @@ async def test_order_stream_rejects_driver_ticket_before_database_access(monkeyp
     assert websocket.close_code == 4401
     assert websocket.accepted is False
     assert connection.fetchval_calls == []
+
+
+@pytest.mark.parametrize("subject", ["", "passenger", "0", "-1", "１２３", "9" * 20])
+def test_passenger_claims_rejects_invalid_telegram_subject(jwt_secret, subject):
+    token = make_token(jwt_secret, subject=subject)
+    with pytest.raises(HTTPException) as error:
+        passenger_router.passenger_claims("Bearer " + token)
+    assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("order_id", "last_event_id"), [
+    (0, 0), (-1, 0), (2**63, 0), (987, -1), (987, 2**63),
+])
+async def test_order_stream_rejects_invalid_order_or_event_cursor_before_ticket_or_database(
+    monkeypatch, order_id, last_event_id
+):
+    websocket = FakeWebSocket()
+    connection = FakeConnection(owned_order=987)
+    monkeypatch.setattr(passenger_router.db, "pool", FakePool(connection))
+
+    async def ticket_must_not_be_consumed(ticket, scope):
+        raise AssertionError("invalid stream identifiers must be rejected before ticket use")
+
+    monkeypatch.setattr(passenger_router, "consume_ws_ticket", ticket_must_not_be_consumed)
+    await passenger_router.passenger_order_stream(
+        websocket, order_id, "single-use-ticket", last_event_id=last_event_id
+    )
+
+    assert websocket.close_code == 4400
+    assert websocket.accepted is False
+    assert connection.fetchval_calls == []
