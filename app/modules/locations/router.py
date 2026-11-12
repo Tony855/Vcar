@@ -1,4 +1,4 @@
-"""Authenticated driver GPS ingestion and low-latency location stream."""
+""""Authenticated driver GPS ingestion and low-latency location stream."""
 from __future__ import annotations
 
 import asyncio
@@ -98,12 +98,16 @@ async def update_driver_location(
         "speed_mps": payload.speed_mps,
         "recorded_at": recorded_at.isoformat(),
     }
+    # Stamp presence after the serialized DB write. A request may have waited
+    # behind another GPS transaction; using its pre-lock timestamp could make
+    # a freshly accepted driver look older/offline in Redis.
+    heartbeat_at = datetime.now(timezone.utc).timestamp()
     realtime_published = await publish_driver_location(
         db.redis,
         telegram_id=telegram_id,
         longitude=payload.longitude,
         latitude=payload.latitude,
-        heartbeat_at=now.timestamp(),
+        heartbeat_at=heartbeat_at,
         event=event,
     )
     return {
@@ -219,7 +223,6 @@ async def driver_location_stream(websocket: WebSocket, ticket: str):
                 await pubsub.aclose()
 
 
-
 class NavigationRequest(BaseModel):
     coordinates: list[tuple[float, float]] = Field(min_length=2, max_length=25)
 
@@ -255,7 +258,6 @@ async def driver_navigation_match(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RoutingError as exc:
         raise HTTPException(status_code=503, detail="Navigation matching unavailable") from exc
-
 
 
 @router.websocket("/admin/fleet/stream")
