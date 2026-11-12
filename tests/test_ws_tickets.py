@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import jwt
 import pytest
+from fastapi import HTTPException
 
 from app.modules.auth import ws_tickets
 
@@ -76,3 +77,18 @@ async def test_ticket_issuer_rejects_access_token_without_exp(fake_redis):
     )
     with pytest.raises(ValueError, match="Invalid or expired"):
         await ws_tickets.issue_ws_ticket(token_without_exp, "admin-fleet")
+
+
+@pytest.mark.asyncio
+async def test_ticket_issuer_rejects_weak_signing_secret(fake_redis, monkeypatch):
+    _, _ = fake_redis
+    weak_secret = "weak"
+    monkeypatch.setattr(ws_tickets, "settings", SimpleNamespace(secret_key=weak_secret))
+    token_with_weak_key = jwt.encode(
+        {"sub": "12345", "role": "admin", "exp": int(time.time()) + 300},
+        weak_secret,
+        algorithm="HS256",
+    )
+    with pytest.raises(HTTPException) as error:
+        await ws_tickets.issue_ws_ticket(token_with_weak_key, "admin-fleet")
+    assert error.value.status_code == 503

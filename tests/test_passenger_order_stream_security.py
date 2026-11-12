@@ -202,3 +202,16 @@ def test_passenger_claims_rejects_token_without_exp(jwt_secret):
     with pytest.raises(HTTPException) as error:
         passenger_router.passenger_claims("Bearer " + token_without_exp)
     assert error.value.status_code == 401
+
+
+def test_passenger_claims_rejects_weak_signing_secret(jwt_secret, monkeypatch):
+    weak_secret = "weak"
+    monkeypatch.setattr(passenger_router, "settings", SimpleNamespace(secret_key=weak_secret))
+    forged_with_weak_key = jwt.encode(
+        {"sub": "1001", "role": "passenger", "exp": 2**31},
+        weak_secret,
+        algorithm="HS256",
+    )
+    with pytest.raises(HTTPException) as error:
+        passenger_router.passenger_claims("Bearer " + forged_with_weak_key)
+    assert error.value.status_code == 503

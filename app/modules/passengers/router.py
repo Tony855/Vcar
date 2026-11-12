@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, WebSocket, 
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.core.security import create_access_token, verify_telegram_webapp_init_data, is_valid_telegram_subject
+from app.core.security import (
+    create_access_token, verify_telegram_webapp_init_data,
+    is_valid_telegram_subject, require_strong_secret_key,
+)
 from app.db.core import db
 from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.repositories.order_repo import OrderRepository
@@ -60,9 +63,10 @@ async def passenger_session(request: TelegramSessionRequest):
 def passenger_claims(authorization: str | None) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
+    secret_key = require_strong_secret_key(settings.secret_key)
     try:
         claims = jwt.decode(
-            authorization[7:], settings.secret_key, algorithms=["HS256"],
+            authorization[7:], secret_key, algorithms=["HS256"],
             options={"require": ["exp"]},
         )
     except jwt.PyJWTError as exc:

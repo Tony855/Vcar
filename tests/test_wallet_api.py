@@ -364,3 +364,20 @@ def test_wallet_api_rejects_token_without_exp(wallet_client):
     )
     assert response.status_code == 401
     assert connection.fetch_calls == []
+
+
+def test_wallet_api_rejects_weak_signing_secret(wallet_client, monkeypatch):
+    client, connection, _ = wallet_client
+    weak_secret = "weak"
+    monkeypatch.setattr(wallet_router, "settings", SimpleNamespace(secret_key=weak_secret))
+    forged_with_weak_key = jwt.encode(
+        {"sub": "7003003", "role": "passenger", "exp": 2**31},
+        weak_secret,
+        algorithm="HS256",
+    )
+    response = client.get(
+        "/api/v1/wallet/me",
+        headers={"Authorization": f"Bearer {forged_with_weak_key}"},
+    )
+    assert response.status_code == 503
+    assert connection.fetch_calls == []
