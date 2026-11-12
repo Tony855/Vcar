@@ -17,7 +17,7 @@ tests:
           - exp_labels:
               severity: critical
             exp_annotations:
-              summary: Redis dependency is unavailable
+              summary: Vcar Redis dependency is unavailable
               description: Vcar metrics can still be scraped, but Redis PING has failed for more than two minutes.
       - eval_time: 3m
         alertname: VcarBlackboxProbeFailed
