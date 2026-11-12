@@ -134,56 +134,59 @@ async def rate_pax_to_driver(call: CallbackQuery, state: FSMContext, driver_bot)
         return await call.answer("无权评价、订单未完成或该订单已评价", show_alert=True)
 
     order = await OrderRepository.get(oid)
+    await state.set_state(RatingStates.waiting_for_comment)
+    await state.update_data(
+        oid=oid,
+        driver_tg=order.get("d_tg") if order else None,
+        passenger_id=user["id"],
+    )
+    await call.message.edit_text(t("passenger.rated_5_stars", user, score=score))
     if order and order.get("d_tg"):
-        async with db.pool.acquire() as c:
-            exists = await c.fetchval(
-                "SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2",
-                oid, order["driver_id"],
-            )
-            if not exists:
-                await c.execute(
-                    "INSERT INTO reviews (order_id, driver_id, passenger_id, rating) VALUES ($1, $2, $3, $4)",
-                    oid, order["driver_id"], order["customer_id"], score,
-                )
-            else:
-                await c.execute(
-                    "UPDATE reviews SET rating=$1 WHERE order_id=$2 AND driver_id=$3",
-                    score, oid, order["driver_id"],
-                )
-
-        await state.set_state(RatingStates.waiting_for_comment)
-        await state.update_data(oid=oid, driver_tg=order["d_tg"])
-        await call.message.edit_text(t("passenger.rated_5_stars", user, score=score))
         try:
-            asyncio.create_task(driver_bot.send_message(
+            await driver_bot.send_message(
                 order["d_tg"],
                 t("driver.rider_rated", order.get("d_locale", "en"), score=score),
-            ))
+            )
         except Exception:
-            pass
+            logging.exception("Failed to notify driver about passenger rating")
     await call.answer()
 
 
 @router.message(RatingStates.waiting_for_comment)
 async def receive_review_comment(msg: Message, state: FSMContext, driver_bot):
+    user = await UserRepository.get_or_create(msg.from_user.id)
     data = await state.get_data()
-    oid = data.get('oid')
-    driver_tg = data.get('driver_tg')
-    
-    if msg.text == '/skip':
+    oid = data.get("oid")
+    passenger_id = data.get("passenger_id")
+    driver_tg = data.get("driver_tg")
+
+    # Bind the FSM continuation to the same passenger who submitted the rating.
+    if passenger_id != user["id"] or not oid:
         await state.clear()
-        await msg.answer(t("passenger.skipped_comment", user))
-        return
-        
-    comment = msg.text
-    async with db.pool.acquire() as c:
-        await c.execute("UPDATE reviews SET comment=$1 WHERE order_id=$2", comment, oid)
-    
+        return await msg.answer("评价会话已失效，请重新进入订单评价。")
+
+    if msg.text == "/skip":
+        await state.clear()
+        return await msg.answer(t("passenger.skipped_comment", user))
+
+    if not msg.text:
+        return await msg.answer("请发送文字评价，或输入 /skip 跳过。")
+    if len(msg.text) > 1000:
+        return await msg.answer("评价内容不能超过 1000 个字符。")
+
+    if not await OrderRepository.add_rating_comment(oid, user["id"], msg.text):
+        await state.clear()
+        return await msg.answer("评价已失效或无法保存，请重新进入订单评价。")
+
     await state.clear()
     await msg.answer("✅ 您的文字评价已提交！")
-    try:
-        asyncio.create_task(driver_bot.send_message(driver_tg, f"⭐ 您收到了一条新评价：\n\"{comment}\""))
-    except: pass
+    if driver_tg:
+        try:
+            await driver_bot.send_message(
+                driver_tg, f"⭐ 您收到了一条新评价：\n\"{msg.text.strip()}\""
+            )
+        except Exception:
+            logging.exception("Failed to notify driver about review comment")
 
 @router.message(PaxStates.dropoff, F.location)
 async def step2(msg: Message, state: FSMContext, driver_bot):

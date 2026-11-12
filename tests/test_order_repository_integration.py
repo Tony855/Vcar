@@ -913,6 +913,7 @@ async def test_order_ratings_are_authorized_idempotent_and_directional(database_
         assert by_id[passenger_id]["rating_count"] == 2
     finally:
         async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM reviews WHERE order_id=$1", order["id"])
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)",
@@ -958,6 +959,130 @@ async def test_concurrent_duplicate_order_rating_updates_aggregate_once(database
         assert aggregate["rating_count"] == 2
     finally:
         async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM reviews WHERE order_id=$1", order["id"])
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
+
+
+@pytest.mark.asyncio
+async def test_rating_comment_is_bound_to_own_completed_order_and_persists(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "rating-comment-passenger")
+        other_passenger_id = await _create_user(connection, "rating-comment-other")
+        driver_id = await _create_user(connection, "rating-comment-driver")
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        for new_status, old_status in (
+            ("ARRIVED", "ACCEPTED"),
+            ("IN_PROGRESS", "ARRIVED"),
+            ("COMPLETED", "IN_PROGRESS"),
+        ):
+            assert await OrderRepository.update_status(
+                order["id"], new_status, old_status,
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ) is True
+        assert await OrderRepository.submit_rating(
+            order["id"], passenger_id, "PASSENGER", 5
+        ) is True
+
+        assert await OrderRepository.add_rating_comment(
+            order["id"], other_passenger_id, "forged"
+        ) is False
+        assert await OrderRepository.add_rating_comment(
+            order["id"], passenger_id, "   "
+        ) is False
+        assert await OrderRepository.add_rating_comment(
+            order["id"], passenger_id, "x" * 1001
+        ) is False
+        assert await OrderRepository.add_rating_comment(
+            order["id"], passenger_id, "Smooth trip"
+        ) is True
+
+        async with database_pool.acquire() as connection:
+            comment = await connection.fetchval(
+                "SELECT comment FROM order_ratings "
+                "WHERE order_id=$1 AND rater_role='PASSENGER'",
+                order["id"],
+            )
+            legacy = await connection.fetchrow(
+                "SELECT driver_id, passenger_id, rating FROM reviews WHERE order_id=$1",
+                order["id"],
+            )
+        assert comment == "Smooth trip"
+        assert legacy["driver_id"] == driver_id
+        assert legacy["passenger_id"] == passenger_id
+        assert legacy["rating"] == 5
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM reviews WHERE order_id=$1", order["id"])
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)",
+                [passenger_id, other_passenger_id, driver_id],
+            )
+
+
+@pytest.mark.asyncio
+async def test_rating_legacy_projection_rolls_back_with_rating_insert(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "rating-projection-passenger")
+        driver_id = await _create_user(connection, "rating-projection-driver")
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        for new_status, old_status in (
+            ("ARRIVED", "ACCEPTED"),
+            ("IN_PROGRESS", "ARRIVED"),
+            ("COMPLETED", "IN_PROGRESS"),
+        ):
+            assert await OrderRepository.update_status(
+                order["id"], new_status, old_status,
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ) is True
+        async with database_pool.acquire() as connection:
+            await connection.execute(
+                """
+                CREATE FUNCTION reject_rating_projection() RETURNS trigger AS $$
+                BEGIN
+                    RAISE EXCEPTION 'injected rating projection failure';
+                END;
+                $$ LANGUAGE plpgsql
+                """
+            )
+            await connection.execute(
+                """
+                CREATE TRIGGER reject_rating_projection
+                BEFORE INSERT ON reviews
+                FOR EACH ROW EXECUTE FUNCTION reject_rating_projection()
+                """
+            )
+        with pytest.raises(Exception, match="injected rating projection failure"):
+            await OrderRepository.submit_rating(
+                order["id"], passenger_id, "PASSENGER", 4
+            )
+        async with database_pool.acquire() as connection:
+            rating_count = await connection.fetchval(
+                "SELECT count(*) FROM order_ratings WHERE order_id=$1",
+                order["id"],
+            )
+            user_rating = await connection.fetchrow(
+                "SELECT rating, rating_count FROM users WHERE id=$1", driver_id
+            )
+        assert rating_count == 0
+        assert float(user_rating["rating"]) == 5.0
+        assert user_rating["rating_count"] == 1
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DROP TRIGGER IF EXISTS reject_rating_projection ON reviews")
+            await connection.execute("DROP FUNCTION IF EXISTS reject_rating_projection()")
+            await connection.execute("DELETE FROM reviews WHERE order_id=$1", order["id"])
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
