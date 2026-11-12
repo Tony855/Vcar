@@ -66,6 +66,7 @@ async def reconcile_order_settlements() -> list[dict]:
                 COALESCE(SUM(t.amount_minor), 0)::text AS ledger_sum_minor,
                 COUNT(DISTINCT t.currency)::bigint AS currency_count,
                 COUNT(DISTINCT t.order_id)::bigint AS order_count,
+                COUNT(DISTINCT t.wallet_id)::bigint AS wallet_count,
                 COUNT(DISTINCT t.metadata->>'_batch_key')::bigint AS batch_key_count,
                 ARRAY_AGG(t.metadata->>'_batch_index' ORDER BY t.id)
                     FILTER (WHERE t.id IS NOT NULL) AS batch_indexes,
@@ -155,6 +156,9 @@ async def reconcile_order_settlements() -> list[dict]:
                 and ledger_sum == 0
                 and int(row["currency_count"]) == 1
                 and int(row["order_count"]) == 1
+                # Each batch leg must belong to a distinct wallet, matching
+                # WalletLedger.post_balanced_batch and crash recovery checks.
+                and int(row["wallet_count"]) == count
                 and int(row["batch_key_count"]) == 1
                 and sorted(index_values) == list(range(count))
                 and not malformed_indexes

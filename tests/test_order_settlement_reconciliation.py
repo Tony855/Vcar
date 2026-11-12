@@ -50,6 +50,7 @@ def audit_row(**overrides):
         "ledger_sum_minor": "0",
         "currency_count": 1,
         "order_count": 1,
+        "wallet_count": 2,
         "batch_key_count": 1,
         "batch_indexes": ["0", "1"],
         "currency_mismatch_count": 0,
@@ -177,6 +178,23 @@ async def test_settlement_audit_flags_deterministic_idempotency_key_mismatch(mon
         reconciliation.db,
         "pool",
         Pool([audit_row(idempotency_key_mismatch_count=1)]),
+    )
+
+    findings = await reconciliation.reconcile_order_settlements()
+
+    assert len(findings) == 1
+    assert findings[0]["finding"] == "INCONSISTENT_LEDGER_BATCH"
+
+
+
+@pytest.mark.asyncio
+async def test_settlement_audit_rejects_multiple_legs_for_the_same_wallet(monkeypatch):
+    # A zero-sum batch with contiguous indexes is still invalid when it
+    # violates the ledger writer's one-wallet-per-leg invariant.
+    monkeypatch.setattr(
+        reconciliation.db,
+        "pool",
+        Pool([audit_row(wallet_count=1)]),
     )
 
     findings = await reconciliation.reconcile_order_settlements()
