@@ -164,7 +164,8 @@ class OrderRepository:
             async with connection.transaction():
                 # Serialize competing accept attempts made by the same driver.
                 driver = await connection.fetchrow(
-                    "SELECT id FROM users WHERE id=$1 FOR UPDATE", did
+                    "SELECT id FROM users WHERE id=$1 AND driver_status='APPROVED' FOR UPDATE",
+                    did,
                 )
                 if not driver:
                     return False
