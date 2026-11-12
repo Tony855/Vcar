@@ -19,6 +19,10 @@ class InsufficientFunds(WalletError):
     pass
 
 
+class WalletBalanceLimit(WalletError):
+    pass
+
+
 class IdempotencyConflict(WalletError):
     pass
 
@@ -169,6 +173,10 @@ class WalletLedger:
                     return LedgerResult(previous["id"], wallet["id"], balance, True)
                 if wallet["currency"] != currency.upper():
                     raise WalletError("Wallet currency mismatch")
+                # PostgreSQL BIGINT is signed 64-bit. Reject a credit that
+                # would overflow before issuing arithmetic in the UPDATE.
+                if amount_minor > 0 and wallet["balance_minor"] > bigint_max - amount_minor:
+                    raise WalletBalanceLimit("Wallet balance exceeds the supported maximum")
                 updated = await conn.fetchrow(
                     """
                     UPDATE wallet_accounts
