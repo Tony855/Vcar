@@ -12,10 +12,7 @@ from app.core.security import verify_driver_token
 from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.core import db
 from app.modules.locations.gps import is_newer_sample, build_location_snapshot
-from app.modules.locations.redis_projection import (
-    capture_driver_presence_generation,
-    publish_driver_location,
-)
+from app.modules.locations.redis_projection import publish_driver_location
 from app.modules.locations.fleet import fetch_fleet_snapshot
 
 router = APIRouter(tags=["driver-location"])
@@ -45,21 +42,39 @@ async def update_driver_location(
         raise HTTPException(status_code=422, detail="GPS sample is outside the accepted time window")
 
     telegram_id = int(claims["sub"])
-    presence_online, presence_generation = await capture_driver_presence_generation(
-        db.redis, telegram_id
-    )
-    if presence_online is False:
-        raise HTTPException(status_code=409, detail="Driver is offline")
-
+    event = {
+        "telegram_id": telegram_id,
+        "latitude": payload.latitude,
+        "longitude": payload.longitude,
+        "accuracy_m": payload.accuracy_m,
+        "heading_deg": payload.heading_deg,
+        "speed_mps": payload.speed_mps,
+        "recorded_at": recorded_at.isoformat(),
+    }
+    realtime_published = False
     async with db.pool.acquire() as conn:
         async with conn.transaction():
+            # Keep the user row locked through Redis projection. This serializes
+            # GPS publication with durable online/offline transitions: a late
+            # request cannot publish after an offline transition has committed.
             driver = await conn.fetchrow(
-                "SELECT id FROM users WHERE telegram_id=$1 AND driver_status='APPROVED' FOR UPDATE",
+                """
+                SELECT id, driver_is_online, driver_presence_generation
+                FROM users
+                WHERE telegram_id=$1 AND driver_status='APPROVED'
+                FOR UPDATE
+                """,
                 telegram_id,
             )
             if not driver:
                 raise HTTPException(status_code=403, detail="Approved driver account required")
-            latest = await conn.fetchval("SELECT recorded_at FROM driver_locations WHERE driver_id=$1", driver["id"])
+            if not driver["driver_is_online"]:
+                raise HTTPException(status_code=409, detail="Driver is offline")
+            presence_generation = int(driver["driver_presence_generation"])
+            latest = await conn.fetchval(
+                "SELECT recorded_at FROM driver_locations WHERE driver_id=$1",
+                driver["id"],
+            )
             if not is_newer_sample(recorded_at, latest):
                 raise HTTPException(status_code=409, detail="GPS sample is not newer than the last accepted sample")
             point = f"SRID=4326;POINT({payload.longitude} {payload.latitude})"
@@ -98,36 +113,22 @@ async def update_driver_location(
                     active_order, driver["id"], point, payload.accuracy_m, recorded_at,
                 )
 
-    event = {
-        "telegram_id": telegram_id,
-        "latitude": payload.latitude,
-        "longitude": payload.longitude,
-        "accuracy_m": payload.accuracy_m,
-        "heading_deg": payload.heading_deg,
-        "speed_mps": payload.speed_mps,
-        "recorded_at": recorded_at.isoformat(),
-    }
-    # Stamp presence after the serialized DB write. A request may have waited
-    # behind another GPS transaction; using its pre-lock timestamp could make
-    # a freshly accepted driver look older/offline in Redis.
-    heartbeat_at = datetime.now(timezone.utc).timestamp()
-    realtime_published = False
-    if presence_generation is not None:
-        realtime_published = await publish_driver_location(
-            db.redis,
-            telegram_id=telegram_id,
-            presence_generation=presence_generation,
-            longitude=payload.longitude,
-            latitude=payload.latitude,
-            heartbeat_at=heartbeat_at,
-            event=event,
-        )
+            # The Redis operation is best-effort, but remains inside the row
+            # lock so go_offline cannot commit ahead of this publication.
+            realtime_published = await publish_driver_location(
+                db.redis,
+                telegram_id=telegram_id,
+                presence_generation=presence_generation,
+                longitude=payload.longitude,
+                latitude=payload.latitude,
+                heartbeat_at=datetime.now(timezone.utc).timestamp(),
+                event=event,
+            )
     return {
         "accepted": True,
         "recorded_at": recorded_at.isoformat(),
         "realtime_published": realtime_published,
     }
-
 
 @router.websocket("/driver/location/stream")
 async def driver_location_stream(websocket: WebSocket, ticket: str):
