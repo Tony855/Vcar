@@ -242,3 +242,14 @@ def test_passenger_session_rejects_tampered_telegram_init_data(api_client):
 
     assert response.status_code == 401
     assert connection.execute_calls == []
+
+
+@pytest.mark.parametrize("order_id", [0, -1, 2**63])
+def test_passenger_order_status_rejects_invalid_order_id_before_database(api_client, order_id):
+    client, connection, token = api_client
+    response = client.get(
+        f"/api/passenger/orders/{order_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+    assert connection.fetchrow_calls == []
