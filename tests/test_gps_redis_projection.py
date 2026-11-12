@@ -225,9 +225,10 @@ async def test_dispatch_expiry_cleanup_does_not_delete_a_concurrent_gps_heartbea
         assert telegram_id in {str(item[0]) for item in nearby}
         assert await redis.zscore("driver:heartbeat", telegram_id) == pytest.approx(fresh_heartbeat)
         assert await redis.zscore("driver:location:version", telegram_id) == pytest.approx(fresh_version)
-        assert await redis.geopos("driver:online", telegram_id) == pytest.approx(
-            [(104.9282, 11.5564)], abs=0.0001
-        )
+        position = (await redis.geopos("driver:online", telegram_id))[0]
+        assert position is not None
+        assert position[0] == pytest.approx(104.9282, abs=0.0001)
+        assert position[1] == pytest.approx(11.5564, abs=0.0001)
     finally:
         await redis.zrem("driver:heartbeat", telegram_id)
         await redis.zrem("driver:location:version", telegram_id)
