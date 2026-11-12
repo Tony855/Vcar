@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.db.core import db
 from app.services.driver_presence import is_driver_online
 from app.services.order_event_outbox import run_order_event_outbox_worker
+from app.services.driver_presence_projection import run_driver_presence_reconciliation_worker
 from app.core.security import verify_token, verify_driver_token, create_access_token, verify_password
 from app.modules.routing.router import router as routing_router
 from app.modules.auth.router import router as auth_router
@@ -30,6 +31,8 @@ from app.modules.orders.router import router as driver_orders_router
 app = FastAPI()
 _outbox_stop_event = None
 _outbox_worker_task = None
+_presence_stop_event = None
+_presence_worker_task = None
 app.include_router(routing_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api")
 app.include_router(ws_auth_router, prefix="/api")
@@ -52,6 +55,7 @@ class ReviewData(BaseModel): tg_id: int; status: str
 @app.on_event("startup")
 async def startup():
     global _outbox_stop_event, _outbox_worker_task
+    global _presence_stop_event, _presence_worker_task
     await db.init()
     _outbox_stop_event = asyncio.Event()
     _outbox_worker_task = asyncio.create_task(
@@ -61,11 +65,23 @@ async def startup():
         ),
         name="order-event-outbox-worker",
     )
+    _presence_stop_event = asyncio.Event()
+    _presence_worker_task = asyncio.create_task(
+        run_driver_presence_reconciliation_worker(_presence_stop_event),
+        name="driver-presence-redis-reconciliation-worker",
+    )
 
 
 @app.on_event("shutdown")
 async def shutdown():
     global _outbox_stop_event, _outbox_worker_task
+    global _presence_stop_event, _presence_worker_task
+    if _presence_stop_event is not None:
+        _presence_stop_event.set()
+    if _presence_worker_task is not None:
+        await _presence_worker_task
+        _presence_worker_task = None
+    _presence_stop_event = None
     if _outbox_stop_event is not None:
         _outbox_stop_event.set()
     if _outbox_worker_task is not None:
