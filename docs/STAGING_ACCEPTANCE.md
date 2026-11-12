@@ -100,7 +100,7 @@ and it rechecks/locks that state before writing the projection. GPS ingestion ho
 row lock through its best-effort Redis publish so an offline transition cannot be overtaken by an
 older in-flight GPS request. Migration `20261113_0009` initializes existing drivers as offline;
 after upgrading, drivers must explicitly go online again. Redis markers are rebuilt from the
-database generation after Redis loss.
+database generation after Redis loss or a database restore that rolls the durable generation back; the reconciliation worker replaces stale Redis generation markers only after rechecking the locked PostgreSQL row.
 
 The administrator fleet WebSocket now sends a durable PostgreSQL snapshot immediately after
 subscribing to Redis, including on reconnect. If a Pub/Sub connection fails, it rebuilds the
