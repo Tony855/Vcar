@@ -162,6 +162,14 @@ class OrderRepository:
 
     @classmethod
     async def accept(cls, oid, did):
+        bigint_max = 2**63 - 1
+        if (
+            not isinstance(oid, int) or isinstance(oid, bool)
+            or not 0 < oid <= bigint_max
+            or not isinstance(did, int) or isinstance(did, bool)
+            or not 0 < did <= bigint_max
+        ):
+            return False
         async with db.pool.acquire() as connection:
             async with connection.transaction():
                 # Serialize competing accept attempts made by the same driver.
@@ -203,11 +211,24 @@ class OrderRepository:
     @classmethod
     async def update_status(cls, oid, new_status, expected_status, actor_user_id=None, actor_role="SYSTEM"):
         validate_transition(expected_status, new_status)
+        # Reject malformed database identifiers before binding them to BIGINT parameters.
+        bigint_max = 2**63 - 1
+        if (
+            not isinstance(oid, int) or isinstance(oid, bool)
+            or not 0 < oid <= bigint_max
+            or actor_role not in {"SYSTEM", "DRIVER", "PASSENGER"}
+        ):
+            return False
         # Human actors must be bound to the order participant recorded in PostgreSQL.
         # SYSTEM is reserved for trusted internal transitions without a user identity.
-        if actor_role not in {"SYSTEM", "DRIVER", "PASSENGER"}:
-            return False
-        if actor_role != "SYSTEM" and actor_user_id is None:
+        if actor_role == "SYSTEM":
+            if actor_user_id is not None:
+                return False
+        elif (
+            not isinstance(actor_user_id, int)
+            or isinstance(actor_user_id, bool)
+            or not 0 < actor_user_id <= bigint_max
+        ):
             return False
 
         async with db.pool.acquire() as connection:
