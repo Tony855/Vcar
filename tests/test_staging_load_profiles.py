@@ -100,8 +100,9 @@ def test_staging_profiles_forward_optional_p95_ceilings_to_every_tier(tmp_path):
     result, output = _run(tmp_path, max_connect="1500", max_fanout="500")
     assert result.returncode == 0, result.stderr
     args = (tmp_path / "fake-args.log").read_text(encoding="utf-8")
-    assert "--max-connect-p95-ms\\n1500" in args
-    assert "--max-fanout-p95-ms\\n500" in args
+    lines = args.splitlines()
+    assert lines[lines.index("--max-connect-p95-ms") + 1] == "1500"
+    assert lines[lines.index("--max-fanout-p95-ms") + 1] == "500"
     assert len(list(output.glob("gps-*.json"))) == 4
 
 
