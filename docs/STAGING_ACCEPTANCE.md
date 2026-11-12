@@ -28,6 +28,13 @@ until all checks above pass. Never credit a wallet based only on a browser redir
 Wallet idempotency now binds a replay to the same user, amount, currency, kind, order, provider
 reference and canonical audit metadata. This is a ledger safety guard, not provider signature
 verification or evidence of settlement.
+
+**Cancellation-fee boundary:** order cancellation currently records `cancel_fee` on the order
+and in the immutable order event only. It does not debit the passenger wallet, credit the driver,
+or create a settlement ledger entry. Bot messages must describe the amount as recorded/pending,
+not as already deducted or paid. Do not enable collection or driver payout until the fee currency,
+charge trigger, payer balance/collection method, refund rules and driver/platform allocation are
+approved and covered by an explicit balanced-ledger workflow.
 The current release deliberately does not invent a callback signature, merchant identity, or
 provider status mapping. Provider integration remains blocked on the official merchant contract
 and sandbox; CI cannot certify settlement correctness without those inputs.

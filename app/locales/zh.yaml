@@ -53,7 +53,7 @@ driver:
   send_location_btn: 📍 发送实时位置给乘客
   ask_send_location: 👇 请点击输入框左侧的【📎 附件】-> 选择【位置】，将当前位置发给乘客。
   passenger_cancelled: '⚠️ 乘客取消了订单 #{order_id}'
-  passenger_cancelled_fee: '⚠️ 乘客取消了订单 #{order_id}，您获得违约金 ${fee}'
+  passenger_cancelled_fee: '⚠️ 乘客取消了订单 #{order_id}，记录的取消费用为 ${fee}（尚未结算）'
   offline_btn: 🔴 下线休息
   offline_success: 🛑 您已成功下线，将不再接收新订单。
   already_online: ✅ 您已在接单中，无需重复上线。如需更新位置请直接发送定位，或点击下线休息。
@@ -101,7 +101,7 @@ passenger:
   trip_started: 🚗 行程已开始，祝您旅途愉快！
   trip_completed: 🏁 已到达目的地，本次费用：${price}。感谢您的乘坐！
   cancel_free: ✅ 订单已取消。
-  cancel_with_fee: ✅ 订单已取消。扣除违约金 ${fee}
+  cancel_with_fee: ✅ 订单已取消。取消费用 ${fee} 已记录，尚未从钱包扣款。
   order_timeout: ⏳ 超时取消
   rate_success: ✅ 感谢您的评价！您给司机打了 {score} 星。
   rate_drv_prompt: ⭐ <b>请评价本次行程的司机：</b>

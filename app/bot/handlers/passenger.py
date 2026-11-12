@@ -99,8 +99,10 @@ async def p_cancel(call: CallbackQuery, driver_bot):
     oid = int(call.data.split(":")[1])
     order = await OrderRepository.get(oid)
     if not order: return await call.answer("订单不存在")
-    fee = 1.0 if order['status'] in ('ACCEPTED', 'ARRIVED') else 0.0
-    if await OrderRepository.cancel_with_fee(oid, user['id'], 'PASSENGER', fee):
+    # The repository applies the fee against the status observed under its row lock.
+    if await OrderRepository.cancel_with_fee(oid, user['id'], 'PASSENGER', 1.0):
+        order = await OrderRepository.get(oid) or order
+        fee = float(order.get('cancel_fee') or 0)
         await DispatchService.remove_order_from_pool(oid)
         if order.get('d_tg'):
             try: await driver_bot.send_message(order['d_tg'], t("driver.passenger_cancelled_fee" if fee>0 else "driver.passenger_cancelled", user, order_id=oid, fee=fee))
