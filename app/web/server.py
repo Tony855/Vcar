@@ -24,6 +24,7 @@ from app.modules.auth.ws_router import router as ws_auth_router
 from app.modules.locations.router import router as locations_router
 from app.modules.passengers.router import router as passengers_router
 from app.modules.payments.router import router as wallet_router
+from app.modules.orders.router import router as driver_orders_router
 
 app = FastAPI()
 _outbox_stop_event = None
@@ -34,6 +35,7 @@ app.include_router(ws_auth_router, prefix="/api")
 app.include_router(locations_router, prefix="/api/v1")
 app.include_router(passengers_router, prefix="/api")
 app.include_router(wallet_router, prefix="/api/v1")
+app.include_router(driver_orders_router, prefix="/api/v1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
