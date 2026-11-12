@@ -488,3 +488,128 @@ async def test_outbox_retry_sanitizes_nul_and_truncates_error_text(database_pool
         async with database_pool.acquire() as connection:
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute("DELETE FROM users WHERE id=$1", passenger_id)
+
+
+@pytest.mark.asyncio
+async def test_gps_location_rolls_back_when_trip_track_insert_fails(database_pool, monkeypatch):
+    """A failed trip-track write must not leave an accepted but unannounced GPS point."""
+    from datetime import datetime, timezone
+    from fastapi import HTTPException
+
+    from app.modules.locations import router as locations_router
+
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "gps-rollback-passenger")
+        driver_id = await _create_user(connection, "gps-rollback-driver")
+        telegram_id = await connection.fetchval(
+            "SELECT telegram_id FROM users WHERE id=$1", driver_id
+        )
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    trigger_suffix = uuid.uuid4().hex[:12]
+    function_name = f"vcar_fail_trip_track_{trigger_suffix}"
+    trigger_name = f"vcar_fail_trip_track_trigger_{trigger_suffix}"
+    async with database_pool.acquire() as connection:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        await connection.execute(
+            f"""
+            CREATE FUNCTION {function_name}() RETURNS trigger AS $$
+            BEGIN
+                RAISE EXCEPTION 'injected trip track write failure';
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        await connection.execute(
+            f"CREATE TRIGGER {trigger_name} BEFORE INSERT ON trip_tracks "
+            f"FOR EACH ROW EXECUTE FUNCTION {function_name}()"
+        )
+    try:
+        payload = locations_router.LocationUpdate(
+            latitude=11.5564,
+            longitude=104.9282,
+            accuracy_m=5.0,
+            recorded_at=datetime.now(timezone.utc),
+        )
+        with pytest.raises(Exception, match="injected trip track write failure"):
+            await locations_router.update_driver_location(
+                payload, {"sub": str(telegram_id)}
+            )
+        async with database_pool.acquire() as connection:
+            location_count = await connection.fetchval(
+                "SELECT COUNT(*) FROM driver_locations WHERE driver_id=$1",
+                driver_id,
+            )
+            track_count = await connection.fetchval(
+                "SELECT COUNT(*) FROM trip_tracks WHERE order_id=$1",
+                order["id"],
+            )
+        assert location_count == 0
+        assert track_count == 0
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON trip_tracks")
+            await connection.execute(f"DROP FUNCTION IF EXISTS {function_name}()")
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_gps_samples_keep_only_the_newest_timestamp(database_pool, monkeypatch):
+    """Concurrent requests cannot let an older GPS sample overwrite a newer one."""
+    from datetime import datetime, timedelta, timezone
+    from fastapi import HTTPException
+
+    from app.modules.locations import router as locations_router
+
+    async with database_pool.acquire() as connection:
+        driver_id = await _create_user(connection, "gps-concurrency-driver")
+        telegram_id = await connection.fetchval(
+            "SELECT telegram_id FROM users WHERE id=$1", driver_id
+        )
+
+    class RedisProjection:
+        async def geoadd(self, *args):
+            return 1
+
+        async def zadd(self, *args):
+            return 1
+
+        async def zremrangebyscore(self, *args):
+            return 0
+
+        async def publish(self, *args):
+            return 1
+
+    monkeypatch.setattr(locations_router.db, "redis", RedisProjection())
+    latest_time = datetime.now(timezone.utc) - timedelta(seconds=1)
+    older_time = latest_time - timedelta(seconds=1)
+    older = locations_router.LocationUpdate(
+        latitude=11.5, longitude=104.9, recorded_at=older_time
+    )
+    newer = locations_router.LocationUpdate(
+        latitude=11.6, longitude=105.0, recorded_at=latest_time
+    )
+    try:
+        outcomes = await asyncio.gather(
+            locations_router.update_driver_location(older, {"sub": str(telegram_id)}),
+            locations_router.update_driver_location(newer, {"sub": str(telegram_id)}),
+            return_exceptions=True,
+        )
+        accepted = [item for item in outcomes if isinstance(item, dict) and item.get("accepted")]
+        rejected = [item for item in outcomes if isinstance(item, HTTPException)]
+        assert len(accepted) in (1, 2)
+        assert len(rejected) + len(accepted) == 2
+        assert all(item.status_code == 409 for item in rejected)
+        async with database_pool.acquire() as connection:
+            stored = await connection.fetchval(
+                "SELECT recorded_at FROM driver_locations WHERE driver_id=$1",
+                driver_id,
+            )
+        assert stored == latest_time
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM users WHERE id=$1", driver_id)
