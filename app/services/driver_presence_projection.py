@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -58,7 +57,6 @@ async def reconcile_driver_presence(redis_client, connection, *, now=None) -> di
     if current.tzinfo is None or current.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
     cutoff = current - timedelta(seconds=120)
-    cutoff_epoch = cutoff.timestamp()
     scan_epoch = current.timestamp()
 
     rows = await connection.fetch(FRESH_DRIVERS_QUERY, cutoff, current)
