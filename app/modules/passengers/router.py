@@ -4,11 +4,11 @@ from __future__ import annotations
 import asyncio
 import json
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.core.security import create_access_token, verify_telegram_webapp_init_data
+from app.core.security import create_access_token, verify_telegram_webapp_init_data, is_valid_telegram_subject
 from app.db.core import db
 from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.repositories.order_repo import OrderRepository
@@ -64,8 +64,8 @@ def passenger_claims(authorization: str | None) -> dict:
         claims = jwt.decode(authorization[7:], settings.secret_key, algorithms=["HS256"])
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired passenger token") from exc
-    if claims.get("role") != "passenger" or not claims.get("sub"):
-        raise HTTPException(status_code=403, detail="Passenger permissions required")
+    if claims.get("role") != "passenger" or not is_valid_telegram_subject(claims.get("sub")):
+        raise HTTPException(status_code=403, detail="Passenger identity or permissions are invalid")
     return claims
 
 
@@ -98,7 +98,7 @@ async def create_booking(
 
 @router.get("/orders/{order_id}")
 async def passenger_order_status(
-    order_id: int,
+    order_id: int = Path(gt=0, le=2**63 - 1),
     authorization: str | None = Header(default=None),
 ):
     claims = passenger_claims(authorization)
@@ -124,6 +124,14 @@ async def passenger_order_stream(
     ticket: str,
     last_event_id: int = 0,
 ):
+    if (
+        not isinstance(order_id, int) or isinstance(order_id, bool)
+        or not 0 < order_id <= 2**63 - 1
+        or not isinstance(last_event_id, int) or isinstance(last_event_id, bool)
+        or not 0 <= last_event_id <= 2**63 - 1
+    ):
+        await websocket.close(code=4400)
+        return
     claims = await consume_ws_ticket(ticket, f"passenger-order:{order_id}")
     if not claims or claims.get("role") != "passenger":
         await websocket.close(code=4401)
