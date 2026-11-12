@@ -31,7 +31,7 @@ def _scope_role(scope: str) -> str | None:
             order_id = int(scope.split(":", 1)[1])
         except ValueError:
             return None
-        return "passenger" if order_id > 0 else None
+        return "passenger" if 0 < order_id <= 2**63 - 1 else None
     return None
 
 
