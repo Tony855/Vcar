@@ -78,16 +78,14 @@ async def open_or_get_wallet(
             """
             INSERT INTO wallet_accounts (user_id, currency)
             VALUES ($1, $2)
-            ON CONFLICT (user_id) DO NOTHING
+            ON CONFLICT (user_id, currency) DO NOTHING
             """,
             user_id, request.currency,
         )
         wallet = await conn.fetchrow(
-            "SELECT id, currency, balance_minor, created_at FROM wallet_accounts WHERE user_id=$1",
-            user_id,
+            "SELECT id, currency, balance_minor, created_at FROM wallet_accounts WHERE user_id=$1 AND currency=$2",
+            user_id, request.currency,
         )
-    if wallet["currency"] != request.currency:
-        raise HTTPException(status_code=409, detail="Wallet already exists in another currency")
     return dict(wallet)
 
 
