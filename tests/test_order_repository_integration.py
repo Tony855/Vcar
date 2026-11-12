@@ -1286,6 +1286,27 @@ async def test_completed_order_settlement_posts_explicit_wallet_batch_once(datab
         assert prepared.status == "PREPARED"
         assert prepared.replayed is False
 
+        # A failed debit must roll back every credit in the same batch and
+        # leave the immutable snapshot retryable in PREPARED state.
+        from app.modules.payments.ledger import InsufficientFunds
+        with pytest.raises(InsufficientFunds):
+            await post_explicit_allocation(
+                settlement_id=settlement_id,
+                legs=[
+                    {"user_id": passenger_id, "amount_minor": -2000, "kind": "TEST_FARE"},
+                    {"user_id": driver_id, "amount_minor": 1900, "kind": "TEST_DRIVER_CREDIT"},
+                    {"user_id": platform_id, "amount_minor": 100, "kind": "TEST_PLATFORM_CREDIT"},
+                ],
+            )
+        async with database_pool.acquire() as connection:
+            assert await connection.fetchval(
+                "SELECT status FROM order_settlements WHERE id=$1", settlement_id
+            ) == "PREPARED"
+            assert await connection.fetchval(
+                "SELECT COUNT(*) FROM wallet_transactions WHERE order_id=$1",
+                order["id"],
+            ) == 0
+
         # Explicit fixture allocation: passenger debit is balanced by driver
         # and platform credits. This is not a production allocation default.
         legs = [
