@@ -612,4 +612,5 @@ async def test_concurrent_gps_samples_keep_only_the_newest_timestamp(database_po
         assert stored == latest_time
     finally:
         async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM driver_locations WHERE driver_id=$1", driver_id)
             await connection.execute("DELETE FROM users WHERE id=$1", driver_id)
