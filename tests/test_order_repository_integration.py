@@ -8,6 +8,7 @@ import pytest
 from app.db.core import db
 from app.db.repositories.order_repo import OrderRepository
 from app.modules.payments.ledger import WalletLedger
+from app.modules.payments.settlement import OrderSettlement, OrderNotSettleable, SettlementConflict
 
 
 @pytest.fixture
@@ -1127,3 +1128,53 @@ async def test_rating_legacy_projection_rolls_back_with_rating_insert(database_p
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_completed_order_settlement_snapshot_is_atomic_and_idempotent(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "settlement-passenger")
+        driver_id = await _create_user(connection, "settlement-driver")
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    key = f"settlement-{uuid.uuid4()}"
+    try:
+        with pytest.raises(OrderNotSettleable):
+            await OrderSettlement.prepare(
+                order_id=order["id"], currency="USD", policy_version="kh-v1",
+                idempotency_key=key, components={"driver_earning": 800, "platform_fee": 200},
+            )
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        for new_status, old_status in (("ARRIVED", "ACCEPTED"), ("IN_PROGRESS", "ARRIVED"), ("COMPLETED", "IN_PROGRESS")):
+            assert await OrderRepository.update_status(
+                order["id"], new_status, old_status,
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ) is True
+
+        args = dict(
+            order_id=order["id"], currency="USD", policy_version="kh-v1",
+            idempotency_key=key, components={"driver_earning": 800, "platform_fee": 200},
+        )
+        prepared = await OrderSettlement.prepare(**args)
+        replay = await OrderSettlement.prepare(**args)
+        assert prepared.status == "PREPARED" and prepared.replayed is False
+        assert replay.settlement_id == prepared.settlement_id and replay.replayed is True
+
+        with pytest.raises(SettlementConflict):
+            await OrderSettlement.prepare(
+                **{**args, "components": {"driver_earning": 700, "platform_fee": 300}}
+            )
+        async with database_pool.acquire() as connection:
+            rows = await connection.fetch(
+                "SELECT id, currency, policy_version, components, status FROM order_settlements WHERE order_id=$1",
+                order["id"],
+            )
+        assert len(rows) == 1
+        assert rows[0]["status"] == "PREPARED"
+        assert rows[0]["components"] == {"driver_earning": 800, "platform_fee": 200}
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM order_settlements WHERE order_id=$1", order["id"])
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute("DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id])
