@@ -1,29 +1,20 @@
+import json
+
 import pytest
 
 from app.modules.locations.redis_projection import publish_driver_location
 
 
 class FakeRedis:
-    def __init__(self, fail_on=None):
-        self.fail_on = fail_on
+    def __init__(self, fail=False):
+        self.fail = fail
         self.calls = []
 
-    async def _record(self, name, *args):
-        self.calls.append((name, args))
-        if self.fail_on == name:
+    async def eval(self, *args):
+        self.calls.append(args)
+        if self.fail:
             raise ConnectionError("simulated Redis outage")
-
-    async def geoadd(self, *args):
-        await self._record("geoadd", *args)
-
-    async def zadd(self, *args):
-        await self._record("zadd", *args)
-
-    async def zremrangebyscore(self, *args):
-        await self._record("zremrangebyscore", *args)
-
-    async def publish(self, *args):
-        await self._record("publish", *args)
+        return 1
 
 
 @pytest.fixture
@@ -40,7 +31,7 @@ def sample():
 
 
 @pytest.mark.asyncio
-async def test_projection_updates_presence_and_both_streams(sample):
+async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(sample):
     redis = FakeRedis()
 
     result = await publish_driver_location(
@@ -53,21 +44,24 @@ async def test_projection_updates_presence_and_both_streams(sample):
     )
 
     assert result is True
-    assert [call[0] for call in redis.calls] == [
-        "geoadd", "zadd", "zremrangebyscore", "publish", "publish"
+    assert len(redis.calls) == 1
+    script, key_count, *values = redis.calls[0]
+    assert "ZSCORE" in script and "GEOADD" in script
+    assert "ZREMRANGEBYSCORE" in script and script.count("PUBLISH") == 2
+    assert key_count == 4
+    assert values[:4] == [
+        "driver:online",
+        "driver:heartbeat",
+        "driver:location:12345",
+        "fleet:locations",
     ]
-    assert redis.calls[-1][1][0] == "fleet:locations"
+    assert values[4:8] == [104.9282, 11.5564, "12345", 1794460000.0]
+    assert json.loads(values[8]) == sample
 
 
-@pytest.mark.parametrize(
-    "failed_operation",
-    ["geoadd", "zadd", "zremrangebyscore", "publish"],
-)
 @pytest.mark.asyncio
-async def test_redis_failure_is_reported_as_degraded_projection_not_exception(
-    sample, failed_operation
-):
-    redis = FakeRedis(fail_on=failed_operation)
+async def test_redis_failure_is_reported_as_degraded_projection_not_exception(sample):
+    redis = FakeRedis(fail=True)
 
     result = await publish_driver_location(
         redis,
@@ -79,13 +73,13 @@ async def test_redis_failure_is_reported_as_degraded_projection_not_exception(
     )
 
     assert result is False
+    assert len(redis.calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_real_redis_projection_updates_geo_presence_and_delivers_pubsub(sample):
-    """Exercise the production Redis client against the CI Redis service."""
+async def test_real_redis_projection_is_atomic_and_rejects_late_older_updates(sample):
+    """An older request completing late must not overwrite newer Redis state."""
     import asyncio
-    import json
     import os
     import uuid
 
@@ -97,29 +91,32 @@ async def test_real_redis_projection_updates_geo_presence_and_delivers_pubsub(sa
     pubsub = redis.pubsub()
     try:
         await pubsub.subscribe(channel)
-        # Consume the subscription acknowledgement before publishing.
-        await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=False, timeout=1), 2)
-        result = await publish_driver_location(
-            redis,
-            telegram_id=telegram_id,
-            longitude=104.9282,
-            latitude=11.5564,
-            heartbeat_at=1794460000.0,
-            event={**sample, "telegram_id": telegram_id},
+        await asyncio.wait_for(
+            pubsub.get_message(ignore_subscribe_messages=False, timeout=1), 2
         )
-        assert result is True
 
-        message = None
-        async def receive():
-            nonlocal message
-            while message is None:
-                candidate = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1)
-                if candidate and candidate.get("type") == "message":
-                    message = candidate
-        await asyncio.wait_for(receive(), 5)
-        assert json.loads(message["data"])["telegram_id"] == telegram_id
-        assert await redis.zscore("driver:heartbeat", str(telegram_id)) == 1794460000.0
-        assert await redis.geopos("driver:online", str(telegram_id)) is not None
+        newer = {**sample, "telegram_id": telegram_id, "latitude": 11.557}
+        older = {**sample, "telegram_id": telegram_id, "latitude": 11.555}
+        assert await publish_driver_location(
+            redis, telegram_id=telegram_id, longitude=104.9282,
+            latitude=11.557, heartbeat_at=1794460002.0, event=newer,
+        )
+        assert await publish_driver_location(
+            redis, telegram_id=telegram_id, longitude=104.9282,
+            latitude=11.555, heartbeat_at=1794460001.0, event=older,
+        )
+
+        message = await asyncio.wait_for(
+            pubsub.get_message(ignore_subscribe_messages=True, timeout=1), 2
+        )
+        assert json.loads(message["data"])["latitude"] == 11.557
+        assert await redis.zscore("driver:heartbeat", str(telegram_id)) == 1794460002.0
+        position = await redis.geopos("driver:online", str(telegram_id))
+        assert position[0] is not None
+        assert position[0][1] == pytest.approx(11.557, abs=0.00001)
+
+        # No second Pub/Sub frame should be emitted for the stale request.
+        assert await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.05) is None
     finally:
         await pubsub.aclose()
         await redis.zrem("driver:heartbeat", str(telegram_id))
@@ -141,8 +138,6 @@ async def test_real_redis_client_recovers_after_connection_pool_disconnect(sampl
         assert await redis.ping() is True
         await redis.set(key, "before-disconnect")
         await redis.connection_pool.disconnect(inuse_connections=True)
-
-        # The next command must establish a fresh connection transparently.
         assert await redis.ping() is True
         assert await redis.get(key) == "before-disconnect"
         await redis.set(key, "after-disconnect")
