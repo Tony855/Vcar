@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.error
@@ -53,6 +54,14 @@ def validate_payload(name: str, payload: object) -> bool:
             and isinstance(waypoints[0], dict)
             and isinstance(waypoints[0].get("location"), list)
             and len(waypoints[0]["location"]) == 2
+            and all(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                for value in waypoints[0]["location"]
+            )
+            and -180 <= waypoints[0]["location"][0] <= 180
+            and -90 <= waypoints[0]["location"][1] <= 90
         )
 
     if name == "route":
@@ -64,9 +73,11 @@ def validate_payload(name: str, payload: object) -> bool:
         return (
             isinstance(distance, (int, float))
             and not isinstance(distance, bool)
+            and math.isfinite(distance)
             and distance > 0
             and isinstance(duration, (int, float))
             and not isinstance(duration, bool)
+            and math.isfinite(duration)
             and duration >= 0
         )
 
@@ -83,6 +94,7 @@ def validate_payload(name: str, payload: object) -> bool:
             and all(
                 isinstance(matrix[i][j], (int, float))
                 and not isinstance(matrix[i][j], bool)
+                and math.isfinite(matrix[i][j])
                 and matrix[i][j] >= 0
                 for matrix in (durations, distances)
                 for i, j in ((0, 1), (1, 0))
@@ -97,6 +109,7 @@ def validate_payload(name: str, payload: object) -> bool:
             and bool(matchings)
             and isinstance(matchings[0], dict)
             and isinstance(matchings[0].get("distance"), (int, float))
+            and math.isfinite(matchings[0]["distance"])
             and matchings[0]["distance"] >= 0
             and isinstance(tracepoints, list)
             and len(tracepoints) >= 2
