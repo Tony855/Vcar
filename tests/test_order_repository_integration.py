@@ -175,7 +175,7 @@ async def test_order_status_outbox_is_transactional_and_retryable(database_pool)
         assert len(claimed) == 1
         assert claimed[0]["event_id"] == initial["event_id"]
         assert claimed[0]["attempts"] == 1
-        assert await OrderRepository.mark_status_event_delivered(claimed[0]["id"]) is True
+        assert await OrderRepository.mark_status_event_delivered(claimed[0]["id"], claimed[0]["lock_token"]) is True
         assert await OrderRepository.mark_status_event_delivered(claimed[0]["id"]) is False
 
         assert await OrderRepository.accept(order["id"], driver_id) is True
@@ -183,7 +183,7 @@ async def test_order_status_outbox_is_transactional_and_retryable(database_pool)
         assert len(claimed) == 1
         assert json.loads(claimed[0]["payload"])["status"] == "ACCEPTED"
         assert await OrderRepository.retry_status_event(
-            claimed[0]["id"], "temporary Redis outage"
+            claimed[0]["id"], claimed[0]["lock_token"], "temporary Redis outage"
         ) is True
 
         async with database_pool.acquire() as connection:
@@ -446,12 +446,21 @@ async def test_outbox_worker_reclaims_claim_abandoned_by_crashed_process(databas
         assert recovered[0]["id"] == outbox_id
         assert recovered[0]["attempts"] == first_claim[0]["attempts"] + 1
 
+        # A late first worker cannot acknowledge or release the newer lease.
+        assert await OrderRepository.mark_status_event_delivered(
+            outbox_id, first_claim[0]["lock_token"]
+        ) is False
+        assert await OrderRepository.retry_status_event(
+            outbox_id, first_claim[0]["lock_token"], "stale worker failure"
+        ) is False
+
         async with database_pool.acquire() as connection:
             row = await connection.fetchrow(
-                "SELECT locked_at, delivered_at, attempts FROM order_event_outbox WHERE id=$1",
+                "SELECT locked_at, lock_token, delivered_at, attempts FROM order_event_outbox WHERE id=$1",
                 outbox_id,
             )
         assert row["locked_at"] is not None
+        assert row["lock_token"] == recovered[0]["lock_token"]
         assert row["delivered_at"] is None
         assert row["attempts"] == 2
     finally:
@@ -473,7 +482,7 @@ async def test_outbox_retry_sanitizes_nul_and_truncates_error_text(database_pool
         assert len(claimed) == 1
         error_text = "redis error\x00" + ("x" * 1200)
         assert await OrderRepository.retry_status_event(
-            claimed[0]["id"], error_text
+            claimed[0]["id"], claimed[0]["lock_token"], error_text
         ) is True
         async with database_pool.acquire() as connection:
             stored = await connection.fetchval(
