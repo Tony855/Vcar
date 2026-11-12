@@ -42,3 +42,17 @@ def test_admin_adjustment_rejects_zero_amount():
             reason="Manual correction approved",
             idempotency_key="admin-adjustment-0008",
         )
+
+
+@pytest.mark.parametrize("amount", [True, False, 1.5, "500"])
+def test_admin_adjustment_rejects_non_integer_minor_units(amount):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        router.AdminAdjustment(
+            user_id=12,
+            currency="USD",
+            amount_minor=amount,
+            reason="Manual correction approved",
+            idempotency_key="admin-adjustment-invalid",
+        )
