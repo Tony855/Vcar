@@ -64,6 +64,15 @@ groups:
           summary: Vcar has an old undelivered order event
           description: The oldest pending order event is more than five minutes old.
 
+      - alert: VcarBackupMetricsMissing
+        expr: absent(vcar_backup_last_success_timestamp_seconds) or absent(vcar_backup_last_run_success)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar database backup telemetry is missing
+          description: The backup textfile metrics are absent; verify the scheduled backup job and node_exporter textfile collector configuration.
+
       - alert: VcarBackupLastRunFailed
         expr: vcar_backup_last_run_success == 0
         for: 1m
