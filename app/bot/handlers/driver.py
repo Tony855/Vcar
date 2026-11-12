@@ -17,6 +17,7 @@ import logging
 import io
 
 router = Router()
+logger = logging.getLogger(__name__)
 class DrvStates(StatesGroup): 
     location = State()
     reg_phone = State()
@@ -24,6 +25,33 @@ class DrvStates(StatesGroup):
     reg_car_photo = State()
     reg_license_photo = State()
     reg_drv_license_photo = State()
+
+def _schedule_notification(coroutine, *, context: str):
+    """Run best-effort Telegram delivery without losing background failures."""
+    try:
+        task = asyncio.create_task(coroutine)
+    except Exception:
+        close = getattr(coroutine, "close", None)
+        if close is not None:
+            close()
+        logger.exception("Unable to schedule Telegram notification: %s", context)
+        return None
+
+    def report_failure(completed_task):
+        try:
+            completed_task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.error(
+                "Telegram notification failed: %s",
+                context,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
+    task.add_done_callback(report_failure)
+    return task
+
 
 def t(key, user, **vars):
     if isinstance(user, dict):
@@ -221,12 +249,18 @@ async def handle_driver_location(msg: Message, passenger_bot):
         return await msg.answer("❌ 您当前没有进行中的订单。")
 
     # 1. 把司机当前的位置实时转发给乘客
-    try:
-        asyncio.create_task(passenger_bot.send_location(active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude))
-        asyncio.create_task(passenger_bot.send_message(active["c_tg"], t("common.driver_location_update", active.get("c_locale", "en"))))
-    except Exception as e:
-        import logging
-        logging.error(f"发送位置给乘客失败: {e}")
+    _schedule_notification(
+        passenger_bot.send_location(
+            active['c_tg'], latitude=msg.location.latitude, longitude=msg.location.longitude
+        ),
+        context=f"driver location update to passenger {active['c_tg']}",
+    )
+    _schedule_notification(
+        passenger_bot.send_message(
+            active["c_tg"], t("common.driver_location_update", active.get("c_locale", "en"))
+        ),
+        context=f"driver location notice to passenger {active['c_tg']}",
+    )
 
     # 2. 如果状态是已接单(ACCEPTED)，说明司机刚到，发“开始”按钮
     if active['status'] == 'ACCEPTED':
@@ -250,8 +284,12 @@ async def start(call: CallbackQuery, passenger_bot):
         await call.message.edit_text(t('driver.start_msg', user), reply_markup=kb)
         order = await OrderRepository.get(oid)
         if order and order.get('c_tg'):
-            try: asyncio.create_task(passenger_bot.send_message(order['c_tg'], t("passenger.trip_started", {"locale": order.get("c_locale")})))
-            except Exception: pass
+            _schedule_notification(
+                passenger_bot.send_message(
+                    order['c_tg'], t("passenger.trip_started", {"locale": order.get("c_locale")})
+                ),
+                context=f"trip-started notice for order {oid}",
+            )
 
 @router.callback_query(F.data.startswith('fin:'))
 async def finish(call: CallbackQuery, passenger_bot):
@@ -262,11 +300,22 @@ async def finish(call: CallbackQuery, passenger_bot):
         order = await OrderRepository.get(oid)
         if order and order.get('c_tg'):
             price_str = f"{float(order['price_estimate']):.2f}"
-            try: 
-                asyncio.create_task(passenger_bot.send_message(order['c_tg'], t("passenger.trip_completed", {"locale": order.get("c_locale")}, price=price_str)))
-                stars = [[InlineKeyboardButton(text=t("driver.star_btn", user) if i==5 else f"{'⭐'*i} {i}", callback_data=f"rate_pax:{oid}:{i}")] for i in range(1, 6)]
-                await passenger_bot.send_message(order["c_tg"], t("passenger.rate_drv_prompt", {"locale": order.get("c_locale", "en")}), reply_markup=InlineKeyboardMarkup(inline_keyboard=stars))
-            except Exception: pass
+            _schedule_notification(
+                passenger_bot.send_message(
+                    order['c_tg'],
+                    t("passenger.trip_completed", {"locale": order.get("c_locale")}, price=price_str),
+                ),
+                context=f"trip-completed notice for order {oid}",
+            )
+            stars = [[InlineKeyboardButton(text=t("driver.star_btn", user) if i==5 else f"{'⭐'*i} {i}", callback_data=f"rate_pax:{oid}:{i}")] for i in range(1, 6)]
+            try:
+                await passenger_bot.send_message(
+                    order["c_tg"],
+                    t("passenger.rate_drv_prompt", {"locale": order.get("c_locale", "en")}),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=stars),
+                )
+            except Exception:
+                logger.exception("Unable to send passenger rating prompt for order %s", oid)
         stars_drv = [[InlineKeyboardButton(text=t("driver.star_btn", user) if i==5 else f"{'⭐'*i} {i}", callback_data=f"rate_drv:{oid}:{i}")] for i in range(1, 6)]
         await call.message.answer(t("driver.rate_pax_prompt", user), reply_markup=InlineKeyboardMarkup(inline_keyboard=stars_drv))
 
