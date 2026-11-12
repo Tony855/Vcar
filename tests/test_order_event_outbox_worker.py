@@ -9,6 +9,7 @@ from app.services.order_event_outbox import dispatch_order_event_batch
 async def test_outbox_worker_publishes_event_and_acknowledges_it():
     event = {
         "id": 7,
+        "lock_token": "claim-token-7",
         "event_id": 42,
         "order_id": 9,
         "payload": {
@@ -34,7 +35,7 @@ async def test_outbox_worker_publishes_event_and_acknowledges_it():
     payload = json.loads(raw_payload)
     assert payload["event_id"] == 42
     assert payload["status"] == "ACCEPTED"
-    repository.mark_status_event_delivered.assert_awaited_once_with(7)
+    repository.mark_status_event_delivered.assert_awaited_once_with(7, "claim-token-7")
     repository.retry_status_event.assert_not_awaited()
 
 
@@ -42,6 +43,7 @@ async def test_outbox_worker_publishes_event_and_acknowledges_it():
 async def test_outbox_worker_retries_when_redis_publish_fails():
     event = {
         "id": 8,
+        "lock_token": "claim-token-8",
         "event_id": 43,
         "order_id": 10,
         "payload": '{"status":"ARRIVED"}',
@@ -58,14 +60,15 @@ async def test_outbox_worker_retries_when_redis_publish_fails():
     assert delivered == 0
     repository.mark_status_event_delivered.assert_not_awaited()
     repository.retry_status_event.assert_awaited_once()
-    outbox_id, error = repository.retry_status_event.await_args.args
+    outbox_id, lock_token, error = repository.retry_status_event.await_args.args
     assert outbox_id == 8
+    assert lock_token == "claim-token-8"
     assert isinstance(error, ConnectionError)
 
 
 @pytest.mark.asyncio
 async def test_outbox_worker_recovers_event_id_for_legacy_payload():
-    event = {"id": 9, "event_id": 44, "order_id": 11, "payload": "{}"}
+    event = {"id": 9, "lock_token": "claim-token-9", "event_id": 44, "order_id": 11, "payload": "{}"}
     repository = type("Repository", (), {})()
     repository.claim_status_events = AsyncMock(return_value=[event])
     repository.mark_status_event_delivered = AsyncMock(return_value=True)
@@ -84,6 +87,7 @@ async def test_outbox_worker_recovers_event_id_for_legacy_payload():
 async def test_outbox_worker_uses_canonical_database_event_and_order_ids():
     event = {
         "id": 10,
+        "lock_token": "claim-token-10",
         "event_id": 50,
         "order_id": 12,
         "payload": {"event_id": 999, "order_id": 777, "status": "IN_PROGRESS"},
@@ -103,7 +107,7 @@ async def test_outbox_worker_uses_canonical_database_event_and_order_ids():
     assert payload["event_id"] == 50
     assert payload["order_id"] == 12
     assert payload["status"] == "IN_PROGRESS"
-    repository.mark_status_event_delivered.assert_awaited_once_with(10)
+    repository.mark_status_event_delivered.assert_awaited_once_with(10, "claim-token-10")
     repository.retry_status_event.assert_not_awaited()
 
 
@@ -111,6 +115,7 @@ async def test_outbox_worker_uses_canonical_database_event_and_order_ids():
 async def test_outbox_worker_does_not_count_unacknowledged_publish_as_delivered():
     event = {
         "id": 11,
+        "lock_token": "claim-token-11",
         "event_id": 51,
         "order_id": 13,
         "payload": {"status": "COMPLETED"},
@@ -126,5 +131,20 @@ async def test_outbox_worker_does_not_count_unacknowledged_publish_as_delivered(
 
     assert delivered == 0
     redis_client.publish.assert_awaited_once()
-    repository.mark_status_event_delivered.assert_awaited_once_with(11)
+    repository.mark_status_event_delivered.assert_awaited_once_with(11, "claim-token-11")
+    repository.retry_status_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_uses_claim_token_to_fence_stale_acknowledgement():
+    event = {"id": 12, "event_id": 52, "order_id": 14, "lock_token": "stale-worker-token", "payload": {"status": "COMPLETED"}}
+    repository = type("Repository", (), {})()
+    repository.claim_status_events = AsyncMock(return_value=[event])
+    repository.mark_status_event_delivered = AsyncMock(return_value=False)
+    repository.retry_status_event = AsyncMock()
+    redis_client = type("Redis", (), {})()
+    redis_client.publish = AsyncMock(return_value=1)
+    delivered = await dispatch_order_event_batch(redis_client, repository)
+    assert delivered == 0
+    repository.mark_status_event_delivered.assert_awaited_once_with(12, "stale-worker-token")
     repository.retry_status_event.assert_not_awaited()
