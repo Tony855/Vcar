@@ -1,0 +1,48 @@
+rule_files:
+  - /etc/prometheus/vcar-alert-rules.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'vcar_redis_available'
+        values: '0+0x5'
+      - series: 'probe_success{job="blackbox-vcar",instance="http://vcar:8080/health/ready"}'
+        values: '0+0x5'
+      - series: 'probe_success{job="blackbox-vcar",instance="http://osrm:5000/route/v1/driving/104.9,11.5;104.95,11.55"}'
+        values: '0+0x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: VcarRedisUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Vcar Redis dependency is unavailable
+              description: Vcar metrics can still be scraped, but Redis PING has failed for more than two minutes.
+      - eval_time: 3m
+        alertname: VcarBlackboxProbeFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-vcar
+              instance: http://vcar:8080/health/ready
+            exp_annotations:
+              summary: A Vcar HTTP or routing probe is failing
+              description: Blackbox Exporter has failed a configured Vcar health or OSRM route probe for more than two minutes.
+          - exp_labels:
+              severity: critical
+              job: blackbox-vcar
+              instance: http://osrm:5000/route/v1/driving/104.9,11.5;104.95,11.55
+            exp_annotations:
+              summary: A Vcar HTTP or routing probe is failing
+              description: Blackbox Exporter has failed a configured Vcar health or OSRM route probe for more than two minutes.
+      - eval_time: 3m
+        alertname: VcarOSRMProbeFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: blackbox-vcar
+              instance: http://osrm:5000/route/v1/driving/104.9,11.5;104.95,11.55
+            exp_annotations:
+              summary: Vcar OSRM route probe is failing
+              description: The configured Cambodia OSRM route probe has failed for more than two minutes.
