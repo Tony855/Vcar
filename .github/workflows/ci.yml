@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           probe_telegram_id=$((700000000000 + RANDOM))
-          probe_user_id="$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "INSERT INTO users (telegram_id, first_name) VALUES ($probe_telegram_id, 'migration-rollback-probe') RETURNING id")"
+          probe_user_id="$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -qAtc "INSERT INTO users (telegram_id, first_name) VALUES ($probe_telegram_id, 'migration-rollback-probe') RETURNING id")"
           docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($probe_user_id, 'USD', 1234), ($probe_user_id, 'KHR', 5678)"
           if uv run --no-sync alembic downgrade 20261112_0006; then
             echo "Expected multi-currency wallet downgrade to fail, but it succeeded." >&2
