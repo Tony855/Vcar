@@ -131,3 +131,57 @@ async def test_reconciliation_does_not_overwrite_a_newer_redis_gps_version():
 
     assert result == {"database_fresh": 1, "repaired": 0, "stale_removed": 0}
     assert redis.versions["1004"] == (now - timedelta(seconds=5)).timestamp()
+
+@pytest.mark.asyncio
+async def test_real_redis_reconciliation_repairs_500_drivers_and_prunes_orphans():
+    """Exercise both reconciliation Lua scripts against the CI Redis service."""
+    import os
+    import uuid
+
+    from redis.asyncio import Redis
+
+    from app.services.driver_presence_projection import reconcile_driver_presence
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    now = datetime.now(timezone.utc)
+    base_id = 1_000_000_000 + (uuid.uuid4().int % 8_000_000_000)
+    rows = [
+        driver_row(base_id + index, now, age=5, recorded_age=6)
+        for index in range(500)
+    ]
+    stale_id = f"stale-{uuid.uuid4().hex}"
+    racing_id = f"racing-{uuid.uuid4().hex}"
+    try:
+        await redis.geoadd("driver:online", [(104.9, 11.5, stale_id), (104.9, 11.5, racing_id)])
+        await redis.zadd("driver:heartbeat", {
+            stale_id: now.timestamp() - 600,
+            racing_id: now.timestamp() + 1,
+        })
+        await redis.zadd("driver:location:version", {
+            stale_id: now.timestamp() - 600,
+            racing_id: now.timestamp() - 5,
+        })
+
+        result = await reconcile_driver_presence(redis, FakeConnection(rows), now=now)
+
+        assert result == {
+            "database_fresh": 500,
+            "repaired": 500,
+            "stale_removed": 1,
+        }
+        assert await redis.zcard("driver:heartbeat") == 501
+        assert await redis.zcard("driver:online") == 501
+        assert await redis.zscore("driver:heartbeat", stale_id) is None
+        assert await redis.zscore("driver:heartbeat", racing_id) == now.timestamp() + 1
+        assert await redis.zscore("driver:heartbeat", str(base_id + 499)) == pytest.approx(
+            (now - timedelta(seconds=5)).timestamp()
+        )
+        assert await redis.zscore("driver:location:version", str(base_id + 499)) == pytest.approx(
+            (now - timedelta(seconds=6)).timestamp()
+        )
+    finally:
+        members = [str(base_id + index) for index in range(500)] + [stale_id, racing_id]
+        await redis.zrem("driver:heartbeat", *members)
+        await redis.zrem("driver:location:version", *members)
+        await redis.zrem("driver:online", *members)
+        await redis.aclose()
