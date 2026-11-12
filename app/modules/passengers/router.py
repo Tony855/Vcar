@@ -171,7 +171,18 @@ async def passenger_order_stream(
 
     async def subscribe():
         subscriber = db.redis.pubsub()
-        await subscriber.subscribe(channel)
+        try:
+            await subscriber.subscribe(channel)
+        except Exception:
+            try:
+                await subscriber.aclose()
+            except Exception:
+                logger.debug(
+                    "Failed to close unsuccessful passenger order Pub/Sub",
+                    extra={"order_id": order_id},
+                    exc_info=True,
+                )
+            raise
         return subscriber
 
     async def send_durable_updates():
