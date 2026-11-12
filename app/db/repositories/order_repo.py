@@ -314,7 +314,7 @@ class OrderRepository:
                     if order["driver_id"] != actor_user_id:
                         return False
                     ratee_user_id = order["customer_id"]
-                if ratee_user_id is None:
+                if ratee_user_id is None or ratee_user_id == actor_user_id:
                     return False
 
                 inserted = await connection.fetchrow(
