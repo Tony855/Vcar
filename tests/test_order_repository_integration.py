@@ -697,7 +697,7 @@ async def test_driver_can_cancel_and_non_finite_fees_are_rejected(database_pool)
     )
     try:
         assert await OrderRepository.accept(order["id"], driver_id) is True
-        for invalid_fee in (float("nan"), float("inf"), float("-inf")):
+        for invalid_fee in (float("nan"), float("inf"), float("-inf"), True, "1.0", object()):
             assert await OrderRepository.cancel_with_fee(
                 order["id"], driver_id, "DRIVER", invalid_fee
             ) is False
