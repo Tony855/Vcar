@@ -65,9 +65,22 @@ probes are not counted as successful. Client-side results alone do not establish
 Acceptance thresholds must be agreed before the run; suggested starting gates:
 - connection success >= 99%;
 - frame delivery >= 99%;
+- initial snapshot and reconnect snapshot delivery >= 99%;
 - no sustained CPU/RAM saturation or DB/Redis pool exhaustion;
 - no cross-account location leakage;
 - clean disconnect and reconnect behavior.
+
+Optional client-side p95 latency ceilings can be made hard exit gates instead of
+being merely reported:
+```bash
+VCAR_MAX_CONNECT_P95_MS=1500 VCAR_MAX_FANOUT_P95_MS=500 \
+  bash scripts/run_staging_load_profiles.sh
+```
+These values are examples only, not approved production SLAs. Set them from the
+staging host/network baseline before a run. When configured, the load script
+rejects missing, non-finite, negative, unordered or over-ceiling p50/p95/p99
+distributions; when omitted, latency percentiles remain report-only. The four-tier
+helper passes the same ceilings to every 50/100/250/500 profile.
 
 The admin fleet stream periodically reconciles from PostgreSQL and falls back to a durable
 snapshot if Redis Pub/Sub fails. Driver and administrator stream recovery paths have automated

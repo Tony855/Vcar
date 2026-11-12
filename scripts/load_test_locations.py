@@ -80,11 +80,19 @@ def is_fleet_location_event(payload: str) -> bool:
     )
 
 
-def meets_acceptance_thresholds(report: dict, minimum_rate: float) -> bool:
-    """Return whether every measured delivery/recovery gate passed.
+def meets_acceptance_thresholds(
+    report: dict,
+    minimum_rate: float,
+    *,
+    max_connect_p95_ms: float | None = None,
+    max_fanout_p95_ms: float | None = None,
+) -> bool:
+    """Return whether delivery, recovery and configured latency gates passed.
 
-    Rates are untrusted report data: reject NaN/infinity, values outside
-    [0, 1], and malformed failure counts rather than letting them pass a gate.
+    Report data and optional thresholds are untrusted: reject booleans,
+    NaN/infinity, negative latencies and malformed percentile ordering.
+    Latency ceilings are opt-in because the staging owner must set an SLA
+    appropriate to the actual host and network.
     """
     if (
         isinstance(minimum_rate, bool)
@@ -114,6 +122,35 @@ def meets_acceptance_thresholds(report: dict, minimum_rate: float) -> bool:
             or not 0 <= rate <= 1
             or rate < minimum_rate
         ):
+            return False
+
+    latency_gates = (
+        ("connect_latency_ms", max_connect_p95_ms),
+        ("fanout_latency_ms", max_fanout_p95_ms),
+    )
+    for field, ceiling in latency_gates:
+        if ceiling is None:
+            continue
+        if (
+            isinstance(ceiling, bool)
+            or not isinstance(ceiling, (int, float))
+            or not math.isfinite(ceiling)
+            or ceiling <= 0
+        ):
+            return False
+        distribution = report.get(field)
+        if not isinstance(distribution, dict):
+            return False
+        values = [distribution.get(key) for key in ("p50", "p95", "p99")]
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+            for value in values
+        ):
+            return False
+        if not values[0] <= values[1] <= values[2] or values[1] > ceiling:
             return False
     return True
 
@@ -311,7 +348,12 @@ async def run(args: argparse.Namespace) -> int:
             output.write_text(rendered + "\n", encoding="utf-8")
         for ws in sockets:
             await ws.close()
-    return 0 if meets_acceptance_thresholds(report, args.min_delivery_rate) else 1
+    return 0 if meets_acceptance_thresholds(
+        report,
+        args.min_delivery_rate,
+        max_connect_p95_ms=args.max_connect_p95_ms,
+        max_fanout_p95_ms=args.max_fanout_p95_ms,
+    ) else 1
 
 
 def main() -> int:
@@ -325,6 +367,10 @@ def main() -> int:
     parser.add_argument("--longitude", type=float, default=104.9282)
     parser.add_argument("--receive-timeout", type=float, default=12.0)
     parser.add_argument("--min-delivery-rate", type=float, default=0.99)
+    parser.add_argument("--max-connect-p95-ms", type=float, default=None,
+                        help="Optional maximum p95 WebSocket connection latency in milliseconds")
+    parser.add_argument("--max-fanout-p95-ms", type=float, default=None,
+                        help="Optional maximum p95 GPS-to-fleet fan-out latency in milliseconds")
     parser.add_argument("--json-output", help="Optional path for a machine-readable JSON report")
     args = parser.parse_args()
     if not 1 <= args.connections <= 1000 or not 1 <= args.messages <= 20:
@@ -333,11 +379,19 @@ def main() -> int:
         parser.error("reconnect-probes must be 0..connections")
     numeric_options = (
         args.receive_timeout, args.min_delivery_rate, args.latitude, args.longitude,
+    ) + tuple(
+        value for value in (args.max_connect_p95_ms, args.max_fanout_p95_ms)
+        if value is not None
     )
     if not all(math.isfinite(value) for value in numeric_options):
         parser.error("receive-timeout, min-delivery-rate and coordinates must be finite")
     if args.receive_timeout <= 0 or not 0 <= args.min_delivery_rate <= 1:
         parser.error("receive-timeout must be positive and min-delivery-rate must be 0..1")
+    if any(
+        value is not None and value <= 0
+        for value in (args.max_connect_p95_ms, args.max_fanout_p95_ms)
+    ):
+        parser.error("configured p95 latency ceilings must be positive")
     if not (-90 <= args.latitude <= 90 and -180 <= args.longitude <= 180):
         parser.error("latitude/longitude are outside valid geographic bounds")
     return asyncio.run(run(args))

@@ -221,3 +221,74 @@ def test_acceptance_rejects_invalid_threshold_and_failure_count():
         assert not meets_acceptance_thresholds(passing, threshold), repr(threshold)
     for failures in (True, -1, 0.5, "0"):
         assert not meets_acceptance_thresholds(passing | {"failures": failures}, 0.99)
+
+
+def test_load_acceptance_enforces_configured_connection_and_fanout_p95_ceilings():
+    report = build_report(
+        requested_connections=100,
+        connected=100,
+        messages_sent=3,
+        frames_received=300,
+        connect_latencies_ms=[10, 20, 30, 40, 50],
+        fanout_latencies_ms=[5, 10, 15, 20, 25],
+        failures=0,
+        elapsed_seconds=2,
+        initial_snapshot_attempts=100,
+        initial_snapshots=100,
+        reconnect_attempts=5,
+        reconnect_snapshots=5,
+    )
+    assert meets_acceptance_thresholds(
+        report, 0.99, max_connect_p95_ms=50, max_fanout_p95_ms=25
+    )
+    assert not meets_acceptance_thresholds(
+        report, 0.99, max_connect_p95_ms=39
+    )
+    assert not meets_acceptance_thresholds(
+        report, 0.99, max_fanout_p95_ms=24
+    )
+
+
+def test_load_acceptance_rejects_malformed_latency_percentiles_and_ceilings():
+    report = {
+        "failures": 0,
+        "connection_success_rate": 1.0,
+        "frame_delivery_rate": 1.0,
+        "initial_snapshot_rate": 1.0,
+        "reconnect_snapshot_rate": 1.0,
+        "connect_latency_ms": {"p50": 10, "p95": 20, "p99": 30},
+        "fanout_latency_ms": {"p50": 5, "p95": 10, "p99": 15},
+    }
+    import math
+
+    for invalid in (True, float("nan"), float("inf"), 0, -1, "100"):
+        assert not meets_acceptance_thresholds(
+            report, 0.99, max_connect_p95_ms=invalid
+        )
+    for malformed in (
+        {"p50": 10, "p95": 40, "p99": 30},
+        {"p50": 10, "p95": float("nan"), "p99": 30},
+        {"p50": 10, "p95": -1, "p99": 30},
+        {"p50": 10, "p99": 30},
+    ):
+        assert not meets_acceptance_thresholds(
+            report | {"fanout_latency_ms": malformed},
+            0.99,
+            max_fanout_p95_ms=100,
+        )
+
+
+def test_load_acceptance_keeps_latency_ceilings_opt_in():
+    report = {
+        "failures": 0,
+        "connection_success_rate": 1.0,
+        "frame_delivery_rate": 1.0,
+        "initial_snapshot_rate": 1.0,
+        "reconnect_snapshot_rate": 1.0,
+    }
+    # Legacy callers that only set delivery gates remain supported.
+    assert meets_acceptance_thresholds(report, 0.99)
+    # A configured latency ceiling requires a real measured distribution.
+    assert not meets_acceptance_thresholds(
+        report, 0.99, max_connect_p95_ms=100
+    )

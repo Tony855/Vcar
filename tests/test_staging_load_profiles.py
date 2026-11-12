@@ -16,6 +16,7 @@ import sys
 args = sys.argv[1:]
 connections = args[args.index("--connections") + 1]
 output = pathlib.Path(args[args.index("--json-output") + 1])
+pathlib.Path(os.environ["FAKE_ARGS_LOG"]).write_text("\\n".join(args), encoding="utf-8")
 output.parent.mkdir(parents=True, exist_ok=True)
 if os.getenv("FAKE_FAIL_CONNECTIONS") == connections:
     raise SystemExit(9)
@@ -28,7 +29,7 @@ print("fake profile", connections)
     return executable
 
 
-def _run(tmp_path, *, ack="I_CONFIRM_ISOLATED_STAGING", fail=None):
+def _run(tmp_path, *, ack="I_CONFIRM_ISOLATED_STAGING", fail=None, max_connect=None, max_fanout=None):
     output = tmp_path / "reports"
     env = os.environ | {
         "PYTHON_BIN": str(_fake_python(tmp_path)),
@@ -38,7 +39,12 @@ def _run(tmp_path, *, ack="I_CONFIRM_ISOLATED_STAGING", fail=None):
         "VCAR_LOAD_COOLDOWN_SECONDS": "0",
         "DRIVER_TOKEN": "do-not-print-driver-token",
         "ADMIN_TOKEN": "do-not-print-admin-token",
+        "FAKE_ARGS_LOG": str(tmp_path / "fake-args.log"),
     }
+    if max_connect is not None:
+        env["VCAR_MAX_CONNECT_P95_MS"] = max_connect
+    if max_fanout is not None:
+        env["VCAR_MAX_FANOUT_P95_MS"] = max_fanout
     if fail:
         env["FAKE_FAIL_CONNECTIONS"] = fail
     return subprocess.run(
@@ -87,3 +93,21 @@ def test_staging_profiles_require_short_lived_tokens(tmp_path):
     )
     assert result.returncode == 2
     assert "DRIVER_TOKEN and ADMIN_TOKEN" in result.stderr
+
+
+
+def test_staging_profiles_forward_optional_p95_ceilings_to_every_tier(tmp_path):
+    result, output = _run(tmp_path, max_connect="1500", max_fanout="500")
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "fake-args.log").read_text(encoding="utf-8")
+    lines = args.splitlines()
+    assert lines[lines.index("--max-connect-p95-ms") + 1] == "1500"
+    assert lines[lines.index("--max-fanout-p95-ms") + 1] == "500"
+    assert len(list(output.glob("gps-*.json"))) == 4
+
+
+def test_staging_profiles_reject_invalid_p95_ceiling_before_running(tmp_path):
+    result, output = _run(tmp_path, max_connect="nan")
+    assert result.returncode == 2
+    assert "latency ceilings must be positive" in result.stderr
+    assert not output.exists()

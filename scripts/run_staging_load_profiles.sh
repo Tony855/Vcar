@@ -8,6 +8,8 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 MESSAGES="${VCAR_LOAD_MESSAGES:-3}"
 RECONNECT_PROBES="${VCAR_RECONNECT_PROBES:-5}"
 MIN_RATE="${VCAR_MIN_DELIVERY_RATE:-0.99}"
+MAX_CONNECT_P95="${VCAR_MAX_CONNECT_P95_MS:-}"
+MAX_FANOUT_P95="${VCAR_MAX_FANOUT_P95_MS:-}"
 COOLDOWN="${VCAR_LOAD_COOLDOWN_SECONDS:-30}"
 
 if [[ "${VCAR_STAGING_ACK:-}" != "I_CONFIRM_ISOLATED_STAGING" ]]; then
@@ -26,6 +28,15 @@ if [[ ! "$MESSAGES" =~ ^[1-9][0-9]*$ || ! "$RECONNECT_PROBES" =~ ^[0-9]+$ || ! "
   echo "Messages must be positive; reconnect probes and cooldown must be non-negative integers." >&2
   exit 2
 fi
+LATENCY_ARGS=()
+for setting in "$MAX_CONNECT_P95" "$MAX_FANOUT_P95"; do
+  if [[ -n "$setting" ]] && { [[ ! "$setting" =~ ^[0-9]+([.][0-9]+)?$ ]] || ! awk -v value="$setting" 'BEGIN { exit !(value > 0) }'; }; then
+    echo "Configured p95 latency ceilings must be positive numbers." >&2
+    exit 2
+  fi
+done
+[[ -z "$MAX_CONNECT_P95" ]] || LATENCY_ARGS+=(--max-connect-p95-ms "$MAX_CONNECT_P95")
+[[ -z "$MAX_FANOUT_P95" ]] || LATENCY_ARGS+=(--max-fanout-p95-ms "$MAX_FANOUT_P95")
 
 mkdir -p "$OUTPUT_DIR"
 chmod 700 "$OUTPUT_DIR"
@@ -41,6 +52,7 @@ for connections in 50 100 250 500; do
     --messages "$MESSAGES" \
     --reconnect-probes "$RECONNECT_PROBES" \
     --min-delivery-rate "$MIN_RATE" \
+    "${LATENCY_ARGS[@]}" \
     --json-output "$report"
   if [[ ! -s "$report" ]]; then
     echo "Load profile $connections did not produce a report; stopping." >&2
