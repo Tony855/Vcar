@@ -23,10 +23,14 @@ def test_prometheus_alert_rules_parse_and_cover_redis_pool_and_outbox():
         "VcarDatabasePoolSaturated",
         "VcarOrderOutboxBacklog",
         "VcarOrderOutboxDeliveryStalled",
+        "VcarBackupLastRunFailed",
+        "VcarBackupLastSuccessStale",
     } <= by_name.keys()
     assert "vcar_redis_available" in by_name["VcarRedisUnavailable"]["expr"]
     assert "vcar_database_pool_max_connections" in by_name["VcarDatabasePoolSaturated"]["expr"]
     assert "vcar_database_pool_idle_connections" in by_name["VcarDatabasePoolSaturated"]["expr"]
+    assert "vcar_backup_last_run_success" in by_name["VcarBackupLastRunFailed"]["expr"]
+    assert "vcar_backup_last_success_timestamp_seconds" in by_name["VcarBackupLastSuccessStale"]["expr"]
 
 
 def test_prometheus_scrape_config_uses_private_metrics_token_file():

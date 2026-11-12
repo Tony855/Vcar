@@ -64,6 +64,24 @@ groups:
           summary: Vcar has an old undelivered order event
           description: The oldest pending order event is more than five minutes old.
 
+      - alert: VcarBackupLastRunFailed
+        expr: vcar_backup_last_run_success == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar database backup failed
+          description: The most recent database backup did not complete and verify; inspect the backup job before relying on recovery points.
+
+      - alert: VcarBackupLastSuccessStale
+        expr: time() - vcar_backup_last_success_timestamp_seconds > 86400
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar database backup is overdue
+          description: No verified database backup has completed within the last 24 hours.
+
       - alert: VcarHostCpuSaturated
         expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 85
         for: 10m

@@ -6,7 +6,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "backup_database.sh"
 
 
-def _run_backup(tmp_path, env_text, *, fail_list=False, preexisting_backup_dir_mode=None):
+def _run_backup(tmp_path, env_text, *, fail_list=False, preexisting_backup_dir_mode=None, metrics_file=None, metrics_initial=None):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     dump_log = tmp_path / "dump-args"
@@ -39,6 +39,11 @@ def _run_backup(tmp_path, env_text, *, fail_list=False, preexisting_backup_dir_m
         "VCAR_ENV_FILE": str(env_file),
         "VCAR_BACKUP_DIR": str(backup_dir),
     }
+    if metrics_file is not None:
+        metrics_file.parent.mkdir(parents=True, exist_ok=True)
+        if metrics_initial is not None:
+            metrics_file.write_text(metrics_initial, encoding="utf-8")
+        env["VCAR_BACKUP_METRICS_FILE"] = str(metrics_file)
     result = subprocess.run(
         ["bash", str(SCRIPT)], env=env, text=True, capture_output=True, check=False
     )
@@ -157,3 +162,37 @@ def test_backup_does_not_publish_archive_when_integrity_listing_fails(tmp_path):
     assert result.returncode == 7
     assert not list(backup_dir.glob("vcar-*.dump"))
     assert not list(backup_dir.glob("*.tmp"))
+
+def test_backup_publishes_last_success_and_last_run_metrics_atomically(tmp_path):
+    metrics_file = tmp_path / "textfile" / "vcar_backup.prom"
+    result, _, _ = _run_backup(
+        tmp_path,
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
+        metrics_file=metrics_file,
+    )
+    assert result.returncode == 0, result.stderr
+    metrics = metrics_file.read_text(encoding="utf-8")
+    lines = {
+        line.split()[0]: line.split()[1]
+        for line in metrics.splitlines()
+        if line and not line.startswith("#")
+    }
+    assert int(lines["vcar_backup_last_success_timestamp_seconds"]) > 0
+    assert lines["vcar_backup_last_run_success"] == "1"
+    assert metrics_file.stat().st_mode & 0o777 == 0o644
+
+
+def test_failed_backup_sets_failure_metric_and_preserves_last_success(tmp_path):
+    metrics_file = tmp_path / "textfile" / "vcar_backup.prom"
+    initial = "vcar_backup_last_success_timestamp_seconds 1234\nvcar_backup_last_run_success 1\n"
+    result, _, _ = _run_backup(
+        tmp_path,
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
+        fail_list=True,
+        metrics_file=metrics_file,
+        metrics_initial=initial,
+    )
+    assert result.returncode == 7
+    metrics = metrics_file.read_text(encoding="utf-8")
+    assert "vcar_backup_last_success_timestamp_seconds 1234" in metrics
+    assert "vcar_backup_last_run_success 0" in metrics

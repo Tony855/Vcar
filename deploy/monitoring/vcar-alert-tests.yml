@@ -6,6 +6,10 @@ tests:
     input_series:
       - series: 'vcar_redis_available'
         values: '0+0x5'
+      - series: 'vcar_backup_last_run_success'
+        values: '0+0x5'
+      - series: 'vcar_backup_last_success_timestamp_seconds'
+        values: '0+0x1500'
       - series: 'probe_success{job="blackbox-vcar",instance="http://vcar:8080/health/ready"}'
         values: '0+0x5'
       - series: 'probe_success{job="blackbox-vcar",instance="http://osrm:5000/route/v1/driving/104.9,11.5;104.95,11.55"}'
@@ -46,3 +50,19 @@ tests:
             exp_annotations:
               summary: Vcar OSRM route probe is failing
               description: The configured Cambodia OSRM route probe has failed for more than two minutes.
+      - eval_time: 3m
+        alertname: VcarBackupLastRunFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Vcar database backup failed
+              description: The most recent database backup did not complete and verify; inspect the backup job before relying on recovery points.
+      - eval_time: 25h
+        alertname: VcarBackupLastSuccessStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Vcar database backup is overdue
+              description: No verified database backup has completed within the last 24 hours.
