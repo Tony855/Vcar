@@ -34,16 +34,10 @@ def sample():
 @pytest.mark.asyncio
 async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(sample):
     redis = FakeRedis()
-
     result = await publish_driver_location(
-        redis,
-        telegram_id=12345,
-        longitude=104.9282,
-        latitude=11.5564,
-        heartbeat_at=1794460000.0,
-        event=sample,
+        redis, telegram_id=12345, longitude=104.9282, latitude=11.5564,
+        heartbeat_at=1794460000.0, event=sample,
     )
-
     assert result is True
     assert len(redis.calls) == 1
     script, key_count, *values = redis.calls[0]
@@ -51,11 +45,8 @@ async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(s
     assert "ZREMRANGEBYSCORE" in script and script.count("PUBLISH") == 2
     assert key_count == 5
     assert values[:5] == [
-        "driver:online",
-        "driver:heartbeat",
-        "driver:location:version",
-        "driver:location:12345",
-        "fleet:locations",
+        "driver:online", "driver:heartbeat", "driver:location:version",
+        "driver:location:12345", "fleet:locations",
     ]
     assert values[5:8] == [104.9282, 11.5564, "12345"]
     assert values[8] == datetime.fromisoformat(sample["recorded_at"]).timestamp()
@@ -66,16 +57,10 @@ async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(s
 @pytest.mark.asyncio
 async def test_redis_failure_is_reported_as_degraded_projection_not_exception(sample):
     redis = FakeRedis(fail=True)
-
     result = await publish_driver_location(
-        redis,
-        telegram_id=12345,
-        longitude=104.9282,
-        latitude=11.5564,
-        heartbeat_at=1794460000.0,
-        event=sample,
+        redis, telegram_id=12345, longitude=104.9282, latitude=11.5564,
+        heartbeat_at=1794460000.0, event=sample,
     )
-
     assert result is False
     assert len(redis.calls) == 1
 
@@ -95,20 +80,13 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
     pubsub = redis.pubsub()
     try:
         await pubsub.subscribe(channel)
-        await asyncio.wait_for(
-            pubsub.get_message(ignore_subscribe_messages=False, timeout=1), 2
-        )
-
+        await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=False, timeout=1), 2)
         newer = {
-            **sample,
-            "telegram_id": telegram_id,
-            "latitude": 11.557,
+            **sample, "telegram_id": telegram_id, "latitude": 11.557,
             "recorded_at": "2026-11-12T05:00:02+00:00",
         }
         older = {
-            **sample,
-            "telegram_id": telegram_id,
-            "latitude": 11.555,
+            **sample, "telegram_id": telegram_id, "latitude": 11.555,
             "recorded_at": "2026-11-12T05:00:01+00:00",
         }
         assert await publish_driver_location(
@@ -119,7 +97,6 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
             redis, telegram_id=telegram_id, longitude=104.9282,
             latitude=11.555, heartbeat_at=1794460003.0, event=older,
         )
-
         message = await asyncio.wait_for(
             pubsub.get_message(ignore_subscribe_messages=True, timeout=1), 2
         )
@@ -142,7 +119,6 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
 
 @pytest.mark.asyncio
 async def test_real_redis_client_recovers_after_connection_pool_disconnect(sample):
-    """A dropped Redis socket must be re-established by the production client."""
     import os
     import uuid
 
@@ -165,7 +141,6 @@ async def test_real_redis_client_recovers_after_connection_pool_disconnect(sampl
 
 @pytest.mark.asyncio
 async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeypatch):
-    """Expired heartbeats must remove both presence and the GEO candidate."""
     import os
     import time
     import uuid
@@ -180,11 +155,12 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
     try:
         await redis.geoadd("driver:online", (104.9282, 11.5564, telegram_id))
         await redis.zadd("driver:heartbeat", {telegram_id: time.time() - 600})
+        await redis.zadd("driver:location:version", {telegram_id: 1794460000.0})
         monkeypatch.setattr(db, "redis", redis)
-
         nearby = await DispatchService.get_nearby_drivers(104.9282, 11.5564)
         assert telegram_id not in {str(item[0]) for item in nearby}
         assert await redis.zscore("driver:heartbeat", telegram_id) is None
+        assert await redis.zscore("driver:location:version", telegram_id) is None
         assert await redis.geopos("driver:online", telegram_id) == [None]
     finally:
         await redis.zrem("driver:heartbeat", telegram_id)
