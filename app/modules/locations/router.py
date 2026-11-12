@@ -12,7 +12,10 @@ from app.core.security import verify_driver_token
 from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.core import db
 from app.modules.locations.gps import is_newer_sample, build_location_snapshot
-from app.modules.locations.redis_projection import publish_driver_location
+from app.modules.locations.redis_projection import (
+    capture_driver_presence_generation,
+    publish_driver_location,
+)
 from app.modules.locations.fleet import fetch_fleet_snapshot
 
 router = APIRouter(tags=["driver-location"])
@@ -42,6 +45,12 @@ async def update_driver_location(
         raise HTTPException(status_code=422, detail="GPS sample is outside the accepted time window")
 
     telegram_id = int(claims["sub"])
+    presence_online, presence_generation = await capture_driver_presence_generation(
+        db.redis, telegram_id
+    )
+    if presence_online is False:
+        raise HTTPException(status_code=409, detail="Driver is offline")
+
     async with db.pool.acquire() as conn:
         async with conn.transaction():
             driver = await conn.fetchrow(
@@ -102,14 +111,17 @@ async def update_driver_location(
     # behind another GPS transaction; using its pre-lock timestamp could make
     # a freshly accepted driver look older/offline in Redis.
     heartbeat_at = datetime.now(timezone.utc).timestamp()
-    realtime_published = await publish_driver_location(
-        db.redis,
-        telegram_id=telegram_id,
-        longitude=payload.longitude,
-        latitude=payload.latitude,
-        heartbeat_at=heartbeat_at,
-        event=event,
-    )
+    realtime_published = False
+    if presence_generation is not None:
+        realtime_published = await publish_driver_location(
+            db.redis,
+            telegram_id=telegram_id,
+            presence_generation=presence_generation,
+            longitude=payload.longitude,
+            latitude=payload.latitude,
+            heartbeat_at=heartbeat_at,
+            event=event,
+        )
     return {
         "accepted": True,
         "recorded_at": recorded_at.isoformat(),
