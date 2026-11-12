@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import settings
 from app.db.core import db
-from app.modules.payments.ledger import WalletLedger, WalletError, InsufficientFunds, IdempotencyConflict
+from app.modules.payments.ledger import WalletLedger, WalletError, InsufficientFunds, IdempotencyConflict, WalletBalanceLimit
 
 router = APIRouter(prefix="/wallet", tags=["wallet"])
 
@@ -135,6 +135,8 @@ async def admin_wallet_adjustment(
         )
     except InsufficientFunds as exc:
         raise HTTPException(status_code=409, detail="Wallet balance cannot become negative") from exc
+    except WalletBalanceLimit as exc:
+        raise HTTPException(status_code=409, detail="Wallet balance exceeds the supported maximum") from exc
     except IdempotencyConflict as exc:
         raise HTTPException(status_code=409, detail="Idempotency key conflict") from exc
     except WalletError as exc:
