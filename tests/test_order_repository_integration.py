@@ -419,3 +419,42 @@ async def test_concurrent_outbox_workers_claim_disjoint_events(database_pool):
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_a, passenger_b]
             )
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_reclaims_claim_abandoned_by_crashed_process(database_pool):
+    """A process crash must not strand an outbox event beyond the claim lease."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "lease-passenger")
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        first_claim = await OrderRepository.claim_status_events(limit=1)
+        assert len(first_claim) == 1
+        outbox_id = first_claim[0]["id"]
+
+        # Simulate a worker dying after claiming but before publishing/acking.
+        async with database_pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE order_event_outbox SET locked_at=now()-interval '6 minutes' WHERE id=$1",
+                outbox_id,
+            )
+
+        recovered = await OrderRepository.claim_status_events(limit=1)
+        assert len(recovered) == 1
+        assert recovered[0]["id"] == outbox_id
+        assert recovered[0]["attempts"] == first_claim[0]["attempts"] + 1
+
+        async with database_pool.acquire() as connection:
+            row = await connection.fetchrow(
+                "SELECT locked_at, delivered_at, attempts FROM order_event_outbox WHERE id=$1",
+                outbox_id,
+            )
+        assert row["locked_at"] is not None
+        assert row["delivered_at"] is None
+        assert row["attempts"] == 2
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute("DELETE FROM users WHERE id=$1", passenger_id)
