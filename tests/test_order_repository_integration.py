@@ -7,6 +7,7 @@ import pytest
 
 from app.db.core import db
 from app.db.repositories.order_repo import OrderRepository
+from app.modules.payments.ledger import WalletLedger
 
 
 @pytest.fixture
@@ -200,6 +201,103 @@ async def test_order_status_outbox_is_transactional_and_retryable(database_pool)
         assert retry["delivered_at"] is None
     finally:
         async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
+
+
+@pytest.mark.asyncio
+async def test_passenger_driver_order_and_wallet_lifecycle_is_consistent(database_pool):
+    """Exercise the persisted passenger -> driver -> completed trip -> wallet path."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "e2e-passenger")
+        driver_id = await _create_user(connection, "e2e-driver")
+        wallet_id = await connection.fetchval(
+            """
+            INSERT INTO wallet_accounts (user_id, currency, balance_minor)
+            VALUES ($1, 'USD', 0)
+            RETURNING id
+            """,
+            passenger_id,
+        )
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9282, 11.5564, 104.9500, 11.5700, 5.0, 3.5
+    )
+    topup_key = f"e2e-topup-{uuid.uuid4()}"
+    fare_key = f"e2e-fare-{uuid.uuid4()}"
+    try:
+        assert await OrderRepository.get(order["id"]) is not None
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        assert await OrderRepository.update_status(
+            order["id"], "ARRIVED", "ACCEPTED",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+        assert await OrderRepository.update_status(
+            order["id"], "IN_PROGRESS", "ARRIVED",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+        assert await OrderRepository.update_status(
+            order["id"], "COMPLETED", "IN_PROGRESS",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+
+        credit = await WalletLedger.post(
+            user_id=passenger_id, currency="USD", amount_minor=1000,
+            kind="TOPUP", idempotency_key=topup_key,
+            metadata={"source": "integration-test"},
+        )
+        fare = await WalletLedger.post(
+            user_id=passenger_id, currency="USD", amount_minor=-350,
+            kind="TRIP_FARE", idempotency_key=fare_key,
+            order_id=order["id"],
+            metadata={"source": "completed-trip"},
+        )
+        replay = await WalletLedger.post(
+            user_id=passenger_id, currency="USD", amount_minor=-350,
+            kind="TRIP_FARE", idempotency_key=fare_key,
+            order_id=order["id"],
+            metadata={"source": "completed-trip"},
+        )
+
+        async with database_pool.acquire() as connection:
+            persisted_status = await connection.fetchval(
+                "SELECT status FROM orders WHERE id=$1", order["id"]
+            )
+            event_statuses = await connection.fetch(
+                "SELECT to_status FROM order_events WHERE order_id=$1 ORDER BY id",
+                order["id"],
+            )
+            outbox_count = await connection.fetchval(
+                "SELECT count(*) FROM order_event_outbox WHERE order_id=$1",
+                order["id"],
+            )
+            balance = await connection.fetchval(
+                "SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet_id
+            )
+            fare_rows = await connection.fetchval(
+                "SELECT count(*) FROM wallet_transactions WHERE order_id=$1 AND kind='TRIP_FARE'",
+                order["id"],
+            )
+
+        assert persisted_status == "COMPLETED"
+        assert [row["to_status"] for row in event_statuses] == [
+            "DISPATCHING", "ACCEPTED", "ARRIVED", "IN_PROGRESS", "COMPLETED"
+        ]
+        assert outbox_count == 5
+        assert credit.balance_minor == 1000
+        assert fare.balance_minor == 650
+        assert replay.replayed is True
+        assert replay.transaction_id == fare.transaction_id
+        assert balance == 650
+        assert fare_rows == 1
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute(
+                "DELETE FROM wallet_transactions WHERE wallet_id=$1", wallet_id
+            )
+            await connection.execute("DELETE FROM wallet_accounts WHERE id=$1", wallet_id)
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]

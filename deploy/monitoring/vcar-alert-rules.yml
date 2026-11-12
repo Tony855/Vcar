@@ -10,6 +10,24 @@ groups:
           summary: Vcar metrics endpoint is unreachable
           description: Prometheus has failed to scrape the authenticated Vcar metrics endpoint for more than two minutes.
 
+      - alert: VcarBlackboxProbeFailed
+        expr: probe_success{job="blackbox-vcar"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: A Vcar HTTP or routing probe is failing
+          description: Blackbox Exporter has failed a configured Vcar health or OSRM route probe for more than two minutes.
+
+      - alert: VcarOSRMProbeFailed
+        expr: probe_success{job="blackbox-vcar",instance=~".*/route/.*"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Vcar OSRM route probe is failing
+          description: The configured Cambodia OSRM route probe has failed for more than two minutes.
+
       - alert: VcarRedisUnavailable
         expr: vcar_redis_available == 0
         for: 2m
