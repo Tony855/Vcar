@@ -211,3 +211,26 @@ def test_driver_status_rejects_invalid_and_stale_transitions(driver_order_client
         json={"status": "ARRIVED"},
     )
     assert stale.status_code == 409
+
+
+@pytest.mark.parametrize("order_id", [0, -1, 2**63])
+def test_accept_rejects_order_ids_outside_positive_bigint(driver_order_client, order_id):
+    client, connection, token, _ = driver_order_client
+    response = client.post(
+        f"/api/v1/driver/orders/{order_id}/accept",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+    assert connection.fetchrow_calls == []
+
+
+@pytest.mark.parametrize("order_id", [0, -1, 2**63])
+def test_status_update_rejects_order_ids_outside_positive_bigint(driver_order_client, order_id):
+    client, connection, token, _ = driver_order_client
+    response = client.patch(
+        f"/api/v1/driver/orders/{order_id}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "ARRIVED"},
+    )
+    assert response.status_code == 422
+    assert connection.fetchrow_calls == []
