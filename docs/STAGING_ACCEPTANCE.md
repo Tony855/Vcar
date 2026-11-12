@@ -94,6 +94,14 @@ snapshot if Redis Pub/Sub fails. Driver and administrator stream recovery paths 
 Redis-failure/re-subscription coverage. Run a Redis restart exercise in staging and verify the
 browser remains populated while Redis recovers.
 
+Driver online intent and a monotonic presence generation are persisted in PostgreSQL.
+The Redis reconciliation worker repairs only approved drivers whose durable online flag is true,
+and it rechecks/locks that state before writing the projection. GPS ingestion holds the same user
+row lock through its best-effort Redis publish so an offline transition cannot be overtaken by an
+older in-flight GPS request. Migration `20261113_0009` initializes existing drivers as offline;
+after upgrading, drivers must explicitly go online again. Redis markers are rebuilt from the
+database generation after Redis loss.
+
 The administrator fleet WebSocket now sends a durable PostgreSQL snapshot immediately after
 subscribing to Redis, including on reconnect. If a Pub/Sub connection fails, it rebuilds the
 subscription and sends another durable snapshot. The driver location WebSocket also rebuilds

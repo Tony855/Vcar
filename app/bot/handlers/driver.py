@@ -151,7 +151,10 @@ async def cb_offline(call: CallbackQuery):
     if user.get('driver_status') != 'APPROVED':
         await call.answer("⚠️ 您还未完成司机认证，无法下线！", show_alert=True)
         return
-    await DispatchService.go_offline(str(call.from_user.id))
+    deactivated = await DispatchService.go_offline(str(call.from_user.id))
+    if not deactivated:
+        await call.answer("司机在线状态更新失败，请重试。", show_alert=True)
+        return
     await call.answer(t('driver.offline_success', user), show_alert=True)
     await call.message.edit_text(f"<b>{t('driver.offline_success', user)}</b>")
 
@@ -210,7 +213,12 @@ async def s5(msg: Message, state: FSMContext):
 async def go_online(msg: Message, state: FSMContext):
     user = await UserRepository.get_or_create(msg.from_user.id)
     await state.clear()
-    await DispatchService.go_online(str(msg.from_user.id), msg.location.longitude, msg.location.latitude)
+    activated = await DispatchService.go_online(
+        str(msg.from_user.id), msg.location.longitude, msg.location.latitude
+    )
+    if not activated:
+        await msg.reply(t("driver.status_pending", user))
+        return
     await msg.reply(t('driver.online_success', user))
 
 @router.callback_query(F.data.startswith('acc:'))

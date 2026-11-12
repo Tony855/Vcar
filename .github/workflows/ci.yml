@@ -66,7 +66,7 @@ jobs:
       - run: DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar uv run --no-sync alembic upgrade head --sql
       - run: grep -v '^\\\\' app/db/schema.sql | docker run --rm -i --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1
       - run: uv run --no-sync alembic upgrade head
-      - run: test "$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -Atc "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_name IN ('driver_locations','trip_tracks','wallet_accounts','wallet_transactions')) = 4 AND EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis')")" = "t"
+      - run: test "$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -Atc "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_name IN ('driver_locations','trip_tracks','wallet_accounts','wallet_transactions')) = 4 AND EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis') AND (SELECT count(*) FROM information_schema.columns WHERE table_name='users' AND column_name IN ('driver_is_online','driver_presence_generation')) = 2")" = "t"
       - name: Verify multi-currency wallet downgrade fails without data loss
         run: |
           set -euo pipefail
@@ -79,7 +79,7 @@ jobs:
           fi
           current_revision="$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT version_num FROM alembic_version")"
           wallet_count="$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM wallet_accounts WHERE user_id=$probe_user_id")"
-          test "$current_revision" = "20261112_0008"
+          test "$current_revision" = "20261113_0009"
           test "$wallet_count" = "2"
           docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DELETE FROM wallet_accounts WHERE user_id=$probe_user_id; DELETE FROM users WHERE id=$probe_user_id"
       - run: uv run --no-sync alembic downgrade 20261111_0001 && uv run --no-sync alembic upgrade head

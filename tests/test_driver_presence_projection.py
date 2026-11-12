@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.services.driver_presence_projection import (
+    _REPAIR_DRIVER,
     _REMOVE_STALE_DRIVER,
     reconcile_driver_presence,
 )
@@ -13,6 +14,7 @@ class FakeRedis:
         self.heartbeat = dict(heartbeat or {})
         self.online = set(online or ())
         self.versions = {}
+        self.generations = {}
         self.newer_members = set(newer_members)
         self.repaired = []
 
@@ -26,7 +28,14 @@ class FakeRedis:
             self.online.discard(member)
             self.versions.pop(member, None)
             return 1
-        _keys, longitude, latitude, member, recorded, received = args[:3], *args[3:]
+        if script == _REPAIR_DRIVER:
+            _keys, longitude, latitude, member, recorded, received, generation = args[:4], *args[4:]
+            current_generation = self.generations.get(member)
+            if current_generation is not None and current_generation > int(generation):
+                return 0
+            self.generations[member] = int(generation)
+        else:
+            raise AssertionError("unexpected Redis script")
         previous = self.versions.get(member)
         if previous is not None and previous > float(recorded):
             return 0
@@ -50,18 +59,37 @@ class FakeRedis:
 
 class FakeConnection:
     def __init__(self, rows):
-        self.rows = rows
+        self.rows = [dict(row) for row in rows]
+        self.states = {
+            row["telegram_id"]: {
+                "driver_is_online": row.get("driver_is_online", True),
+                "driver_presence_generation": row["driver_presence_generation"],
+            }
+            for row in self.rows
+        }
         self.query = None
         self.args = None
 
     async def fetch(self, query, *args):
         self.query, self.args = query, args
-        return self.rows
+        return [dict(row) for row in self.rows]
+
+    def transaction(self):
+        class Transaction:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+        return Transaction()
+
+    async def fetchrow(self, query, telegram_id):
+        return self.states.get(telegram_id)
 
 
 def driver_row(telegram_id, now, *, age=10, recorded_age=12):
     return {
         "telegram_id": telegram_id,
+        "driver_presence_generation": 1,
         "longitude": 104.9282,
         "latitude": 11.5564,
         "recorded_at": now - timedelta(seconds=recorded_age),
@@ -89,6 +117,8 @@ async def test_reconciliation_repairs_fresh_database_rows_and_removes_stale_memb
     assert redis.versions["1001"] == pytest.approx((now - timedelta(seconds=12)).timestamp())
     assert connection.args[0] == now - timedelta(seconds=120)
     assert connection.args[1] == now
+    assert "driver_is_online IS TRUE" in connection.query
+    assert redis.generations == {"1001": 1, "1002": 1}
 
 
 @pytest.mark.asyncio
@@ -189,6 +219,7 @@ async def test_real_redis_reconciliation_repairs_500_drivers_and_prunes_orphans(
         await redis.zrem("driver:heartbeat", *members)
         await redis.zrem("driver:location:version", *members)
         await redis.zrem("driver:online", *members)
+        await redis.delete(*(f"driver:presence:generation:{member}" for member in members))
         await redis.aclose()
 
 
@@ -244,4 +275,45 @@ async def test_real_redis_reconciliation_preserves_newer_online_heartbeat():
         await redis.zrem("driver:heartbeat", telegram_id)
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
+        await redis.delete(f"driver:presence:generation:{telegram_id}")
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_does_not_resurrect_a_driver_who_went_offline_after_scan():
+    now = datetime.now(timezone.utc)
+    row = driver_row(1010, now)
+    connection = FakeConnection([row])
+    connection.states[1010]["driver_is_online"] = False
+    redis = FakeRedis(
+        heartbeat={"1010": now.timestamp() - 20},
+        online={"1010"},
+    )
+
+    result = await reconcile_driver_presence(redis, connection, now=now)
+
+    assert result == {"database_fresh": 0, "repaired": 0, "stale_removed": 1}
+    assert "1010" not in redis.online
+    assert "1010" not in redis.heartbeat
+    assert redis.repaired == []
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_skips_a_generation_changed_after_candidate_scan():
+    now = datetime.now(timezone.utc)
+    row = driver_row(1011, now)
+    row["driver_presence_generation"] = 3
+    connection = FakeConnection([row])
+    # Simulate an offline/online transition after the candidate row was read.
+    connection.states[1011]["driver_is_online"] = True
+    connection.states[1011]["driver_presence_generation"] = 4
+    redis = FakeRedis(
+        heartbeat={"1011": now.timestamp() - 20},
+        online={"1011"},
+    )
+
+    result = await reconcile_driver_presence(redis, connection, now=now)
+
+    assert result == {"database_fresh": 0, "repaired": 0, "stale_removed": 1}
+    assert "1011" not in redis.online
+    assert redis.repaired == []

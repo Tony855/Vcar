@@ -515,6 +515,10 @@ async def test_gps_location_rolls_back_when_trip_track_insert_fails(database_poo
         telegram_id = await connection.fetchval(
             "SELECT telegram_id FROM users WHERE id=$1", driver_id
         )
+        await connection.execute(
+            "UPDATE users SET driver_is_online=TRUE, driver_presence_generation=1 WHERE id=$1",
+            driver_id,
+        )
     order = await OrderRepository.create(
         passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
     )
@@ -580,6 +584,10 @@ async def test_concurrent_gps_samples_keep_only_the_newest_timestamp(database_po
         driver_id = await _create_user(connection, "gps-concurrency-driver")
         telegram_id = await connection.fetchval(
             "SELECT telegram_id FROM users WHERE id=$1", driver_id
+        )
+        await connection.execute(
+            "UPDATE users SET driver_is_online=TRUE, driver_presence_generation=1 WHERE id=$1",
+            driver_id,
         )
 
     class RedisProjection:
