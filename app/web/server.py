@@ -176,8 +176,13 @@ async def get_driver_profile(tg_id: int, claims: dict = Depends(verify_driver_to
         order_stats = await c.fetchrow("SELECT COUNT(*) as total_orders, COALESCE(SUM(price_estimate), 0) as total_income FROM orders WHERE driver_id=$1 AND status='COMPLETED'", driver['id'])
         
         # 🌟 新增：去 Redis 里查他是不是真的在线
-        is_online = await db.redis.zscore("driver:online", str(tg_id))
-        real_status = "在线" if is_online is not None else "离线"
+        heartbeat_at = await db.redis.zscore("driver:heartbeat", str(tg_id))
+        now = __import__("time").time()
+        is_online = (
+            heartbeat_at is not None
+            and 0 <= now - float(heartbeat_at) <= 120
+        )
+        real_status = "在线" if is_online else "离线"
         
         return {
             "plate": driver['plate_number'] or "未绑定",
