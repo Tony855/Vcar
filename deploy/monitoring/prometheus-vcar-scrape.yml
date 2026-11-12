@@ -26,3 +26,12 @@ scrape_configs:
       - targets:
           # Replace with the private address of the Vcar web service.
           - 127.0.0.1:8080
+
+  # Optional private node_exporter target. Install node_exporter on the Vcar host
+  # and bind it to loopback or a monitoring-only interface; never expose port 9100 publicly.
+  - job_name: vcar-node
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 127.0.0.1:9100

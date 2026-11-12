@@ -45,3 +45,30 @@ groups:
         annotations:
           summary: Vcar has an old undelivered order event
           description: The oldest pending order event is more than five minutes old.
+
+      - alert: VcarHostCpuSaturated
+        expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Vcar host CPU is saturated
+          description: Host CPU utilization has remained above 85 percent for ten minutes.
+
+      - alert: VcarHostMemoryPressure
+        expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Vcar host memory is under pressure
+          description: Host memory utilization has remained above 90 percent for ten minutes.
+
+      - alert: VcarHostRootFilesystemLow
+        expr: 100 * node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar host root filesystem is nearly full
+          description: Less than 10 percent of root filesystem capacity remains available for five minutes.
