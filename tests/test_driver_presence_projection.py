@@ -59,13 +59,20 @@ class FakeRedis:
 
 class FakeConnection:
     def __init__(self, rows):
-        self.rows = rows
+        self.rows = [dict(row) for row in rows]
+        self.states = {
+            row["telegram_id"]: {
+                "driver_is_online": row.get("driver_is_online", True),
+                "driver_presence_generation": row["driver_presence_generation"],
+            }
+            for row in self.rows
+        }
         self.query = None
         self.args = None
 
     async def fetch(self, query, *args):
         self.query, self.args = query, args
-        return self.rows
+        return [dict(row) for row in self.rows]
 
     def transaction(self):
         class Transaction:
@@ -76,13 +83,7 @@ class FakeConnection:
         return Transaction()
 
     async def fetchrow(self, query, telegram_id):
-        row = next((item for item in self.rows if item["telegram_id"] == telegram_id), None)
-        if row is None:
-            return None
-        return {
-            "driver_is_online": row.get("driver_is_online", True),
-            "driver_presence_generation": row["driver_presence_generation"],
-        }
+        return self.states.get(telegram_id)
 
 
 def driver_row(telegram_id, now, *, age=10, recorded_age=12):
@@ -280,8 +281,8 @@ async def test_real_redis_reconciliation_preserves_newer_online_heartbeat():
 async def test_reconciliation_does_not_resurrect_a_driver_who_went_offline_after_scan():
     now = datetime.now(timezone.utc)
     row = driver_row(1010, now)
-    row["driver_is_online"] = False
     connection = FakeConnection([row])
+    connection.states[1010]["driver_is_online"] = False
     redis = FakeRedis(
         heartbeat={"1010": now.timestamp() - 20},
         online={"1010"},
@@ -302,8 +303,8 @@ async def test_reconciliation_skips_a_generation_changed_after_candidate_scan():
     row["driver_presence_generation"] = 3
     connection = FakeConnection([row])
     # Simulate an offline/online transition after the candidate row was read.
-    connection.rows[0]["driver_is_online"] = True
-    connection.rows[0]["driver_presence_generation"] = 4
+    connection.states[1011]["driver_is_online"] = True
+    connection.states[1011]["driver_presence_generation"] = 4
     redis = FakeRedis(
         heartbeat={"1011": now.timestamp() - 20},
         online={"1011"},
