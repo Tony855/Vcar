@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 
 from app.db.core import db
-from app.modules.payments.ledger import LedgerBatchResult, WalletLedger
+from app.modules.payments.ledger import LedgerBatchResult, WalletError, WalletLedger
 
 
 class SettlementError(Exception):
