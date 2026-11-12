@@ -107,26 +107,49 @@ class DispatchService:
 
     @staticmethod
     async def go_offline(driver_tid):
+        # Serialize this transition with order acceptance by locking the same
+        # durable driver row first. Check active trips in a *subsequent*
+        # READ COMMITTED statement so it sees an acceptance that committed
+        # while this call was waiting for the row lock.
         async with db.pool.acquire() as connection:
-            row = await connection.fetchrow(
-                """
-                UPDATE users
-                SET driver_is_online=FALSE,
-                    driver_presence_generation=driver_presence_generation+1
-                WHERE telegram_id=$1 AND driver_status='APPROVED'
-                  AND driver_presence_generation < 9223372036854775807
-                  AND NOT EXISTS (
-                      SELECT 1 FROM orders
-                      WHERE orders.driver_id=users.id
-                        AND orders.status IN ('ACCEPTED','ARRIVED','IN_PROGRESS')
-                  )
-                RETURNING driver_presence_generation
-                """,
-                int(driver_tid),
-            )
-        if not row:
-            return False
-        generation = int(row["driver_presence_generation"])
+            async with connection.transaction():
+                driver = await connection.fetchrow(
+                    """
+                    SELECT id
+                    FROM users
+                    WHERE telegram_id=$1 AND driver_status='APPROVED'
+                    FOR UPDATE
+                    """,
+                    int(driver_tid),
+                )
+                if not driver:
+                    return False
+                has_active_trip = await connection.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM orders
+                        WHERE driver_id=$1
+                          AND status IN ('ACCEPTED','ARRIVED','IN_PROGRESS')
+                    )
+                    """,
+                    driver["id"],
+                )
+                if has_active_trip:
+                    return False
+                row = await connection.fetchrow(
+                    """
+                    UPDATE users
+                    SET driver_is_online=FALSE,
+                        driver_presence_generation=driver_presence_generation+1
+                    WHERE id=$1 AND driver_is_online IS TRUE
+                      AND driver_presence_generation < 9223372036854775807
+                    RETURNING driver_presence_generation
+                    """,
+                    driver["id"],
+                )
+                if not row:
+                    return False
+                generation = int(row["driver_presence_generation"])
         applied = await db.redis.eval(
             _SET_DRIVER_OFFLINE, 4,
             "driver:online", "driver:heartbeat", "driver:location:version",
