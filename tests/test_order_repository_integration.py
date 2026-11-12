@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 import json
 import uuid
 
@@ -1187,3 +1188,39 @@ async def test_completed_order_settlement_snapshot_is_atomic_and_idempotent(data
             await connection.execute("DELETE FROM order_settlements WHERE order_id=$1", order["id"])
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute("DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id])
+
+
+@pytest.mark.asyncio
+async def test_cancellation_fee_preserves_exact_decimal_without_float_rounding(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "decimal-cancel-passenger")
+        driver_id = await _create_user(connection, "decimal-cancel-driver")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    fee = Decimal("0.100000000000000001")
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        assert await OrderRepository.cancel_with_fee(
+            order["id"], passenger_id, "PASSENGER", fee
+        ) is True
+        async with database_pool.acquire() as connection:
+            stored_fee = await connection.fetchval(
+                "SELECT cancel_fee FROM orders WHERE id=$1", order["id"]
+            )
+            event_metadata = await connection.fetchval(
+                "SELECT metadata FROM order_events WHERE order_id=$1 "
+                "AND to_status='CANCELLED' ORDER BY id DESC LIMIT 1",
+                order["id"],
+            )
+        assert stored_fee == fee
+        if isinstance(event_metadata, str):
+            event_metadata = json.loads(event_metadata)
+        assert event_metadata["cancel_fee"] == "0.100000000000000001"
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )

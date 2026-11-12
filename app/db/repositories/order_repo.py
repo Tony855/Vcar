@@ -1,4 +1,3 @@
-import math
 import json
 from decimal import Decimal, InvalidOperation
 
@@ -274,9 +273,8 @@ class OrderRepository:
         if isinstance(fee, bool) or not isinstance(fee, (int, float, Decimal)):
             return False
         try:
-            fee_decimal = Decimal(str(fee))
-            fee_value = float(fee_decimal)
-            if not fee_decimal.is_finite() or fee_decimal < 0 or not math.isfinite(fee_value):
+            fee_decimal = fee if isinstance(fee, Decimal) else Decimal(str(fee))
+            if not fee_decimal.is_finite() or fee_decimal < 0:
                 return False
         except (InvalidOperation, TypeError, ValueError, OverflowError):
             return False
@@ -306,14 +304,16 @@ class OrderRepository:
                     WHERE id=$3 AND status=$4
                     RETURNING id
                     """,
-                    role, fee_value, oid, current_status,
+                    role, fee_decimal, oid, current_status,
                 )
                 if not row:
                     return False
                 await cls._append_event(
                     connection, oid, current_status, "CANCELLED",
                     actor_user_id=uid, actor_role=role,
-                    metadata={"cancel_fee": fee_value},
+                    # JSON has no Decimal type; preserve the exact decimal text
+                    # rather than silently rounding through binary float.
+                    metadata={"cancel_fee": format(fee_decimal, "f")},
                 )
             return True
 
