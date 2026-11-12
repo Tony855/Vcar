@@ -1533,3 +1533,97 @@ async def test_driver_cannot_go_offline_while_trip_is_active(database_pool, monk
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_offline_transition_rechecks_active_trip_after_waiting_for_driver_lock(
+    database_pool, monkeypatch
+):
+    from app.services.dispatch import DispatchService
+
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "offline-race-passenger")
+        driver_id = await _create_user(connection, "offline-race-driver")
+        telegram_id = await connection.fetchval(
+            "SELECT telegram_id FROM users WHERE id=$1", driver_id
+        )
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    offline_task = None
+    lock_query_started = asyncio.Event()
+    monkeypatch.setattr(db, "redis", object())
+
+    class ObservedConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        async def fetchrow(self, query, *args):
+            if "driver_status='APPROVED'" in query and "FOR UPDATE" in query:
+                lock_query_started.set()
+            return await self.connection.fetchrow(query, *args)
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+    class ObservedAcquire:
+        async def __aenter__(self):
+            self.connection = await database_pool.acquire()
+            return ObservedConnection(self.connection)
+
+        async def __aexit__(self, exc_type, exc, tb):
+            await database_pool.release(self.connection)
+
+    class ObservedPool:
+        def acquire(self):
+            return ObservedAcquire()
+
+    monkeypatch.setattr(db, "pool", ObservedPool())
+    try:
+        # Hold the same user-row lock used by accept() and go_offline().
+        # Start go_offline while it is blocked, then commit an active trip
+        # before releasing the lock. Its later active-trip query must use a
+        # fresh READ COMMITTED statement snapshot.
+        async with database_pool.acquire() as lock_connection:
+            async with lock_connection.transaction():
+                await lock_connection.fetchrow(
+                    "SELECT id FROM users WHERE id=$1 FOR UPDATE", driver_id
+                )
+                offline_task = asyncio.create_task(
+                    DispatchService.go_offline(str(telegram_id))
+                )
+                await asyncio.wait_for(lock_query_started.wait(), timeout=5)
+                # Give asyncpg time to submit the observed SELECT and block on
+                # the row lock before the order becomes active.
+                await asyncio.sleep(0.05)
+
+                await lock_connection.execute(
+                    "UPDATE orders SET driver_id=$1, status='ACCEPTED' WHERE id=$2",
+                    driver_id, order["id"],
+                )
+                await OrderRepository._append_event(
+                    lock_connection, order["id"], "DISPATCHING", "ACCEPTED",
+                    actor_user_id=driver_id, actor_role="DRIVER",
+                )
+
+        assert await asyncio.wait_for(offline_task, timeout=5) is False
+        offline_task = None
+        async with database_pool.acquire() as connection:
+            state = await connection.fetchrow(
+                "SELECT driver_is_online FROM users WHERE id=$1", driver_id
+            )
+            order_state = await connection.fetchrow(
+                "SELECT status, driver_id FROM orders WHERE id=$1", order["id"]
+            )
+        assert state["driver_is_online"] is True
+        assert order_state["status"] == "ACCEPTED"
+        assert order_state["driver_id"] == driver_id
+    finally:
+        if offline_task is not None:
+            offline_task.cancel()
+            await asyncio.gather(offline_task, return_exceptions=True)
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
