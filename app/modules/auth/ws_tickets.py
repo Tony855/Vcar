@@ -39,7 +39,10 @@ async def issue_ws_ticket(access_token: str, scope: str) -> str:
     if expected_role is None:
         raise ValueError("Unsupported WebSocket scope")
     try:
-        claims = jwt.decode(access_token, settings.secret_key, algorithms=["HS256"])
+        claims = jwt.decode(
+            access_token, settings.secret_key, algorithms=["HS256"],
+            options={"require": ["exp"]},
+        )
     except jwt.PyJWTError as exc:
         raise ValueError("Invalid or expired access token") from exc
     if claims.get("role") != expected_role or not claims.get("sub"):
