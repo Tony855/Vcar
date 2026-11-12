@@ -54,8 +54,7 @@ driver:
   ask_send_location: 👇 Please click [📎 Attachment] -> [Location] to send your current
     location.
   passenger_cancelled: '⚠️ Passenger cancelled order #{order_id}'
-  passenger_cancelled_fee: '⚠️ Passenger cancelled order #{order_id}, you got fee
-    ${fee}'
+  passenger_cancelled_fee: '⚠️ Passenger cancelled order #{order_id}. Recorded cancellation fee: ${fee} (not settled yet).'
   offline_btn: 🔴 Go Offline
   offline_success: 🛑 You are now offline and will no longer receive new orders.
   already_online: ✅ You are already online. No need to go online again. Send a location
@@ -105,7 +104,7 @@ passenger:
   trip_started: 🚗 Trip started. Have a safe journey!
   trip_completed: '🏁 Arrived at destination. Total fare: ${price}. Thank you!'
   cancel_free: ✅ Order cancelled.
-  cancel_with_fee: ✅ Order cancelled. Cancel fee ${fee} deducted.
+  cancel_with_fee: ✅ Order cancelled. Cancellation fee ${fee} recorded; it has not been charged to your wallet.
   order_timeout: ⏳ Timeout cancelled
   rate_success: ✅ Thank you for your rating! You rated the driver {score} stars.
   rate_drv_prompt: ⭐ <b>Please rate the driver for this trip:</b>
