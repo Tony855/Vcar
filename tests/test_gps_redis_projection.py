@@ -134,6 +134,8 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
         await redis.zrem("driver:online", str(telegram_id))
         await redis.zrem("driver:heartbeat", str(telegram_id))
         await redis.delete(generation_key)
+        await pool.execute("DELETE FROM users WHERE telegram_id=$1", int(telegram_id))
+        await pool.close()
         await redis.aclose()
 
 
@@ -391,13 +393,21 @@ async def test_offline_transition_fences_an_in_flight_gps_projection(sample, mon
     from app.db.core import db
     from app.services.dispatch import DispatchService
 
+    import asyncpg
+
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
     monkeypatch.setattr(db, "redis", redis)
+    monkeypatch.setattr(db, "pool", pool)
     telegram_id = f"5{uuid.uuid4().int % 900000000}"
     generation_key = f"driver:presence:generation:{telegram_id}"
     channel = f"driver:location:{telegram_id}"
     pubsub = redis.pubsub()
     try:
+        await pool.execute(
+            "INSERT INTO users (telegram_id, driver_status) VALUES ($1, 'APPROVED')",
+            int(telegram_id),
+        )
         await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
         captured = int(await redis.get(generation_key))
         await pubsub.subscribe(channel)
