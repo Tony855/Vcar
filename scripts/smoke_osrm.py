@@ -24,6 +24,8 @@ def parse_coordinate(value: str) -> tuple[float, float]:
         lon, lat = float(lon_text), float(lat_text)
     except (ValueError, AttributeError) as exc:
         raise argparse.ArgumentTypeError("coordinate must be longitude,latitude") from exc
+    if not (math.isfinite(lon) and math.isfinite(lat)):
+        raise argparse.ArgumentTypeError("coordinate values must be finite")
     if not (-180 <= lon <= 180 and -90 <= lat <= 90):
         raise argparse.ArgumentTypeError("coordinate is outside longitude/latitude bounds")
     return lon, lat
