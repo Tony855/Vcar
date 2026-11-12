@@ -109,6 +109,7 @@ def validate_payload(name: str, payload: object) -> bool:
             and bool(matchings)
             and isinstance(matchings[0], dict)
             and isinstance(matchings[0].get("distance"), (int, float))
+            and not isinstance(matchings[0]["distance"], bool)
             and math.isfinite(matchings[0]["distance"])
             and matchings[0]["distance"] >= 0
             and isinstance(tracepoints, list)
