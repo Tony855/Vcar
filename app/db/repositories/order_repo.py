@@ -280,6 +280,71 @@ class OrderRepository:
                 )
             return True
 
+
+    @classmethod
+    async def submit_rating(cls, oid, actor_user_id, actor_role, score):
+        """Record one authenticated rating per order participant, atomically."""
+        if (
+            actor_role not in {"PASSENGER", "DRIVER"}
+            or not isinstance(actor_user_id, int)
+            or isinstance(actor_user_id, bool)
+            or actor_user_id <= 0
+            or not isinstance(score, int)
+            or isinstance(score, bool)
+            or not 1 <= score <= 5
+        ):
+            return False
+
+        async with db.pool.acquire() as connection:
+            async with connection.transaction():
+                order = await connection.fetchrow(
+                    """
+                    SELECT customer_id, driver_id, status
+                    FROM orders WHERE id=$1 FOR UPDATE
+                    """,
+                    oid,
+                )
+                if not order or order["status"] != "COMPLETED":
+                    return False
+                if actor_role == "PASSENGER":
+                    if order["customer_id"] != actor_user_id:
+                        return False
+                    ratee_user_id = order["driver_id"]
+                else:
+                    if order["driver_id"] != actor_user_id:
+                        return False
+                    ratee_user_id = order["customer_id"]
+                if ratee_user_id is None or ratee_user_id == actor_user_id:
+                    return False
+
+                inserted = await connection.fetchrow(
+                    """
+                    INSERT INTO order_ratings
+                        (order_id, rater_role, rater_user_id, ratee_user_id, score)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (order_id, rater_role) DO NOTHING
+                    RETURNING id
+                    """,
+                    oid, actor_role, actor_user_id, ratee_user_id, score,
+                )
+                if not inserted:
+                    return False
+
+                await connection.execute(
+                    """
+                    UPDATE users
+                    SET rating = round(
+                            (COALESCE(rating, 5.0) * GREATEST(COALESCE(rating_count, 1), 1) + $1)
+                            / (GREATEST(COALESCE(rating_count, 1), 1) + 1),
+                            2
+                        ),
+                        rating_count = GREATEST(COALESCE(rating_count, 1), 1) + 1
+                    WHERE id=$2
+                    """,
+                    score, ratee_user_id,
+                )
+                return True
+
     @staticmethod
     async def get_customer_orders(cid):
         async with db.pool.acquire() as c:

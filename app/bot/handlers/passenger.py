@@ -121,27 +121,46 @@ async def pax_chat_proxy(msg: Message, driver_bot):
 
 @router.callback_query(F.data.startswith("rate_pax:"))
 async def rate_pax_to_driver(call: CallbackQuery, state: FSMContext, driver_bot):
-    _, oid, score = call.data.split(":")
-    order = await OrderRepository.get(int(oid))
-    if order and order.get('d_tg'):
-        await UserRepository.update_user_rating(order['d_tg'], int(score))
-        
+    try:
+        _, raw_oid, raw_score = call.data.split(":")
+        oid, score = int(raw_oid), int(raw_score)
+    except (TypeError, ValueError):
+        return await call.answer("评价参数无效", show_alert=True)
+    if not 1 <= score <= 5:
+        return await call.answer("评分必须在 1 到 5 星之间", show_alert=True)
+
+    user = await UserRepository.get_or_create(call.from_user.id)
+    if not await OrderRepository.submit_rating(oid, user["id"], "PASSENGER", score):
+        return await call.answer("无权评价、订单未完成或该订单已评价", show_alert=True)
+
+    order = await OrderRepository.get(oid)
+    if order and order.get("d_tg"):
         async with db.pool.acquire() as c:
-            exists = await c.fetchval("SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2", int(oid), order['driver_id'])
+            exists = await c.fetchval(
+                "SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2",
+                oid, order["driver_id"],
+            )
             if not exists:
                 await c.execute(
                     "INSERT INTO reviews (order_id, driver_id, passenger_id, rating) VALUES ($1, $2, $3, $4)",
-                    int(oid), order['driver_id'], order['customer_id'], int(score)
+                    oid, order["driver_id"], order["customer_id"], score,
                 )
             else:
-                await c.execute("UPDATE reviews SET rating=$1 WHERE order_id=$2 AND driver_id=$3", int(score), int(oid), order['driver_id'])
-                
+                await c.execute(
+                    "UPDATE reviews SET rating=$1 WHERE order_id=$2 AND driver_id=$3",
+                    score, oid, order["driver_id"],
+                )
+
         await state.set_state(RatingStates.waiting_for_comment)
-        await state.update_data(oid=int(oid), driver_tg=order['d_tg'])
-        await call.message.edit_text(t("passenger.rated_5_stars", user, score=int(score)))
+        await state.update_data(oid=oid, driver_tg=order["d_tg"])
+        await call.message.edit_text(t("passenger.rated_5_stars", user, score=score))
         try:
-            asyncio.create_task(driver_bot.send_message(order['d_tg'], t("driver.rider_rated", order.get("d_locale", "en"), score=int(score))))
-        except: pass
+            asyncio.create_task(driver_bot.send_message(
+                order["d_tg"],
+                t("driver.rider_rated", order.get("d_locale", "en"), score=score),
+            ))
+        except Exception:
+            pass
     await call.answer()
 
 

@@ -840,3 +840,125 @@ async def test_concurrent_duplicate_order_completion_emits_one_terminal_event(da
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_order_ratings_are_authorized_idempotent_and_directional(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "rating-passenger")
+        driver_id = await _create_user(connection, "rating-driver")
+        unrelated_id = await _create_user(connection, "rating-unrelated")
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        assert await OrderRepository.update_status(
+            order["id"], "ARRIVED", "ACCEPTED",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+        assert await OrderRepository.update_status(
+            order["id"], "IN_PROGRESS", "ARRIVED",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+        assert await OrderRepository.update_status(
+            order["id"], "COMPLETED", "IN_PROGRESS",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+
+        # Unrelated users cannot rate, and ratings are unavailable before completion.
+        assert await OrderRepository.submit_rating(
+            order["id"], unrelated_id, "PASSENGER", 5
+        ) is False
+        assert await OrderRepository.submit_rating(
+            order["id"], passenger_id, "DRIVER", 5
+        ) is False
+        for invalid_score in (0, 6, True, "5"):
+            assert await OrderRepository.submit_rating(
+                order["id"], passenger_id, "PASSENGER", invalid_score
+            ) is False
+
+        # Each participant can rate the other once; a duplicate is a no-op.
+        assert await OrderRepository.submit_rating(
+            order["id"], passenger_id, "PASSENGER", 5
+        ) is True
+        assert await OrderRepository.submit_rating(
+            order["id"], passenger_id, "PASSENGER", 1
+        ) is False
+        assert await OrderRepository.submit_rating(
+            order["id"], driver_id, "DRIVER", 4
+        ) is True
+        assert await OrderRepository.submit_rating(
+            order["id"], driver_id, "DRIVER", 1
+        ) is False
+
+        async with database_pool.acquire() as connection:
+            rows = await connection.fetch(
+                "SELECT rater_role, rater_user_id, ratee_user_id, score "
+                "FROM order_ratings WHERE order_id=$1 ORDER BY rater_role",
+                order["id"],
+            )
+            aggregates = await connection.fetch(
+                "SELECT id, rating, rating_count FROM users WHERE id = ANY($1)",
+                [passenger_id, driver_id],
+            )
+        assert [(r["rater_role"], r["score"]) for r in rows] == [
+            ("DRIVER", 4), ("PASSENGER", 5)
+        ]
+        assert all(r["rater_user_id"] != r["ratee_user_id"] for r in rows)
+        by_id = {r["id"]: r for r in aggregates}
+        assert float(by_id[driver_id]["rating"]) == 5.0
+        assert by_id[driver_id]["rating_count"] == 2
+        assert float(by_id[passenger_id]["rating"]) == 4.5
+        assert by_id[passenger_id]["rating_count"] == 2
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)",
+                [passenger_id, driver_id, unrelated_id],
+            )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_order_rating_updates_aggregate_once(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "rating-race-passenger")
+        driver_id = await _create_user(connection, "rating-race-driver")
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        for new_status, old_status in (
+            ("ARRIVED", "ACCEPTED"),
+            ("IN_PROGRESS", "ARRIVED"),
+            ("COMPLETED", "IN_PROGRESS"),
+        ):
+            assert await OrderRepository.update_status(
+                order["id"], new_status, old_status,
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ) is True
+
+        results = await asyncio.gather(
+            OrderRepository.submit_rating(order["id"], passenger_id, "PASSENGER", 5),
+            OrderRepository.submit_rating(order["id"], passenger_id, "PASSENGER", 5),
+        )
+        assert sorted(results) == [False, True]
+        async with database_pool.acquire() as connection:
+            count = await connection.fetchval(
+                "SELECT count(*) FROM order_ratings WHERE order_id=$1 AND rater_role='PASSENGER'",
+                order["id"],
+            )
+            aggregate = await connection.fetchrow(
+                "SELECT rating, rating_count FROM users WHERE id=$1", driver_id
+            )
+        assert count == 1
+        assert float(aggregate["rating"]) == 5.0
+        assert aggregate["rating_count"] == 2
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
