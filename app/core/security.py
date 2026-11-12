@@ -71,7 +71,10 @@ async def verify_token(credentials: HTTPAuthorizationCredentials | None = Depend
         raise HTTPException(status_code=401, detail="Bearer token required",
                             headers={"WWW-Authenticate": "Bearer"})
     try:
-        payload = jwt.decode(credentials.credentials, _secret_key(), algorithms=[_ALGORITHM])
+        payload = jwt.decode(
+            credentials.credentials, _secret_key(), algorithms=[_ALGORITHM],
+            options={"require": ["exp"]},
+        )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired",
                             headers={"WWW-Authenticate": "Bearer"})
@@ -135,7 +138,10 @@ async def verify_driver_token(
         raise HTTPException(status_code=401, detail="Bearer token required",
                             headers={"WWW-Authenticate": "Bearer"})
     try:
-        payload = jwt.decode(credentials.credentials, _secret_key(), algorithms=[_ALGORITHM])
+        payload = jwt.decode(
+            credentials.credentials, _secret_key(), algorithms=[_ALGORITHM],
+            options={"require": ["exp"]},
+        )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired",
                             headers={"WWW-Authenticate": "Bearer"})
