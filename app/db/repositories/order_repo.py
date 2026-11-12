@@ -303,6 +303,9 @@ class OrderRepository:
                     return False
                 current_status = order["status"]
                 validate_transition(current_status, "CANCELLED")
+                # Apply the existing dispatch policy using the locked status, not
+                # a status fetched by the caller before this transaction began.
+                effective_fee = fee_decimal if current_status in ("ACCEPTED", "ARRIVED") else Decimal("0")
                 row = await connection.fetchrow(
                     """
                     UPDATE orders
@@ -310,7 +313,7 @@ class OrderRepository:
                     WHERE id=$3 AND status=$4
                     RETURNING id
                     """,
-                    role, fee_decimal, oid, current_status,
+                    role, effective_fee, oid, current_status,
                 )
                 if not row:
                     return False
@@ -319,7 +322,7 @@ class OrderRepository:
                     actor_user_id=uid, actor_role=role,
                     # JSON has no Decimal type; preserve the exact decimal text
                     # rather than silently rounding through binary float.
-                    metadata={"cancel_fee": format(fee_decimal, "f")},
+                    metadata={"cancel_fee": format(effective_fee, "f")},
                 )
             return True
 
