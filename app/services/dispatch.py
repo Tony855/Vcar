@@ -76,7 +76,7 @@ class DispatchService:
     @staticmethod
     async def go_online(driver_tid, lng, lat):
         await db.redis.eval(
-            _SET_DRIVER_ONLINE, 2,
+            _SET_DRIVER_ONLINE, 3,
             "driver:online", "driver:heartbeat", f"driver:presence:generation:{driver_tid}",
             float(lng), float(lat), str(driver_tid), __import__("time").time(),
         )
@@ -84,7 +84,7 @@ class DispatchService:
     @staticmethod
     async def go_offline(driver_tid):
         await db.redis.eval(
-            _SET_DRIVER_OFFLINE, 3,
+            _SET_DRIVER_OFFLINE, 4,
             "driver:online", "driver:heartbeat", "driver:location:version",
             f"driver:presence:generation:{driver_tid}", str(driver_tid),
         )
