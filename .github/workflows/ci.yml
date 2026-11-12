@@ -86,6 +86,9 @@ jobs:
           docker run --rm -v "$PWD/scripts/check_supported_os.sh:/check_supported_os.sh:ro" debian:13-slim bash /check_supported_os.sh /etc/os-release
           docker run --rm -v "$PWD/scripts/check_supported_os.sh:/check_supported_os.sh:ro" ubuntu:24.04 bash /check_supported_os.sh /etc/os-release
       - run: uv run --no-sync pytest -q
+      - name: Verify Redis process restart recovery with the original client pool
+        if: matrix.python-version == '3.13'
+        run: uv run --no-sync python scripts/test_redis_process_recovery.py
       - run: uv run --no-sync pip-audit -r requirements.txt
       - name: Verify restricted runtime database role
         run: |
