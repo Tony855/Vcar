@@ -50,7 +50,7 @@ jobs:
       - run: uv run --no-sync python -m compileall -q app migrations tests
       - run: bash -n deploy/install.sh scripts/*.sh
       - name: Validate Prometheus alert rules
-        run: docker run --rm -v "$PWD/deploy/monitoring:/etc/prometheus:ro" prom/prometheus:v3.5.0 promtool check rules /etc/prometheus/vcar-alert-rules.yml
+        run: docker run --rm --entrypoint promtool -v "$PWD/deploy/monitoring:/etc/prometheus:ro" prom/prometheus:v3.5.0 check rules /etc/prometheus/vcar-alert-rules.yml
       - run: DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar uv run --no-sync alembic upgrade head --sql
       - run: grep -v '^\\\\' app/db/schema.sql | docker run --rm -i --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1
       - run: uv run --no-sync alembic upgrade head
