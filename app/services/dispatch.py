@@ -141,7 +141,7 @@ class DispatchService:
 
             rating_score = (candidate["rating"] / 5.0) * 40.0
             scored_drivers.append({
-                "tg_id": telegram_id,
+                "tg_id": candidate["tg_id"],
                 "dist": candidate["dist"],
                 "eta_seconds": round(eta_seconds, 1) if eta_seconds is not None else None,
                 "rating": candidate["rating"],
