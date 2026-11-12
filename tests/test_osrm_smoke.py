@@ -27,7 +27,7 @@ def test_run_checks_requires_all_osrm_responses_to_be_ok(monkeypatch, capsys):
         status = 200
         def __enter__(self): return self
         def __exit__(self, *args): return False
-        def read(self): return json.dumps({"code": "Ok"}).encode()
+        def read(self): return json.dumps({"code": "Ok", "routes": [{"distance": 100, "duration": 20}]}).encode()
 
     monkeypatch.setattr(smoke_osrm.urllib.request, "urlopen", lambda *a, **k: Response())
     assert smoke_osrm.run_checks("http://osrm", {"route": "/route"}) == 0
