@@ -24,11 +24,10 @@ PRESENCE_RECONCILIATION_STATE = {
 # new as the currently projected sample. No Pub/Sub is emitted: WebSocket
 # consumers already reconcile from PostgreSQL snapshots.
 _REPAIR_DRIVER = """
-local current_generation = redis.call('GET', KEYS[4])
+-- The caller holds the PostgreSQL user row lock and has revalidated that
+-- ARGV[6] is the current durable generation. PostgreSQL is authoritative:
+-- repair must also replace a stale Redis generation left by DB restore.
 local incoming_generation = tonumber(ARGV[6])
-if current_generation and tonumber(current_generation) > incoming_generation then
-    return 0
-end
 local previous = redis.call('ZSCORE', KEYS[3], ARGV[3])
 local incoming_sample = tonumber(ARGV[4])
 if previous and tonumber(previous) > incoming_sample then
