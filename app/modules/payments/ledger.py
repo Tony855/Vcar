@@ -264,8 +264,6 @@ class WalletLedger:
             except (TypeError, ValueError) as exc:
                 raise ValueError("leg metadata must contain finite JSON values") from exc
             total += amount
-            if not -(2**63) <= total <= bigint_max:
-                raise ValueError("batch total exceeds signed 64-bit range")
             normalized.append({
                 "user_id": user_id,
                 "amount_minor": amount,
