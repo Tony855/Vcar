@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Sequence
+import math
 
 import httpx
 
@@ -37,11 +38,30 @@ class OSRMClient:
 
     @staticmethod
     def _validate_coordinate(coordinate: Coordinate) -> None:
-        if len(coordinate) != 2:
+        if not isinstance(coordinate, (tuple, list)) or len(coordinate) != 2:
             raise ValueError("Coordinates must be (longitude, latitude)")
-        lon, lat = float(coordinate[0]), float(coordinate[1])
+        lon, lat = coordinate
+        if (
+            isinstance(lon, bool) or not isinstance(lon, (int, float))
+            or isinstance(lat, bool) or not isinstance(lat, (int, float))
+            or not math.isfinite(lon) or not math.isfinite(lat)
+        ):
+            raise ValueError("Coordinates must contain finite numeric longitude and latitude")
         if not (-180 <= lon <= 180 and -90 <= lat <= 90):
             raise ValueError("Coordinate is outside valid longitude/latitude bounds")
+
+    @staticmethod
+    def _validate_indexes(indexes: Sequence[int], coordinate_count: int, field: str) -> None:
+        if not indexes:
+            raise ValueError(f"{field} must contain at least one coordinate index")
+        if any(
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < 0
+            or index >= coordinate_count
+            for index in indexes
+        ):
+            raise ValueError(f"{field} contains an invalid coordinate index")
 
     @classmethod
     def _coordinates_path(cls, coordinates: Sequence[Coordinate]) -> str:
@@ -92,8 +112,10 @@ class OSRMClient:
         path = self._coordinates_path(coordinates)
         params: dict[str, Any] = {"annotations": annotations}
         if sources is not None:
+            self._validate_indexes(sources, len(coordinates), "sources")
             params["sources"] = ";".join(str(i) for i in sources)
         if destinations is not None:
+            self._validate_indexes(destinations, len(coordinates), "destinations")
             params["destinations"] = ";".join(str(i) for i in destinations)
         return await self._get(f"table/v1/{self.profile}/{path}", params)
 
@@ -109,10 +131,23 @@ class OSRMClient:
         if timestamps is not None:
             if len(timestamps) != len(coordinates):
                 raise ValueError("Timestamp count must match coordinate count")
-            params["timestamps"] = ";".join(str(int(value)) for value in timestamps)
+            if any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+                for value in timestamps
+            ):
+                raise ValueError("Timestamps must be non-negative integers")
+            params["timestamps"] = ";".join(str(value) for value in timestamps)
         if radiuses is not None:
             if len(radiuses) != len(coordinates):
                 raise ValueError("Radius count must match coordinate count")
+            if any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+                for value in radiuses
+            ):
+                raise ValueError("Radiuses must be finite positive numbers")
             params["radiuses"] = ";".join(str(float(value)) for value in radiuses)
         return await self._get(f"match/v1/{self.profile}/{path}", params)
 
