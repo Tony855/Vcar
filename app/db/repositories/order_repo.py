@@ -293,7 +293,10 @@ class OrderRepository:
             actor_role not in {"PASSENGER", "DRIVER"}
             or not isinstance(actor_user_id, int)
             or isinstance(actor_user_id, bool)
-            or actor_user_id <= 0
+            or not 0 < actor_user_id <= 2**63 - 1
+            or not isinstance(oid, int)
+            or isinstance(oid, bool)
+            or not 0 < oid <= 2**63 - 1
             or not isinstance(score, int)
             or isinstance(score, bool)
             or not 1 <= score <= 5

@@ -877,6 +877,16 @@ async def test_order_ratings_are_authorized_idempotent_and_directional(database_
             assert await OrderRepository.submit_rating(
                 order["id"], passenger_id, "PASSENGER", invalid_score
             ) is False
+        for invalid_order_id, invalid_actor_id in (
+            (0, passenger_id),
+            (2**63, passenger_id),
+            (order["id"], 0),
+            (order["id"], 2**63),
+            (order["id"], True),
+        ):
+            assert await OrderRepository.submit_rating(
+                invalid_order_id, invalid_actor_id, "PASSENGER", 5
+            ) is False
 
         # Each participant can rate the other once; a duplicate is a no-op.
         assert await OrderRepository.submit_rating(
