@@ -47,8 +47,12 @@ async def test_presence_heartbeat_is_stamped_after_serialized_database_transacti
         assert state["transaction_finished_at"] is not None
         return True
 
+    async def capture_presence(_redis, _telegram_id):
+        return True, 1
+
     monkeypatch.setattr(locations_router.db, "pool", Pool())
     monkeypatch.setattr(locations_router.db, "redis", object())
+    monkeypatch.setattr(locations_router, "capture_driver_presence_generation", capture_presence)
     monkeypatch.setattr(locations_router, "publish_driver_location", publish)
 
     recorded_at = datetime.now(timezone.utc)
