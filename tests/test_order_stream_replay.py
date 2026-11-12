@@ -126,11 +126,13 @@ async def test_passenger_stream_replays_and_deduplicates_pubsub_overlap(monkeypa
     class PubSub:
         def __init__(self):
             self.frames = [
-                {"type": "message", "data": json.dumps({"event_id": 5, "status": "IN_PROGRESS"})},
-                {"type": "message", "data": json.dumps({"event_id": 6, "status": "ARRIVED"})},
+                {"type": "message", "data": json.dumps(["malformed", "json", "shape"])},
+                {"type": "message", "data": json.dumps({"event_id": 6, "order_id": 999, "status": "ARRIVED"})},
+                {"type": "message", "data": json.dumps({"event_id": 5, "order_id": 8, "status": "IN_PROGRESS"})},
+                {"type": "message", "data": json.dumps({"event_id": 6, "order_id": 8, "status": "ARRIVED"})},
                 # At-least-once outbox delivery may publish the same event again.
-                {"type": "message", "data": json.dumps({"event_id": 6, "status": "ARRIVED"})},
-                {"type": "message", "data": json.dumps({"event_id": 7, "status": "COMPLETED"})},
+                {"type": "message", "data": json.dumps({"event_id": 6, "order_id": 8, "status": "ARRIVED"})},
+                {"type": "message", "data": json.dumps({"event_id": 7, "order_id": 8, "status": "COMPLETED"})},
             ]
 
         async def subscribe(self, channel):
