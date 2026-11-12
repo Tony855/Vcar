@@ -1,6 +1,5 @@
 """Driver profile presence must follow the expiring heartbeat, not GEO membership."""
 import time
-from types import SimpleNamespace
 
 import jwt
 import pytest
