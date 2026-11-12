@@ -95,7 +95,7 @@ async def open_or_get_wallet(
 async def my_wallet_transactions(
     authorization: str | None = Header(default=None),
     limit: int = Query(default=50, ge=1, le=100),
-    before_id: int | None = Query(default=None, gt=0),
+    before_id: int | None = Query(default=None, gt=0, le=2**63 - 1),
 ):
     claims = _claims(authorization, {"driver", "passenger"})
     async with db.pool.acquire() as conn:
