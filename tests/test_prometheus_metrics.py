@@ -72,6 +72,17 @@ async def test_metrics_returns_outbox_and_gps_gauges(monkeypatch):
     monkeypatch.setattr(server, "settings", SimpleNamespace(metrics_bearer_token="private-token"))
     monkeypatch.setattr(server.db, "pool", Pool())
     monkeypatch.setattr(server.db, "redis", HealthyRedis())
+    from app.services.driver_presence_projection import PRESENCE_RECONCILIATION_STATE
+    for key, value in {
+        "last_success_timestamp": 1234.5,
+        "last_failure_timestamp": 1200.0,
+        "consecutive_failures": 0,
+        "last_duration_seconds": 0.125,
+        "database_fresh": 500,
+        "repaired": 498,
+        "stale_removed": 2,
+    }.items():
+        monkeypatch.setitem(PRESENCE_RECONCILIATION_STATE, key, value)
 
     response = await server.prometheus_metrics("Bearer private-token")
     body = response.body.decode()
@@ -85,6 +96,13 @@ async def test_metrics_returns_outbox_and_gps_gauges(monkeypatch):
     assert "vcar_database_pool_idle_connections 3" in body
     assert "vcar_database_pool_max_connections 10" in body
     assert "vcar_redis_available 1" in body
+    assert "vcar_driver_presence_reconciliation_last_success_timestamp 1234.500" in body
+    assert "vcar_driver_presence_reconciliation_last_failure_timestamp 1200.000" in body
+    assert "vcar_driver_presence_reconciliation_consecutive_failures 0" in body
+    assert "vcar_driver_presence_reconciliation_last_duration_seconds 0.125000" in body
+    assert "vcar_driver_presence_reconciliation_database_fresh 500" in body
+    assert "vcar_driver_presence_reconciliation_repaired 498" in body
+    assert "vcar_driver_presence_reconciliation_stale_removed 2" in body
     assert body.endswith("\n")
 
 

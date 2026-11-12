@@ -3,9 +3,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
+
+# Process-local worker telemetry. Prometheus exposes these gauges per app
+# process; they remain readable while Redis is unavailable.
+PRESENCE_RECONCILIATION_STATE = {
+    "last_success_timestamp": 0.0,
+    "last_failure_timestamp": 0.0,
+    "consecutive_failures": 0,
+    "last_duration_seconds": 0.0,
+    "database_fresh": 0,
+    "repaired": 0,
+    "stale_removed": 0,
+}
 
 # Repair a driver's projection only when PostgreSQL's GPS sample is at least as
 # new as the currently projected sample. No Pub/Sub is emitted: WebSocket
@@ -113,16 +126,30 @@ async def run_driver_presence_reconciliation_worker(
     if interval < 1:
         raise ValueError("interval must be at least one second")
     while not stop_event.is_set():
+        started = time.monotonic()
         try:
             from app.db.core import db
 
             if db.pool is not None and db.redis is not None:
                 async with db.pool.acquire() as connection:
                     result = await reconcile_driver_presence(db.redis, connection)
+                PRESENCE_RECONCILIATION_STATE.update({
+                    "last_success_timestamp": time.time(),
+                    "consecutive_failures": 0,
+                    "last_duration_seconds": time.monotonic() - started,
+                    "database_fresh": int(result["database_fresh"]),
+                    "repaired": int(result["repaired"]),
+                    "stale_removed": int(result["stale_removed"]),
+                })
                 logger.info("Driver presence Redis projection reconciled", extra=result)
         except asyncio.CancelledError:
             raise
         except Exception:
+            PRESENCE_RECONCILIATION_STATE.update({
+                "last_failure_timestamp": time.time(),
+                "consecutive_failures": PRESENCE_RECONCILIATION_STATE["consecutive_failures"] + 1,
+                "last_duration_seconds": time.monotonic() - started,
+            })
             logger.warning(
                 "Driver presence reconciliation failed; PostgreSQL remains authoritative",
                 exc_info=True,

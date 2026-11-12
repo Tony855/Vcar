@@ -17,6 +17,7 @@ sys.path.append(BASE_DIR)
 from app.core.config import settings
 from app.db.core import db
 from app.services.driver_presence import is_driver_online
+from app.services.driver_presence_projection import PRESENCE_RECONCILIATION_STATE
 from app.services.order_event_outbox import run_order_event_outbox_worker
 from app.services.driver_presence_projection import run_driver_presence_reconciliation_worker
 from app.core.security import verify_token, verify_driver_token, create_access_token, verify_password
@@ -345,6 +346,27 @@ async def prometheus_metrics(authorization: str | None = Header(default=None)):
         "# HELP vcar_redis_available Whether Redis responds to PING.",
         "# TYPE vcar_redis_available gauge",
         f"vcar_redis_available {redis_available}",
+        "# HELP vcar_driver_presence_reconciliation_last_success_timestamp Unix timestamp of the last successful PostgreSQL to Redis presence repair.",
+        "# TYPE vcar_driver_presence_reconciliation_last_success_timestamp gauge",
+        f"vcar_driver_presence_reconciliation_last_success_timestamp {PRESENCE_RECONCILIATION_STATE['last_success_timestamp']:.3f}",
+        "# HELP vcar_driver_presence_reconciliation_last_failure_timestamp Unix timestamp of the last failed presence repair.",
+        "# TYPE vcar_driver_presence_reconciliation_last_failure_timestamp gauge",
+        f"vcar_driver_presence_reconciliation_last_failure_timestamp {PRESENCE_RECONCILIATION_STATE['last_failure_timestamp']:.3f}",
+        "# HELP vcar_driver_presence_reconciliation_consecutive_failures Consecutive failed presence repair cycles.",
+        "# TYPE vcar_driver_presence_reconciliation_consecutive_failures gauge",
+        f"vcar_driver_presence_reconciliation_consecutive_failures {PRESENCE_RECONCILIATION_STATE['consecutive_failures']}",
+        "# HELP vcar_driver_presence_reconciliation_last_duration_seconds Duration of the last presence repair cycle.",
+        "# TYPE vcar_driver_presence_reconciliation_last_duration_seconds gauge",
+        f"vcar_driver_presence_reconciliation_last_duration_seconds {PRESENCE_RECONCILIATION_STATE['last_duration_seconds']:.6f}",
+        "# HELP vcar_driver_presence_reconciliation_database_fresh Fresh database driver rows in the last successful repair.",
+        "# TYPE vcar_driver_presence_reconciliation_database_fresh gauge",
+        f"vcar_driver_presence_reconciliation_database_fresh {PRESENCE_RECONCILIATION_STATE['database_fresh']}",
+        "# HELP vcar_driver_presence_reconciliation_repaired Driver projections repaired in the last successful cycle.",
+        "# TYPE vcar_driver_presence_reconciliation_repaired gauge",
+        f"vcar_driver_presence_reconciliation_repaired {PRESENCE_RECONCILIATION_STATE['repaired']}",
+        "# HELP vcar_driver_presence_reconciliation_stale_removed Stale Redis presence members removed in the last successful cycle.",
+        "# TYPE vcar_driver_presence_reconciliation_stale_removed gauge",
+        f"vcar_driver_presence_reconciliation_stale_removed {PRESENCE_RECONCILIATION_STATE['stale_removed']}",
         "",
     ])
     return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
