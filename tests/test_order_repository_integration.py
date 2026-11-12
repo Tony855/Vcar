@@ -1224,3 +1224,128 @@ async def test_cancellation_fee_preserves_exact_decimal_without_float_rounding(d
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_completed_order_settlement_posts_explicit_wallet_batch_once(database_pool):
+    """Exercise completion -> immutable snapshot -> concurrent balanced posting -> audit.
+
+    The three-way allocation below is synthetic test data supplied explicitly
+    by the test. Production fare splits and payout policy remain configurable
+    and are deliberately not inferred by the settlement service.
+    """
+    from app.modules.payments.reconciliation import reconcile_order_settlements
+    from app.modules.payments.settlement import post_explicit_allocation
+
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "settlement-e2e-passenger")
+        driver_id = await _create_user(connection, "settlement-e2e-driver")
+        platform_id = await _create_user(connection, "settlement-e2e-platform")
+        wallet_ids = await connection.fetch(
+            """
+            INSERT INTO wallet_accounts (user_id, currency, balance_minor)
+            VALUES ($1, 'USD', 0), ($2, 'USD', 0), ($3, 'USD', 0)
+            RETURNING id
+            """,
+            passenger_id, driver_id, platform_id,
+        )
+    order = await OrderRepository.create(
+        passenger_id, 104.9282, 11.5564, 104.9500, 11.5700, 5.0, 3.5
+    )
+    topup_key = f"settlement-e2e-topup-{uuid.uuid4()}"
+    settlement_key = f"settlement-e2e-{uuid.uuid4()}"
+    settlement_id = None
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        assert await OrderRepository.update_status(
+            order["id"], "ARRIVED", "ACCEPTED",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+        assert await OrderRepository.update_status(
+            order["id"], "IN_PROGRESS", "ARRIVED",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+        assert await OrderRepository.update_status(
+            order["id"], "COMPLETED", "IN_PROGRESS",
+            actor_user_id=driver_id, actor_role="DRIVER",
+        ) is True
+
+        await WalletLedger.post(
+            user_id=passenger_id, currency="USD", amount_minor=1000,
+            kind="TOPUP", idempotency_key=topup_key,
+            metadata={"source": "settlement-e2e-fixture"},
+        )
+        prepared = await OrderSettlement.prepare(
+            order_id=order["id"],
+            currency="USD",
+            policy_version="integration-explicit-v1",
+            idempotency_key=settlement_key,
+            components={"gross_fare_minor": 350},
+        )
+        settlement_id = prepared.settlement_id
+        assert prepared.status == "PREPARED"
+        assert prepared.replayed is False
+
+        # Explicit fixture allocation: passenger debit is balanced by driver
+        # and platform credits. This is not a production allocation default.
+        legs = [
+            {"user_id": passenger_id, "amount_minor": -350, "kind": "TEST_FARE"},
+            {"user_id": driver_id, "amount_minor": 300, "kind": "TEST_DRIVER_CREDIT"},
+            {"user_id": platform_id, "amount_minor": 50, "kind": "TEST_PLATFORM_CREDIT"},
+        ]
+        first, second = await asyncio.gather(
+            post_explicit_allocation(settlement_id=settlement_id, legs=legs),
+            post_explicit_allocation(settlement_id=settlement_id, legs=legs),
+        )
+        assert first.status == second.status == "POSTED"
+        assert first.ledger_batch.batch_key == second.ledger_batch.batch_key
+        assert sorted([first.replayed, second.replayed]) == [False, True]
+
+        async with database_pool.acquire() as connection:
+            persisted_status = await connection.fetchval(
+                "SELECT status FROM order_settlements WHERE id=$1", settlement_id
+            )
+            ledger_rows = await connection.fetch(
+                """
+                SELECT amount_minor, currency, order_id, metadata
+                FROM wallet_transactions
+                WHERE metadata->>'_settlement_id'=$1
+                ORDER BY metadata->>'_batch_index'
+                """,
+                str(settlement_id),
+            )
+            balances = await connection.fetch(
+                "SELECT user_id, balance_minor FROM wallet_accounts WHERE id = ANY($1)",
+                [row["id"] for row in wallet_ids],
+            )
+
+        assert persisted_status == "POSTED"
+        assert len(ledger_rows) == 3
+        assert sum(row["amount_minor"] for row in ledger_rows) == 0
+        assert all(row["currency"] == "USD" for row in ledger_rows)
+        assert all(row["order_id"] == order["id"] for row in ledger_rows)
+        assert {row["balance_minor"] for row in balances} == {650, 300, 50}
+        findings = await reconcile_order_settlements()
+        assert not [
+            item for item in findings
+            if item["settlement_id"] == settlement_id
+        ]
+    finally:
+        async with database_pool.acquire() as connection:
+            if settlement_id is not None:
+                await connection.execute(
+                    "DELETE FROM order_settlements WHERE id=$1", settlement_id
+                )
+            await connection.execute(
+                "DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)",
+                [row["id"] for row in wallet_ids],
+            )
+            await connection.execute(
+                "DELETE FROM wallet_accounts WHERE id = ANY($1)",
+                [row["id"] for row in wallet_ids],
+            )
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)",
+                [passenger_id, driver_id, platform_id],
+            )
