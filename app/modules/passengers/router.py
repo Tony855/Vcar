@@ -133,7 +133,11 @@ async def passenger_order_stream(
         await websocket.close(code=4400)
         return
     claims = await consume_ws_ticket(ticket, f"passenger-order:{order_id}")
-    if not claims or claims.get("role") != "passenger":
+    if (
+        not claims
+        or claims.get("role") != "passenger"
+        or not is_valid_telegram_subject(claims.get("sub"))
+    ):
         await websocket.close(code=4401)
         return
 
