@@ -8,10 +8,18 @@ from app.web import server
 
 class MetricsConnection:
     async def fetchval(self, query):
-        if "COUNT(*) FROM order_event_outbox" in query:
-            return 3
         if "MIN(created_at)" in query:
             return 42.5
+        if "available_at <= now()" in query:
+            return 2
+        if "lock_token IS NOT NULL" in query:
+            return 1
+        if "locked_at < now() - interval '5 minutes'" in query:
+            return 1
+        if "attempts >= 8" in query:
+            return 3
+        if "COUNT(*) FROM order_event_outbox" in query:
+            return 3
         if "COUNT(*) FROM driver_locations" in query:
             return 8
         if "LEFT JOIN driver_locations" in query:
@@ -90,6 +98,10 @@ async def test_metrics_returns_outbox_and_gps_gauges(monkeypatch):
     assert response.status_code == 200
     assert "vcar_order_event_outbox_pending 3" in body
     assert "vcar_order_event_outbox_oldest_age_seconds 42.500" in body
+    assert "vcar_order_event_outbox_ready 2" in body
+    assert "vcar_order_event_outbox_claimed 1" in body
+    assert "vcar_order_event_outbox_expired_claims 1" in body
+    assert "vcar_order_event_outbox_high_retry 3" in body
     assert "vcar_driver_locations_fresh 8" in body
     assert "vcar_driver_locations_stale 2" in body
     assert "vcar_database_pool_connections 7" in body

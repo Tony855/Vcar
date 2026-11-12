@@ -297,6 +297,31 @@ async def prometheus_metrics(authorization: str | None = Header(default=None)):
             FROM order_event_outbox WHERE delivered_at IS NULL
             """
         )
+        ready_outbox = await connection.fetchval(
+            """
+            SELECT COUNT(*) FROM order_event_outbox
+            WHERE delivered_at IS NULL AND available_at <= now()
+              AND (locked_at IS NULL OR locked_at < now() - interval '5 minutes')
+            """
+        )
+        claimed_outbox = await connection.fetchval(
+            """
+            SELECT COUNT(*) FROM order_event_outbox
+            WHERE delivered_at IS NULL AND locked_at IS NOT NULL AND lock_token IS NOT NULL
+            """
+        )
+        expired_claims_outbox = await connection.fetchval(
+            """
+            SELECT COUNT(*) FROM order_event_outbox
+            WHERE delivered_at IS NULL AND locked_at < now() - interval '5 minutes'
+            """
+        )
+        high_retry_outbox = await connection.fetchval(
+            """
+            SELECT COUNT(*) FROM order_event_outbox
+            WHERE delivered_at IS NULL AND attempts >= 8
+            """
+        )
         fresh_drivers = await connection.fetchval(
             "SELECT COUNT(*) FROM driver_locations WHERE received_at >= now() - interval '120 seconds'"
         )
@@ -328,6 +353,18 @@ async def prometheus_metrics(authorization: str | None = Header(default=None)):
         "# HELP vcar_order_event_outbox_oldest_age_seconds Age of the oldest undelivered order event.",
         "# TYPE vcar_order_event_outbox_oldest_age_seconds gauge",
         f"vcar_order_event_outbox_oldest_age_seconds {float(oldest_outbox_age or 0):.3f}",
+        "# HELP vcar_order_event_outbox_ready Events ready for immediate delivery or reclaim.",
+        "# TYPE vcar_order_event_outbox_ready gauge",
+        f"vcar_order_event_outbox_ready {int(ready_outbox or 0)}",
+        "# HELP vcar_order_event_outbox_claimed Events currently claimed by a dispatcher.",
+        "# TYPE vcar_order_event_outbox_claimed gauge",
+        f"vcar_order_event_outbox_claimed {int(claimed_outbox or 0)}",
+        "# HELP vcar_order_event_outbox_expired_claims Claims older than the five-minute worker lease.",
+        "# TYPE vcar_order_event_outbox_expired_claims gauge",
+        f"vcar_order_event_outbox_expired_claims {int(expired_claims_outbox or 0)}",
+        "# HELP vcar_order_event_outbox_high_retry Events with at least eight delivery attempts.",
+        "# TYPE vcar_order_event_outbox_high_retry gauge",
+        f"vcar_order_event_outbox_high_retry {int(high_retry_outbox or 0)}",
         "# HELP vcar_driver_locations_fresh Approved drivers with a GPS sample received in the last 120 seconds.",
         "# TYPE vcar_driver_locations_fresh gauge",
         f"vcar_driver_locations_fresh {int(fresh_drivers or 0)}",

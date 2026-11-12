@@ -148,3 +148,69 @@ async def test_outbox_worker_uses_claim_token_to_fence_stale_acknowledgement():
     assert delivered == 0
     repository.mark_status_event_delivered.assert_awaited_once_with(12, "stale-worker-token")
     repository.retry_status_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_retries_malformed_payload_and_continues_batch():
+    events = [
+        {
+            "id": 20,
+            "lock_token": "claim-token-20",
+            "event_id": 60,
+            "order_id": 20,
+            "payload": "{malformed-json",
+        },
+        {
+            "id": 21,
+            "lock_token": "claim-token-21",
+            "event_id": 61,
+            "order_id": 21,
+            "payload": {"status": "COMPLETED"},
+        },
+    ]
+    repository = type("Repository", (), {})()
+    repository.claim_status_events = AsyncMock(return_value=events)
+    repository.mark_status_event_delivered = AsyncMock(return_value=True)
+    repository.retry_status_event = AsyncMock(return_value=True)
+    redis_client = type("Redis", (), {})()
+    redis_client.publish = AsyncMock(return_value=1)
+
+    delivered = await dispatch_order_event_batch(redis_client, repository)
+
+    assert delivered == 1
+    redis_client.publish.assert_awaited_once()
+    assert redis_client.publish.await_args.args[0] == "order:status:21"
+    repository.retry_status_event.assert_awaited_once()
+    outbox_id, lock_token, error = repository.retry_status_event.await_args.args
+    assert (outbox_id, lock_token) == (20, "claim-token-20")
+    assert isinstance(error, ValueError)
+    repository.mark_status_event_delivered.assert_awaited_once_with(
+        21, "claim-token-21"
+    )
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_continues_when_retry_schedule_itself_fails():
+    event = {
+        "id": 22,
+        "lock_token": "claim-token-22",
+        "event_id": 62,
+        "order_id": 22,
+        "payload": {"status": "ACCEPTED"},
+    }
+    repository = type("Repository", (), {})()
+    repository.claim_status_events = AsyncMock(return_value=[event])
+    repository.mark_status_event_delivered = AsyncMock()
+    repository.retry_status_event = AsyncMock(
+        side_effect=ConnectionError("database unavailable")
+    )
+    redis_client = type("Redis", (), {})()
+    redis_client.publish = AsyncMock(side_effect=ConnectionError("Redis unavailable"))
+
+    assert await dispatch_order_event_batch(redis_client, repository) == 0
+    repository.retry_status_event.assert_awaited_once()
+    outbox_id, lock_token, error = repository.retry_status_event.await_args.args
+    assert outbox_id == 22
+    assert lock_token == "claim-token-22"
+    assert isinstance(error, ConnectionError)
+    repository.mark_status_event_delivered.assert_not_awaited()
