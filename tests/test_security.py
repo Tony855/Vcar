@@ -106,3 +106,20 @@ async def test_driver_token_rejects_admin_role(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await verify_driver_token(credentials)
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subject", ["", "admin", "0", "-1", "１２３", "9" * 20])
+async def test_driver_token_rejects_non_telegram_or_out_of_range_subject(monkeypatch, subject):
+    import jwt
+    import time
+    monkeypatch.setenv("SECRET_KEY", "d" * 48)
+    token = jwt.encode(
+        {"sub": subject, "role": "driver", "exp": int(time.time()) + 300},
+        "d" * 48,
+        algorithm="HS256",
+    )
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    with pytest.raises(HTTPException) as exc:
+        await verify_driver_token(credentials)
+    assert exc.value.status_code == 403
