@@ -59,7 +59,7 @@ jobs:
       - name: Rehearse full PostGIS backup and restore
         if: matrix.python-version == '3.13'
         run: |
-          RESTORE_DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar_restore
+          export RESTORE_DATABASE_URL=postgresql://vcar:test@127.0.0.1:5432/vcar_restore
           docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE vcar_restore"
           mkdir -p /tmp/vcar-restore-rehearsal
           docker run --rm --network host -v /tmp/vcar-restore-rehearsal:/backup postgis/postgis:16-3.7 pg_dump --format=custom --no-owner --no-acl --file=/backup/vcar.dump "$DATABASE_URL"
