@@ -181,3 +181,31 @@ async def test_wallet_ledger_accepts_minimum_signed_bigint_amount_before_databas
             kind="ADJUSTMENT",
             idempotency_key="validation-min-signed-bigint",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kwargs,error", [
+    ({"currency": "USD", "legs": [], "idempotency_key": "batch-validation"}, "legs"),
+    ({"currency": "USD", "legs": [{"user_id": 1, "amount_minor": -1, "kind": "OUT"}], "idempotency_key": "batch-validation"}, "legs"),
+    ({"currency": "USD", "legs": [{"user_id": 1, "amount_minor": -1, "kind": "OUT"}, {"user_id": 2, "amount_minor": 2, "kind": "IN"}], "idempotency_key": "batch-validation"}, "sum to zero"),
+    ({"currency": "USD", "legs": [{"user_id": 1, "amount_minor": -1, "kind": "OUT"}, {"user_id": 1, "amount_minor": 1, "kind": "IN"}], "idempotency_key": "batch-validation"}, "only once"),
+    ({"currency": "USD", "legs": [{"user_id": 1, "amount_minor": 0, "kind": "OUT"}, {"user_id": 2, "amount_minor": 0, "kind": "IN"}], "idempotency_key": "batch-validation"}, "non-zero"),
+    ({"currency": "USD", "legs": [{"user_id": 1, "amount_minor": -1, "kind": "OUT"}, {"user_id": 2, "amount_minor": 1, "kind": "IN"}], "idempotency_key": "batch-validation", "order_id": True}, "order_id"),
+])
+async def test_balanced_batch_rejects_invalid_contract_before_database(monkeypatch, kwargs, error):
+    monkeypatch.setattr(ledger.db, "pool", None)
+    with pytest.raises(ValueError, match=error):
+        await ledger.WalletLedger.post_balanced_batch(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_balanced_batch_rejects_non_finite_metadata_before_database(monkeypatch):
+    monkeypatch.setattr(ledger.db, "pool", None)
+    with pytest.raises(ValueError, match="finite JSON"):
+        await ledger.WalletLedger.post_balanced_batch(
+            currency="USD", idempotency_key="batch-validation-metadata",
+            legs=[
+                {"user_id": 1, "amount_minor": -10, "kind": "OUT", "metadata": {"v": float("nan")}},
+                {"user_id": 2, "amount_minor": 10, "kind": "IN"},
+            ],
+        )
