@@ -277,3 +277,24 @@ def test_wallet_user_endpoints_reject_invalid_token_subjects(wallet_client, subj
     )
     assert response.status_code == 403
     assert connection.fetchval_calls == []
+
+
+@pytest.mark.parametrize("before_id", [0, -1, 2**63, -(2**63)])
+def test_wallet_transaction_cursor_rejects_out_of_range_ids(wallet_client, before_id):
+    client, connection, token = wallet_client
+    response = client.get(
+        f"/api/v1/wallet/me/transactions?before_id={before_id}",
+        headers={"Authorization": f"Bearer {token()}"},
+    )
+    assert response.status_code == 422
+    assert connection.fetch_calls == []
+
+
+def test_wallet_transaction_cursor_accepts_maximum_signed_bigint(wallet_client):
+    client, connection, token = wallet_client
+    response = client.get(
+        f"/api/v1/wallet/me/transactions?before_id={2**63 - 1}",
+        headers={"Authorization": f"Bearer {token()}"},
+    )
+    assert response.status_code == 200
+    assert connection.fetch_calls[0][1] == (7003003, 2**63 - 1, 50)
