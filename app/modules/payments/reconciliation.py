@@ -84,7 +84,13 @@ async def reconcile_order_settlements() -> list[dict]:
                 COUNT(*) FILTER (
                     WHERE t.id IS NOT NULL
                       AND t.metadata->>'_policy_version' IS DISTINCT FROM s.policy_version
-                )::bigint AS policy_mismatch_count
+                )::bigint AS policy_mismatch_count,
+                COUNT(*) FILTER (
+                    WHERE t.id IS NOT NULL
+                      AND t.idempotency_key IS DISTINCT FROM (
+                          'settlement:' || s.id::text || ':' || (t.metadata->>'_batch_index')
+                      )
+                )::bigint AS idempotency_key_mismatch_count
             FROM order_settlements AS s
             LEFT JOIN wallet_transactions AS t
               ON t.metadata->>'_settlement_id' = s.id::text
@@ -156,6 +162,7 @@ async def reconcile_order_settlements() -> list[dict]:
                 and int(row["order_mismatch_count"]) == 0
                 and int(row["batch_key_mismatch_count"]) == 0
                 and int(row["policy_mismatch_count"]) == 0
+                and int(row["idempotency_key_mismatch_count"]) == 0
             )
             if not complete_batch:
                 finding = "INCONSISTENT_LEDGER_BATCH"

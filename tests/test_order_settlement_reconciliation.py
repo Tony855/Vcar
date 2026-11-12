@@ -56,6 +56,7 @@ def audit_row(**overrides):
         "order_mismatch_count": 0,
         "batch_key_mismatch_count": 0,
         "policy_mismatch_count": 0,
+        "idempotency_key_mismatch_count": 0,
     }
     row.update(overrides)
     return row
@@ -168,3 +169,17 @@ async def test_settlement_audit_flags_ledger_rows_without_snapshot(monkeypatch):
         "order_count": 1,
         "batch_keys": ["settlement:9999"],
     }
+
+
+@pytest.mark.asyncio
+async def test_settlement_audit_flags_deterministic_idempotency_key_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        reconciliation.db,
+        "pool",
+        Pool([audit_row(idempotency_key_mismatch_count=1)]),
+    )
+
+    findings = await reconciliation.reconcile_order_settlements()
+
+    assert len(findings) == 1
+    assert findings[0]["finding"] == "INCONSISTENT_LEDGER_BATCH"
