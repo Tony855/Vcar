@@ -283,19 +283,7 @@ async def rate_driver_to_pax(call: CallbackQuery):
     if not await OrderRepository.submit_rating(oid, user['id'], 'DRIVER', score):
         return await call.answer("无权评价、订单未完成或该订单已评价", show_alert=True)
 
-    order = await OrderRepository.get(oid)
-    if order:
-        async with db.pool.acquire() as c:
-            exists = await c.fetchval(
-                "SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2",
-                oid, order['driver_id'],
-            )
-            if not exists:
-                await c.execute(
-                    "INSERT INTO reviews (order_id, driver_id, passenger_id, rating) VALUES ($1, $2, $3, $4)",
-                    oid, order['driver_id'], order['customer_id'], score,
-                )
-        await call.message.edit_text(t("driver.rated_pax", user, score=score))
+    await call.message.edit_text(t("driver.rated_pax", user, score=score))
     await call.answer()
 
 @router.message(F.text | F.voice | F.photo)
