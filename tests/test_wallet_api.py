@@ -349,3 +349,18 @@ def test_wallet_transaction_history_rejects_unsupported_currency(wallet_client):
     )
     assert response.status_code == 422
     assert connection.fetch_calls == []
+
+
+def test_wallet_api_rejects_token_without_exp(wallet_client):
+    client, connection, _ = wallet_client
+    token_without_exp = jwt.encode(
+        {"sub": "7003003", "role": "passenger"},
+        wallet_router.settings.secret_key,
+        algorithm="HS256",
+    )
+    response = client.get(
+        "/api/v1/wallet/me",
+        headers={"Authorization": f"Bearer {token_without_exp}"},
+    )
+    assert response.status_code == 401
+    assert connection.fetch_calls == []
