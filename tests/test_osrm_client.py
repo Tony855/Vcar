@@ -55,3 +55,42 @@ async def test_osrm_error_code_becomes_routing_error():
     client = OSRMClient(base_url="http://osrm", transport=httpx.MockTransport(handler))
     with pytest.raises(RoutingError):
         await client.route([(104.9, 11.5), (104.95, 11.55)])
+
+
+@pytest.mark.parametrize(
+    "coordinate",
+    [
+        (True, 11.5),
+        (104.9, False),
+        ("104.9", 11.5),
+        (float("nan"), 11.5),
+        (float("inf"), 11.5),
+    ],
+)
+def test_rejects_boolean_string_and_non_finite_coordinates(coordinate):
+    with pytest.raises(ValueError):
+        OSRMClient._coordinates_path([coordinate, (104.95, 11.55)])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timestamps", [[1, True], [1, 2.5], [-1, 2]])
+async def test_match_rejects_invalid_timestamps(timestamps):
+    client = OSRMClient(base_url="http://osrm")
+    with pytest.raises(ValueError, match="Timestamps"):
+        await client.match([(104.9, 11.5), (104.95, 11.55)], timestamps=timestamps)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("radiuses", [[1.0, True], [1.0, float("inf")], [1.0, 0]])
+async def test_match_rejects_invalid_radiuses(radiuses):
+    client = OSRMClient(base_url="http://osrm")
+    with pytest.raises(ValueError, match="Radiuses"):
+        await client.match([(104.9, 11.5), (104.95, 11.55)], radiuses=radiuses)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("indexes", [[0, True], [0, 2], [-1, 1], []])
+async def test_table_rejects_invalid_coordinate_indexes(indexes):
+    client = OSRMClient(base_url="http://osrm")
+    with pytest.raises(ValueError):
+        await client.table([(104.9, 11.5), (104.95, 11.55)], sources=indexes)
