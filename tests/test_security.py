@@ -1,4 +1,5 @@
 import pytest
+import jwt
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
