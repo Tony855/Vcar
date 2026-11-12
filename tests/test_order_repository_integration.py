@@ -1370,3 +1370,53 @@ async def test_completed_order_settlement_posts_explicit_wallet_batch_once(datab
                 "DELETE FROM users WHERE id = ANY($1)",
                 [passenger_id, driver_id, platform_id],
             )
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_order_transition_emits_one_outbox_event(database_pool):
+    """Only one concurrent caller may advance a status and append its event."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "duplicate-transition-passenger")
+        driver_id = await _create_user(connection, "duplicate-transition-driver")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+
+        outcomes = await asyncio.gather(
+            OrderRepository.update_status(
+                order["id"], "ARRIVED", "ACCEPTED",
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ),
+            OrderRepository.update_status(
+                order["id"], "ARRIVED", "ACCEPTED",
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ),
+        )
+        assert sorted(outcomes) == [False, True]
+
+        async with database_pool.acquire() as connection:
+            row = await connection.fetchrow(
+                "SELECT status FROM orders WHERE id=$1", order["id"]
+            )
+            events = await connection.fetch(
+                """
+                SELECT from_status, to_status, actor_user_id, actor_role
+                FROM order_events
+                WHERE order_id=$1 AND to_status='ARRIVED'
+                """,
+                order["id"],
+            )
+        assert row["status"] == "ARRIVED"
+        assert len(events) == 1
+        assert events[0]["from_status"] == "ACCEPTED"
+        assert events[0]["actor_user_id"] == driver_id
+        assert events[0]["actor_role"] == "DRIVER"
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)",
+                [passenger_id, driver_id],
+            )
