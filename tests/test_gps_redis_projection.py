@@ -182,6 +182,27 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
         assert await redis.zscore("driver:heartbeat", telegram_id) is None
         assert await redis.zscore("driver:location:version", telegram_id) is None
         assert await redis.geopos("driver:online", telegram_id) == [None]
+
+        # A delayed online command from generation 1 cannot undo generation 2 offline.
+        stale_online = await redis.eval(
+            _SET_DRIVER_ONLINE, 3,
+            "driver:online", "driver:heartbeat", generation_key,
+            104.9282, 11.5564, telegram_id, 1794460000.0, online_generation,
+        )
+        assert stale_online == 0
+        assert await redis.geopos("driver:online", telegram_id) == [None]
+
+        # A delayed offline command from generation 2 cannot undo a later generation 3 online.
+        await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
+        current_generation = int(await redis.get(generation_key))
+        stale_offline = await redis.eval(
+            _SET_DRIVER_OFFLINE, 4,
+            "driver:online", "driver:heartbeat", "driver:location:version",
+            generation_key, telegram_id, offline_generation,
+        )
+        assert stale_offline == 0
+        assert int(await redis.get(generation_key)) == current_generation
+        assert await redis.zscore("driver:heartbeat", telegram_id) is not None
     finally:
         await redis.zrem("driver:heartbeat", telegram_id)
         await redis.zrem("driver:location:version", telegram_id)
