@@ -24,7 +24,17 @@ jobs:
     env:
       PYTHONPATH: .
       DATABASE_URL: postgresql://vcar:test@127.0.0.1:5432/vcar
+      REDIS_URL: redis://127.0.0.1:6379/15
     services:
+      redis:
+        image: redis:8.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
       postgres:
         image: postgis/postgis:16-3.7
         env:
@@ -69,6 +79,10 @@ jobs:
           docker run --rm --network host -v /tmp/vcar-restore-rehearsal:/backup postgis/postgis:16-3.7 pg_restore --exit-on-error --single-transaction --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL" /backup/vcar.dump
           test "$(docker run --rm --network host postgis/postgis:16-3.7 psql "$RESTORE_DATABASE_URL" -Atc "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('driver_locations','trip_tracks','wallet_accounts','wallet_transactions')) = 4 AND EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis')")" = "t"
           test "$(docker run --rm --network host postgis/postgis:16-3.7 psql "$RESTORE_DATABASE_URL" -Atc "SELECT count(*) FROM public.restore_rehearsal_sentinel WHERE marker='vcar-ci-restore-checkpoint'")" = "1"
+      - name: Verify supported installer operating systems in containers
+        run: |
+          docker run --rm -v "$PWD/scripts/check_supported_os.sh:/check_supported_os.sh:ro" debian:13-slim bash /check_supported_os.sh /etc/os-release
+          docker run --rm -v "$PWD/scripts/check_supported_os.sh:/check_supported_os.sh:ro" ubuntu:24.04 bash /check_supported_os.sh /etc/os-release
       - run: uv run --no-sync pytest -q
       - run: uv run --no-sync pip-audit -r requirements.txt
       - name: Verify restricted runtime database role
