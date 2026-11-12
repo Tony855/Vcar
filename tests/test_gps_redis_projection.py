@@ -276,7 +276,7 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
     from redis.asyncio import Redis
 
     from app.db.core import db
-    from app.services.dispatch import DispatchService
+    from app.services.dispatch import DispatchService, _SET_DRIVER_ONLINE, _SET_DRIVER_OFFLINE
 
     import asyncpg
 
@@ -320,11 +320,32 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
         assert await redis.zscore("driver:heartbeat", telegram_id) is None
         assert await redis.zscore("driver:location:version", telegram_id) is None
         assert await redis.geopos("driver:online", telegram_id) == [None]
+
+        stale_online = await redis.eval(
+            _SET_DRIVER_ONLINE, 3,
+            "driver:online", "driver:heartbeat", generation_key,
+            104.9282, 11.5564, telegram_id, 1794460000.0, online_generation,
+        )
+        assert stale_online == 0
+        assert await redis.geopos("driver:online", telegram_id) == [None]
+
+        await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
+        current_generation = int(await redis.get(generation_key))
+        stale_offline = await redis.eval(
+            _SET_DRIVER_OFFLINE, 4,
+            "driver:online", "driver:heartbeat", "driver:location:version",
+            generation_key, telegram_id, offline_generation,
+        )
+        assert stale_offline == 0
+        assert int(await redis.get(generation_key)) == current_generation
+        assert await redis.zscore("driver:heartbeat", telegram_id) is not None
     finally:
         await redis.zrem("driver:heartbeat", telegram_id)
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.delete(f"driver:presence:generation:{telegram_id}")
+        await pool.execute("DELETE FROM users WHERE telegram_id=$1", int(telegram_id))
+        await pool.close()
         await redis.aclose()
 
 
