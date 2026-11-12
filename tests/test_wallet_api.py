@@ -167,3 +167,67 @@ def test_admin_wallet_adjustment_records_admin_identity_through_http(wallet_clie
     assert response.json()["transaction_id"] == 27
     assert captured["metadata"]["admin_subject"] == "admin-9"
     assert captured["metadata"]["reason"] == "Approved support correction"
+
+
+@pytest.mark.parametrize("user_id", [True, False, "41", 0, -1])
+def test_admin_wallet_adjustment_rejects_non_positive_or_coerced_user_ids(wallet_client, user_id):
+    client, _, token = wallet_client
+    response = client.post(
+        "/api/v1/wallet/admin/adjust",
+        headers={"Authorization": f"Bearer {token('admin')}"},
+        json={
+            "user_id": user_id,
+            "currency": "USD",
+            "amount_minor": 500,
+            "reason": "Approved support correction",
+            "idempotency_key": "admin-adjustment-http-invalid",
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("reason", "        "),
+    ("idempotency_key", "            "),
+])
+def test_admin_wallet_adjustment_rejects_blank_audit_fields(wallet_client, field, value):
+    client, _, token = wallet_client
+    payload = {
+        "user_id": 41,
+        "currency": "USD",
+        "amount_minor": 500,
+        "reason": "Approved support correction",
+        "idempotency_key": "admin-adjustment-http-valid",
+    }
+    payload[field] = value
+    response = client.post(
+        "/api/v1/wallet/admin/adjust",
+        headers={"Authorization": f"Bearer {token('admin')}"},
+        json=payload,
+    )
+    assert response.status_code == 422
+
+
+def test_admin_wallet_adjustment_normalizes_audit_fields(wallet_client, monkeypatch):
+    client, _, token = wallet_client
+    captured = {}
+
+    async def fake_post(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(transaction_id=28, wallet_id=7, balance_minor=1500, replayed=False)
+
+    monkeypatch.setattr(wallet_router.WalletLedger, "post", fake_post)
+    response = client.post(
+        "/api/v1/wallet/admin/adjust",
+        headers={"Authorization": f"Bearer {token('admin')}"},
+        json={
+            "user_id": 41,
+            "currency": "USD",
+            "amount_minor": 500,
+            "reason": "  Approved support correction  ",
+            "idempotency_key": "  admin-adjustment-http-0028  ",
+        },
+    )
+    assert response.status_code == 200
+    assert captured["metadata"]["reason"] == "Approved support correction"
+    assert captured["idempotency_key"] == "admin-adjustment-http-0028"
