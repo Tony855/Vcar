@@ -94,3 +94,9 @@ def test_validate_payload_rejects_invalid_nearest_coordinate():
     assert not smoke_osrm.validate_payload(
         "nearest", {"code": "Ok", "waypoints": [{"location": [float("nan"), 11.5]}]}
     )
+
+
+def test_validate_payload_rejects_boolean_match_distance():
+    assert not smoke_osrm.validate_payload(
+        "match", {"code": "Ok", "matchings": [{"distance": True}], "tracepoints": [{}, {}]}
+    )
