@@ -16,6 +16,7 @@ sys.path.append(BASE_DIR)
 
 from app.core.config import settings
 from app.db.core import db
+from app.services.driver_presence import is_driver_online
 from app.services.order_event_outbox import run_order_event_outbox_worker
 from app.core.security import verify_token, verify_driver_token, create_access_token, verify_password
 from app.modules.routing.router import router as routing_router
@@ -176,12 +177,7 @@ async def get_driver_profile(tg_id: int, claims: dict = Depends(verify_driver_to
         order_stats = await c.fetchrow("SELECT COUNT(*) as total_orders, COALESCE(SUM(price_estimate), 0) as total_income FROM orders WHERE driver_id=$1 AND status='COMPLETED'", driver['id'])
         
         # 🌟 新增：去 Redis 里查他是不是真的在线
-        heartbeat_at = await db.redis.zscore("driver:heartbeat", str(tg_id))
-        now = __import__("time").time()
-        is_online = (
-            heartbeat_at is not None
-            and 0 <= now - float(heartbeat_at) <= 120
-        )
+        is_online = await is_driver_online(db.redis, tg_id)
         real_status = "在线" if is_online else "离线"
         
         return {

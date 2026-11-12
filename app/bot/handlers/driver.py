@@ -12,6 +12,7 @@ from app.services.pricing import PricingService
 from app.core.enums import DriverStatus, OrderStatus
 from app.core.i18n import translator
 from app.db.core import db
+from app.services.driver_presence import is_driver_online
 import logging
 import io
 
@@ -42,8 +43,8 @@ async def send_drv_menu(msg: Message, user):
         [InlineKeyboardButton(text=t('menu.orders', user), callback_data='menu:orders'), InlineKeyboardButton(text=t('menu.lang', user), callback_data='menu:lang')]
     ]
     # 获取司机当前的真实在线状态
-    is_online = await db.redis.geopos('driver:online', str(msg.from_user.id))
-    if is_online and len(is_online) > 0 and is_online[0] and is_online[0][0] is not None:
+    is_online = await is_driver_online(db.redis, msg.from_user.id)
+    if is_online:
         status_str = t('driver.status_online', user)
     else:
         status_str = t('driver.status_offline', user)
@@ -133,8 +134,8 @@ async def cb_menu(call: CallbackQuery, state: FSMContext):
     status = user.get('driver_status')
     if status == DriverStatus.PENDING.value: return await call.message.answer(t('driver.status_pending', user))
     if status == DriverStatus.APPROVED.value:
-        is_online = await db.redis.geopos('driver:online', str(call.from_user.id))
-        if is_online and len(is_online) > 0 and is_online[0] and is_online[0][0] is not None:
+        is_online = await is_driver_online(db.redis, call.from_user.id)
+        if is_online:
             return await call.message.answer(t('driver.already_online', user))
         await state.set_state(DrvStates.location)
         return await call.message.answer(t('driver.prompt_location', user))
