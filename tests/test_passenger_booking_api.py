@@ -65,10 +65,8 @@ def api_client(monkeypatch):
         secret,
         algorithm="HS256",
     )
-    with TestClient(app) as client:
-        # Avoid application startup DB initialization; TestClient enters the
-        # lifespan, so override it by using the client without a context below.
-        pass
+    # Do not enter TestClient's context manager: that would start the real
+    # application lifespan and initialize/close external services.
     client = TestClient(app)
     return client, connection, token
 
