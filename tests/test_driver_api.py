@@ -28,6 +28,15 @@ class FakeConnection:
         self.fetchval_calls = []
         self.execute_calls = []
 
+    def transaction(self):
+        class Transaction:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+        return Transaction()
+
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query, args))
         if "SELECT id FROM users" in query or "SELECT driver_status FROM users" in query:
