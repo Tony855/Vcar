@@ -23,8 +23,18 @@ def _claims(authorization: str | None, allowed_roles: set[str]) -> dict:
         claims = jwt.decode(authorization[7:], settings.secret_key, algorithms=["HS256"])
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
-    if claims.get("role") not in allowed_roles or not claims.get("sub"):
+    role = claims.get("role")
+    subject = claims.get("sub")
+    if role not in allowed_roles or not subject:
         raise HTTPException(status_code=403, detail="Wallet permission denied")
+    if role in {"driver", "passenger"}:
+        if (
+            not isinstance(subject, str)
+            or not subject.isascii()
+            or not subject.isdecimal()
+            or not 0 < int(subject) <= 2**63 - 1
+        ):
+            raise HTTPException(status_code=403, detail="Wallet account identity is invalid")
     return claims
 
 
@@ -33,9 +43,9 @@ class WalletOpenRequest(BaseModel):
 
 
 class AdminAdjustment(BaseModel):
-    user_id: int = Field(strict=True, gt=0)
+    user_id: int = Field(strict=True, gt=0, le=2**63 - 1)
     currency: str = Field(pattern="^(USD|KHR)$")
-    amount_minor: int = Field(strict=True)
+    amount_minor: int = Field(strict=True, ge=-(2**63), le=2**63 - 1)
     reason: str = Field(min_length=8, max_length=300)
     idempotency_key: str = Field(min_length=12, max_length=128)
 

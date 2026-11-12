@@ -231,3 +231,49 @@ def test_admin_wallet_adjustment_normalizes_audit_fields(wallet_client, monkeypa
     assert response.status_code == 200
     assert captured["metadata"]["reason"] == "Approved support correction"
     assert captured["idempotency_key"] == "admin-adjustment-http-0028"
+
+
+@pytest.mark.parametrize("user_id", [2**63, -(2**63)])
+def test_admin_wallet_adjustment_rejects_user_ids_outside_bigint(wallet_client, user_id):
+    client, _, token = wallet_client
+    response = client.post(
+        "/api/v1/wallet/admin/adjust",
+        headers={"Authorization": f"Bearer {token('admin')}"},
+        json={
+            "user_id": user_id,
+            "currency": "USD",
+            "amount_minor": 500,
+            "reason": "Approved support correction",
+            "idempotency_key": "admin-adjustment-bigint-user",
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("amount", [2**63, -(2**63) - 1])
+def test_admin_wallet_adjustment_rejects_amounts_outside_bigint(wallet_client, amount):
+    client, _, token = wallet_client
+    response = client.post(
+        "/api/v1/wallet/admin/adjust",
+        headers={"Authorization": f"Bearer {token('admin')}"},
+        json={
+            "user_id": 41,
+            "currency": "USD",
+            "amount_minor": amount,
+            "reason": "Approved support correction",
+            "idempotency_key": "admin-adjustment-bigint-amount",
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("subject", ["not-a-telegram-id", "0", "-1", "9" * 20])
+def test_wallet_user_endpoints_reject_invalid_token_subjects(wallet_client, subject):
+    client, connection, token = wallet_client
+    response = client.post(
+        "/api/v1/wallet/me",
+        headers={"Authorization": f"Bearer {token('passenger', subject)}"},
+        json={"currency": "USD"},
+    )
+    assert response.status_code == 403
+    assert connection.fetchval_calls == []
