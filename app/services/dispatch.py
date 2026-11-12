@@ -23,6 +23,19 @@ end
 return removed
 """
 
+_SET_DRIVER_ONLINE = """
+redis.call('GEOADD', KEYS[1], ARGV[1], ARGV[2], ARGV[3])
+redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3])
+return 1
+"""
+
+_SET_DRIVER_OFFLINE = """
+redis.call('ZREM', KEYS[1], ARGV[1])
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('ZREM', KEYS[3], ARGV[1])
+return 1
+"""
+
 
 class DispatchService:
     @staticmethod
@@ -56,14 +69,19 @@ class DispatchService:
 
     @staticmethod
     async def go_online(driver_tid, lng, lat):
-        await db.redis.geoadd("driver:online", (float(lng), float(lat), str(driver_tid)))
-        await db.redis.zadd("driver:heartbeat", {str(driver_tid): __import__("time").time()})
+        await db.redis.eval(
+            _SET_DRIVER_ONLINE, 2,
+            "driver:online", "driver:heartbeat",
+            float(lng), float(lat), str(driver_tid), __import__("time").time(),
+        )
 
     @staticmethod
     async def go_offline(driver_tid):
-        await db.redis.zrem("driver:online", str(driver_tid))
-        await db.redis.zrem("driver:heartbeat", str(driver_tid))
-        await db.redis.zrem("driver:location:version", str(driver_tid))
+        await db.redis.eval(
+            _SET_DRIVER_OFFLINE, 3,
+            "driver:online", "driver:heartbeat", "driver:location:version",
+            str(driver_tid),
+        )
 
     @classmethod
     async def smart_dispatch(cls, pickup_lng, pickup_lat, top_n=3):
