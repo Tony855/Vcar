@@ -194,3 +194,17 @@ Use `bash scripts/run_staging_load_profiles.sh` to execute the 50, 100, 250 and 
 ### Backup freshness and failure telemetry
 
 The backup script can publish node_exporter textfile metrics when `VCAR_BACKUP_METRICS_FILE` points to a file inside the configured textfile collector directory. It atomically writes `vcar_backup_last_success_timestamp_seconds` and `vcar_backup_last_run_success`; a failed run sets the latter to 0 while preserving the last verified backup timestamp. Prometheus rules alert when a backup run fails or the last verified backup is older than 24 hours. Configure the environment variable in the scheduled backup job, ensure node_exporter reads the containing directory, and verify the textfile is readable by the exporter. CI tests success/failure metric behavior and evaluates both alert rules; actual scheduled-job and Alertmanager delivery still require staging setup.
+
+### Multi-currency wallet rollback gate
+
+Migration `20261112_0007_multi_currency_wallets` changes wallet uniqueness from one wallet per user to one wallet per user and currency. Its downgrade intentionally fails when a user has multiple currency wallets because restoring the former `UNIQUE(user_id)` constraint would be unsafe. Before any downgrade across this revision, run this query on a database copy and the target:
+
+```sql
+SELECT user_id, count(*) AS wallet_count,
+       array_agg(currency ORDER BY currency) AS currencies
+FROM wallet_accounts
+GROUP BY user_id
+HAVING count(*) > 1;
+```
+
+Any returned row blocks direct downgrade. Do not delete wallets or ledger rows, or merge balances manually to force rollback. Prefer restoring a verified pre-upgrade backup during an approved maintenance window. If post-upgrade financial activity exists, keep the current schema and ship a forward fix/new migration instead. An empty result is not sufficient by itself: rehearse downgrade/upgrade on a disposable copy and reconcile wallet balances and ledger rows before approval.
