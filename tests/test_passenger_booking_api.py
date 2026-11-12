@@ -4,7 +4,11 @@ These tests exercise FastAPI routing, request validation, bearer authentication,
 and the API-to-service boundary without claiming to replace the PostgreSQL
 repository integration suite.
 """
+import hashlib
+import hmac
+import json
 import time
+from urllib.parse import urlencode
 from types import SimpleNamespace
 
 import jwt
@@ -25,6 +29,11 @@ class FakeConnection:
         self.order = order
         self.fetchval_calls = []
         self.fetchrow_calls = []
+        self.execute_calls = []
+
+    async def execute(self, query, *args):
+        self.execute_calls.append((query, args))
+        return "INSERT 0 1"
 
     async def fetchval(self, query, *args):
         self.fetchval_calls.append((query, args))
@@ -57,7 +66,11 @@ class FakePool:
 @pytest.fixture
 def api_client(monkeypatch):
     secret = "passenger-api-test-secret-" + "x" * 40
-    monkeypatch.setattr(passenger_router, "settings", SimpleNamespace(secret_key=secret))
+    monkeypatch.setattr(
+        passenger_router, "settings",
+        SimpleNamespace(secret_key=secret, passenger_bot_token="passenger-test-bot-token"),
+    )
+    monkeypatch.setenv("SECRET_KEY", secret)
     connection = FakeConnection()
     monkeypatch.setattr(db, "pool", FakePool(connection))
     token = jwt.encode(
@@ -183,3 +196,49 @@ def test_booking_api_returns_service_unavailable_when_route_quote_fails(api_clie
     assert response.json()["detail"] == "Unable to calculate a safe route quote"
     assert create_calls == []
     assert connection.fetchval_calls
+
+
+def _telegram_init_data(bot_token, user):
+    values = {
+        "auth_date": str(int(time.time())),
+        "user": json.dumps(user, separators=(",", ":")),
+    }
+    check_string = "\n".join(f"{key}={values[key]}" for key in sorted(values))
+    secret_key = hmac.new(bot_token.encode(), b"WebAppData", hashlib.sha256).digest()
+    values["hash"] = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+    return urlencode(values)
+
+
+def test_passenger_session_validates_telegram_signature_and_creates_session(api_client):
+    client, connection, _ = api_client
+    bot_token = "passenger-test-bot-token"
+    init_data = _telegram_init_data(
+        bot_token,
+        {"id": 7001001, "first_name": "Test Passenger", "username": "passenger", "language_code": "en"},
+    )
+
+    response = client.post("/api/passenger/session", json={"init_data": init_data})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tg_id"] == 7001001
+    assert payload["expires_in"] == 1800
+    claims = jwt.decode(payload["token"], passenger_router.settings.secret_key, algorithms=["HS256"])
+    assert claims["sub"] == "7001001"
+    assert claims["role"] == "passenger"
+    assert len(connection.execute_calls) == 1
+    assert connection.execute_calls[0][1][0] == 7001001
+
+
+def test_passenger_session_rejects_tampered_telegram_init_data(api_client):
+    client, connection, _ = api_client
+    init_data = _telegram_init_data(
+        "passenger-test-bot-token",
+        {"id": 7001001, "first_name": "Test Passenger"},
+    )
+    tampered = init_data.replace("7001001", "7001002")
+
+    response = client.post("/api/passenger/session", json={"init_data": tampered})
+
+    assert response.status_code == 401
+    assert connection.execute_calls == []
