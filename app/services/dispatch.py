@@ -7,15 +7,20 @@ from app.infrastructure.osrm.client import OSRMClient, RoutingError
 
 # Remove an expired driver only if its heartbeat is still at or before the
 # cutoff observed by this dispatch pass. A concurrent GPS publish must win.
-_REMOVE_EXPIRED_DRIVER = """
-local heartbeat = redis.call('ZSCORE', KEYS[1], ARGV[1])
-if not heartbeat or tonumber(heartbeat) <= tonumber(ARGV[2]) then
-    redis.call('ZREM', KEYS[1], ARGV[1])
-    redis.call('ZREM', KEYS[2], ARGV[1])
-    redis.call('ZREM', KEYS[3], ARGV[1])
-    return 1
+_REMOVE_EXPIRED_DRIVERS = """
+local cutoff = tonumber(ARGV[1])
+local removed = 0
+for index = 2, #ARGV do
+    local member = ARGV[index]
+    local heartbeat = redis.call('ZSCORE', KEYS[1], member)
+    if not heartbeat or tonumber(heartbeat) <= cutoff then
+        redis.call('ZREM', KEYS[1], member)
+        redis.call('ZREM', KEYS[2], member)
+        redis.call('ZREM', KEYS[3], member)
+        removed = removed + 1
+    end
 end
-return 0
+return removed
 """
 
 
@@ -29,12 +34,11 @@ class DispatchService:
             # Do not bulk-ZREM the scan result: a GPS heartbeat can be refreshed
             # after ZRANGEBYSCORE but before cleanup. Recheck and remove each
             # member atomically so a concurrent fresh publish is never deleted.
-            for member in expired:
-                await db.redis.eval(
-                    _REMOVE_EXPIRED_DRIVER, 3,
-                    "driver:heartbeat", "driver:online", "driver:location:version",
-                    member, cutoff,
-                )
+            await db.redis.eval(
+                _REMOVE_EXPIRED_DRIVERS, 3,
+                "driver:heartbeat", "driver:online", "driver:location:version",
+                cutoff, *expired,
+            )
         return await db.redis.geosearch(
             "driver:online",
             longitude=float(lng),
