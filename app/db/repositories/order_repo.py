@@ -1,3 +1,4 @@
+import math
 import json
 
 from app.db.core import db
@@ -237,7 +238,10 @@ class OrderRepository:
         # participant is not sufficient to claim the other participant's role.
         if role not in {"PASSENGER", "DRIVER"}:
             return False
-        if fee < 0:
+        try:
+            if not math.isfinite(float(fee)) or fee < 0:
+                return False
+        except (TypeError, ValueError, OverflowError):
             return False
 
         async with db.pool.acquire() as connection:
