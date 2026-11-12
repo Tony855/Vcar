@@ -80,7 +80,7 @@ class WalletLedger:
             not isinstance(amount_minor, int)
             or isinstance(amount_minor, bool)
             or amount_minor == 0
-            or not -bigint_max <= amount_minor <= bigint_max
+            or not -(2**63) <= amount_minor <= bigint_max
         ):
             raise ValueError("amount_minor must be a non-zero signed 64-bit integer")
         if (
