@@ -44,3 +44,79 @@ async def test_update_status_system_actor_must_not_supply_user_identity(monkeypa
     assert await OrderRepository.update_status(
         1, "ARRIVED", "ACCEPTED", actor_user_id=2, actor_role="SYSTEM"
     ) is False
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -1, 501, True, 1.5, "10", None])
+async def test_claim_status_events_rejects_invalid_limit_before_database(monkeypatch, limit):
+    monkeypatch.setattr(db, "pool", None)
+    with pytest.raises(ValueError, match="claim limit"):
+        await OrderRepository.claim_status_events(limit=limit)
+
+
+class _Acquire:
+    def __init__(self, connection):
+        self.connection = connection
+
+    async def __aenter__(self):
+        return self.connection
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _Pool:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def acquire(self):
+        return _Acquire(self.connection)
+
+
+class _OutboxUpdateConnection:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    async def execute(self, query, *args):
+        self.calls.append((query, args))
+        return self.result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result,expected", [("UPDATE 1", True), ("UPDATE 0", False)])
+async def test_outbox_acknowledgement_is_fenced_by_claim_token(
+    monkeypatch, result, expected
+):
+    connection = _OutboxUpdateConnection(result)
+    monkeypatch.setattr(db, "pool", _Pool(connection))
+
+    acknowledged = await OrderRepository.mark_status_event_delivered(
+        123, "claim-token-current"
+    )
+
+    assert acknowledged is expected
+    query, args = connection.calls[0]
+    assert "lock_token=$2" in query
+    assert args == (123, "claim-token-current")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result,expected", [("UPDATE 1", True), ("UPDATE 0", False)])
+async def test_outbox_retry_release_is_fenced_by_claim_token(
+    monkeypatch, result, expected
+):
+    connection = _OutboxUpdateConnection(result)
+    monkeypatch.setattr(db, "pool", _Pool(connection))
+
+    released = await OrderRepository.retry_status_event(
+        123, "claim-token-current", RuntimeError("temporary failure")
+    )
+
+    assert released is expected
+    query, args = connection.calls[0]
+    assert "lock_token=$3" in query
+    assert args[0] == 123
+    assert args[2] == "claim-token-current"
+    assert args[1] == "temporary failure"
