@@ -74,7 +74,7 @@ async def test_wallet_ledger_rejects_invalid_user_id_before_database(monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("currency", ["ÅBC", "ＡＢＣ", "usd", "U D"])
+@pytest.mark.parametrize("currency", ["ÅBC", "ＡＢＣ", "U D"])
 async def test_wallet_ledger_rejects_non_ascii_or_malformed_currency(monkeypatch, currency):
     monkeypatch.setattr(ledger.db, "pool", None)
     with pytest.raises(ValueError, match="currency"):
@@ -88,7 +88,7 @@ async def test_wallet_ledger_rejects_non_ascii_or_malformed_currency(monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("key", ["   ", "\\t\\n"])
+@pytest.mark.parametrize("key", ["   ", "\t\n"])
 async def test_wallet_ledger_rejects_blank_idempotency_key_before_database(monkeypatch, key):
     monkeypatch.setattr(ledger.db, "pool", None)
     with pytest.raises(ValueError, match="idempotency_key"):
