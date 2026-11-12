@@ -81,14 +81,41 @@ def is_fleet_location_event(payload: str) -> bool:
 
 
 def meets_acceptance_thresholds(report: dict, minimum_rate: float) -> bool:
-    """Return whether every measured delivery/recovery gate passed."""
-    return (
-        report.get("failures", 0) == 0
-        and report.get("connection_success_rate", 0.0) >= minimum_rate
-        and report.get("frame_delivery_rate", 0.0) >= minimum_rate
-        and report.get("initial_snapshot_rate", 0.0) >= minimum_rate
-        and report.get("reconnect_snapshot_rate", 0.0) >= minimum_rate
+    """Return whether every measured delivery/recovery gate passed.
+
+    Rates are untrusted report data: reject NaN/infinity, values outside
+    [0, 1], and malformed failure counts rather than letting them pass a gate.
+    """
+    if (
+        isinstance(minimum_rate, bool)
+        or not isinstance(minimum_rate, (int, float))
+        or not math.isfinite(minimum_rate)
+        or not 0 <= minimum_rate <= 1
+    ):
+        return False
+    if not isinstance(report, dict):
+        return False
+    failures = report.get("failures")
+    if isinstance(failures, bool) or not isinstance(failures, int) or failures != 0:
+        return False
+
+    rate_fields = (
+        "connection_success_rate",
+        "frame_delivery_rate",
+        "initial_snapshot_rate",
+        "reconnect_snapshot_rate",
     )
+    for field in rate_fields:
+        rate = report.get(field)
+        if (
+            isinstance(rate, bool)
+            or not isinstance(rate, (int, float))
+            or not math.isfinite(rate)
+            or not 0 <= rate <= 1
+            or rate < minimum_rate
+        ):
+            return False
+    return True
 
 
 def build_report(
@@ -304,6 +331,11 @@ def main() -> int:
         parser.error("connections must be 1..1000 and messages must be 1..20")
     if not 0 <= args.reconnect_probes <= args.connections:
         parser.error("reconnect-probes must be 0..connections")
+    numeric_options = (
+        args.receive_timeout, args.min_delivery_rate, args.latitude, args.longitude,
+    )
+    if not all(math.isfinite(value) for value in numeric_options):
+        parser.error("receive-timeout, min-delivery-rate and coordinates must be finite")
     if args.receive_timeout <= 0 or not 0 <= args.min_delivery_rate <= 1:
         parser.error("receive-timeout must be positive and min-delivery-rate must be 0..1")
     if not (-90 <= args.latitude <= 90 and -180 <= args.longitude <= 180):
