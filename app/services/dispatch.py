@@ -24,14 +24,22 @@ return removed
 """
 
 _SET_DRIVER_ONLINE = """
-redis.call('INCR', KEYS[3])
+local current = redis.call('GET', KEYS[3])
+if current and tonumber(current) > tonumber(ARGV[5]) then
+    return 0
+end
+redis.call('SET', KEYS[3], ARGV[5], 'EX', 2592000)
 redis.call('GEOADD', KEYS[1], ARGV[1], ARGV[2], ARGV[3])
 redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3])
 return 1
 """
 
 _SET_DRIVER_OFFLINE = """
-redis.call('INCR', KEYS[4])
+local current = redis.call('GET', KEYS[4])
+if current and tonumber(current) > tonumber(ARGV[2]) then
+    return 0
+end
+redis.call('SET', KEYS[4], ARGV[2], 'EX', 2592000)
 redis.call('ZREM', KEYS[1], ARGV[1])
 redis.call('ZREM', KEYS[2], ARGV[1])
 redis.call('ZREM', KEYS[3], ARGV[1])
@@ -75,19 +83,51 @@ class DispatchService:
 
     @staticmethod
     async def go_online(driver_tid, lng, lat):
+        async with db.pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                UPDATE users
+                SET driver_is_online=TRUE,
+                    driver_presence_generation=driver_presence_generation+1
+                WHERE telegram_id=$1 AND driver_status='APPROVED'
+                  AND driver_presence_generation < 9223372036854775807
+                RETURNING driver_presence_generation
+                """,
+                int(driver_tid),
+            )
+        if not row:
+            return False
+        generation = int(row["driver_presence_generation"])
         await db.redis.eval(
             _SET_DRIVER_ONLINE, 3,
             "driver:online", "driver:heartbeat", f"driver:presence:generation:{driver_tid}",
-            float(lng), float(lat), str(driver_tid), __import__("time").time(),
+            float(lng), float(lat), str(driver_tid), __import__("time").time(), generation,
         )
+        return True
 
     @staticmethod
     async def go_offline(driver_tid):
+        async with db.pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                UPDATE users
+                SET driver_is_online=FALSE,
+                    driver_presence_generation=driver_presence_generation+1
+                WHERE telegram_id=$1 AND driver_status='APPROVED'
+                  AND driver_presence_generation < 9223372036854775807
+                RETURNING driver_presence_generation
+                """,
+                int(driver_tid),
+            )
+        if not row:
+            return False
+        generation = int(row["driver_presence_generation"])
         await db.redis.eval(
             _SET_DRIVER_OFFLINE, 4,
             "driver:online", "driver:heartbeat", "driver:location:version",
-            f"driver:presence:generation:{driver_tid}", str(driver_tid),
+            f"driver:presence:generation:{driver_tid}", str(driver_tid), generation,
         )
+        return True
 
     @classmethod
     async def smart_dispatch(cls, pickup_lng, pickup_lat, top_n=3):
