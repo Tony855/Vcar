@@ -190,3 +190,34 @@ def test_build_report_keeps_success_rate_when_all_snapshot_probes_pass():
     assert report["initial_snapshot_rate"] == 1.0
     assert report["reconnect_snapshot_rate"] == 1.0
     assert meets_acceptance_thresholds(report, 0.99)
+
+
+def test_acceptance_rejects_non_finite_or_out_of_range_rates():
+    passing = {
+        "failures": 0,
+        "connection_success_rate": 1.0,
+        "frame_delivery_rate": 1.0,
+        "initial_snapshot_rate": 1.0,
+        "reconnect_snapshot_rate": 1.0,
+    }
+    import math
+
+    for value in (float("nan"), float("inf"), -0.01, 1.01, True, "1.0"):
+        malformed = passing | {"frame_delivery_rate": value}
+        assert not meets_acceptance_thresholds(malformed, 0.99), repr(value)
+
+
+def test_acceptance_rejects_invalid_threshold_and_failure_count():
+    passing = {
+        "failures": 0,
+        "connection_success_rate": 1.0,
+        "frame_delivery_rate": 1.0,
+        "initial_snapshot_rate": 1.0,
+        "reconnect_snapshot_rate": 1.0,
+    }
+    import math
+
+    for threshold in (float("nan"), float("inf"), -0.01, 1.01, True, "0.99"):
+        assert not meets_acceptance_thresholds(passing, threshold), repr(threshold)
+    for failures in (True, -1, 0.5, "0"):
+        assert not meets_acceptance_thresholds(passing | {"failures": failures}, 0.99)
