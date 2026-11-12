@@ -174,3 +174,20 @@ async def test_order_stream_rejects_invalid_order_or_event_cursor_before_ticket_
     assert websocket.close_code == 4400
     assert websocket.accepted is False
     assert connection.fetchval_calls == []
+
+
+@pytest.mark.asyncio
+async def test_order_stream_rejects_malformed_passenger_ticket_subject_before_database(monkeypatch):
+    websocket = FakeWebSocket()
+    connection = FakeConnection(owned_order=987)
+    monkeypatch.setattr(passenger_router.db, "pool", FakePool(connection))
+
+    async def malformed_ticket(ticket, scope):
+        return {"sub": "not-a-telegram-id", "role": "passenger"}
+
+    monkeypatch.setattr(passenger_router, "consume_ws_ticket", malformed_ticket)
+    await passenger_router.passenger_order_stream(websocket, 987, "malformed-ticket")
+
+    assert websocket.close_code == 4401
+    assert websocket.accepted is False
+    assert connection.fetchval_calls == []
