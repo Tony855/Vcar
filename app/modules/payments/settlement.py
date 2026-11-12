@@ -57,12 +57,14 @@ class OrderSettlement:
     ) -> SettlementResult:
         if not isinstance(order_id, int) or isinstance(order_id, bool) or not 0 < order_id <= 2**63 - 1:
             raise ValueError("order_id must be a positive signed 64-bit integer")
-        if currency not in {"USD", "KHR"}:
+        if not isinstance(currency, str) or currency not in {"USD", "KHR"}:
             raise ValueError("currency must be USD or KHR")
-        if not isinstance(policy_version, str) or not policy_version.strip() or len(policy_version) > 64:
+        if not isinstance(policy_version, str) or not policy_version.strip() or len(policy_version.strip()) > 64:
             raise ValueError("policy_version must contain 1 to 64 characters")
-        if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key) > 128:
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key.strip()) > 128:
             raise ValueError("idempotency_key must contain 1 to 128 characters")
+        policy_version = policy_version.strip()
+        idempotency_key = idempotency_key.strip()
         normalized = _validate_components(components)
         canonical = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         async with db.pool.acquire() as conn:
