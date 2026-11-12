@@ -41,12 +41,16 @@ class DispatchService:
     @staticmethod
     async def get_nearby_drivers(lng, lat, radius_km=20):
         now = __import__("time").time()
-        expired = await db.redis.zrangebyscore("driver:heartbeat", "-inf", now - 120)
-        if expired:
-            cutoff = now - 120
-            # Do not bulk-ZREM the scan result: a GPS heartbeat can be refreshed
-            # after ZRANGEBYSCORE but before cleanup. Recheck and remove each
-            # member atomically so a concurrent fresh publish is never deleted.
+        cutoff = now - 120
+        # Bound each Redis script invocation. Long Redis outages or large fleets
+        # can accumulate many stale members; process them in chunks while
+        # retaining the atomic heartbeat recheck for every member.
+        while True:
+            expired = await db.redis.zrangebyscore(
+                "driver:heartbeat", "-inf", cutoff, start=0, num=500
+            )
+            if not expired:
+                break
             await db.redis.eval(
                 _REMOVE_EXPIRED_DRIVERS, 3,
                 "driver:heartbeat", "driver:online", "driver:location:version",
