@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import settings
+from app.core.security import require_strong_secret_key
 from app.db.core import db
 from app.modules.payments.ledger import WalletLedger, WalletError, InsufficientFunds, IdempotencyConflict, WalletBalanceLimit
 
@@ -19,9 +20,10 @@ router = APIRouter(prefix="/wallet", tags=["wallet"])
 def _claims(authorization: str | None, allowed_roles: set[str]) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
+    secret_key = require_strong_secret_key(settings.secret_key)
     try:
         claims = jwt.decode(
-            authorization[7:], settings.secret_key, algorithms=["HS256"],
+            authorization[7:], secret_key, algorithms=["HS256"],
             options={"require": ["exp"]},
         )
     except jwt.PyJWTError as exc:
