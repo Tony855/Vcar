@@ -199,10 +199,10 @@ async def test_dispatch_expiry_cleanup_does_not_delete_a_concurrent_gps_heartbea
     fresh_version = fresh_heartbeat - 1
 
     class RacingRedis:
-        async def zrangebyscore(self, *args):
+        async def zrangebyscore(self, *args, **kwargs):
             # Capture the stale member first, then simulate a GPS publisher
             # completing before DispatchService starts its cleanup operation.
-            expired = await redis.zrangebyscore(*args)
+            expired = await redis.zrangebyscore(*args, **kwargs)
             await redis.geoadd("driver:online", (104.9282, 11.5564, telegram_id))
             await redis.zadd("driver:heartbeat", {telegram_id: fresh_heartbeat})
             await redis.zadd("driver:location:version", {telegram_id: fresh_version})
@@ -268,4 +268,57 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
         await redis.zrem("driver:heartbeat", telegram_id)
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_expiry_cleanup_bounds_redis_script_batches(monkeypatch):
+    import os
+    import time
+    import uuid
+
+    from redis.asyncio import Redis
+
+    from app.db.core import db
+    from app.services.dispatch import DispatchService
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    prefix = f"bounded-stale-{uuid.uuid4().hex}-"
+    members = [f"{prefix}{index}" for index in range(1200)]
+    stale_score = time.time() - 600
+    try:
+        await redis.zadd("driver:heartbeat", {member: stale_score for member in members})
+        await redis.zadd("driver:location:version", {member: stale_score for member in members})
+        await redis.geoadd(
+            "driver:online",
+            [(104.9282 + index * 0.000001, 11.5564, member)
+             for index, member in enumerate(members)],
+        )
+
+        class CountingRedis:
+            def __init__(self):
+                self.script_sizes = []
+
+            async def zrangebyscore(self, *args, **kwargs):
+                return await redis.zrangebyscore(*args, **kwargs)
+
+            async def eval(self, script, key_count, *args):
+                self.script_sizes.append(len(args) - 3)
+                return await redis.eval(script, key_count, *args)
+
+            async def geosearch(self, *args, **kwargs):
+                return await redis.geosearch(*args, **kwargs)
+
+        counted = CountingRedis()
+        monkeypatch.setattr(db, "redis", counted)
+        await DispatchService.get_nearby_drivers(104.9282, 11.5564)
+
+        assert counted.script_sizes == [500, 500, 200]
+        assert await redis.zscore("driver:heartbeat", members[0]) is None
+        assert await redis.zscore("driver:heartbeat", members[-1]) is None
+        assert await redis.geopos("driver:online", members[0]) == [None]
+    finally:
+        await redis.zrem("driver:heartbeat", *members)
+        await redis.zrem("driver:location:version", *members)
+        await redis.zrem("driver:online", *members)
         await redis.aclose()
