@@ -152,7 +152,8 @@ async def test_real_redis_reconciliation_repairs_500_drivers_and_prunes_orphans(
     stale_id = f"stale-{uuid.uuid4().hex}"
     racing_id = f"racing-{uuid.uuid4().hex}"
     try:
-        await redis.geoadd("driver:online", [(104.9, 11.5, stale_id), (104.9, 11.5, racing_id)])
+        await redis.geoadd("driver:online", (104.9, 11.5, stale_id))
+        await redis.geoadd("driver:online", (104.9, 11.5, racing_id))
         await redis.zadd("driver:heartbeat", {
             stale_id: now.timestamp() - 600,
             racing_id: now.timestamp() + 1,
