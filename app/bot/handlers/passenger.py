@@ -17,6 +17,7 @@ from app.core.i18n import translator
 import logging
 
 router = Router()
+logger = logging.getLogger(__name__)
 class PaxStates(StatesGroup): pickup = State(); dropoff = State(); confirm = State()
 def t(key, user, **vars):
     if isinstance(user, dict):
@@ -105,8 +106,13 @@ async def p_cancel(call: CallbackQuery, driver_bot):
         fee = float(order.get('cancel_fee') or 0)
         await DispatchService.remove_order_from_pool(oid)
         if order.get('d_tg'):
-            try: await driver_bot.send_message(order['d_tg'], t("driver.passenger_cancelled_fee" if fee>0 else "driver.passenger_cancelled", user, order_id=oid, fee=fee))
-            except: pass
+            try:
+                await driver_bot.send_message(
+                    order['d_tg'],
+                    t("driver.passenger_cancelled_fee" if fee > 0 else "driver.passenger_cancelled", user, order_id=oid, fee=fee),
+                )
+            except Exception:
+                logger.exception("Failed to notify driver %s about passenger cancellation of order %s", order['d_tg'], oid)
         await call.message.edit_text(t("passenger.cancel_with_fee" if fee>0 else "passenger.cancel_free", user, fee=fee))
     else: await call.answer("状态不允许取消", show_alert=True)
 
@@ -119,7 +125,8 @@ async def pax_chat_proxy(msg: Message, driver_bot):
         try:
             await driver_bot.send_message(active_order['d_tg'], t("common.from_passenger", user))
             await msg.copy_to(active_order['d_tg'])
-        except: pass
+        except Exception:
+            logger.exception("Failed to relay passenger message to driver %s", active_order['d_tg'])
 
 @router.callback_query(F.data.startswith("rate_pax:"))
 async def rate_pax_to_driver(call: CallbackQuery, state: FSMContext, driver_bot):
@@ -235,7 +242,8 @@ async def confirm_order(call: CallbackQuery, state: FSMContext, driver_bot):
             await driver_bot.send_venue(d["tg_id"], latitude=plat, longitude=plng, title=t("common.pickup_venue", user), address=t("common.pickup_desc", user))
             await driver_bot.send_venue(d["tg_id"], latitude=dlat if 'dlat' in locals() else msg.location.latitude, longitude=dlng if 'dlng' in locals() else msg.location.longitude, title=t("common.dropoff_title", {"locale": d.get("locale", "en")}), address="Here")
             await driver_bot.send_message(d["tg_id"], txt, reply_markup=kb, parse_mode="HTML")
-        except: pass
+        except Exception:
+            logger.exception("Failed to dispatch order %s to driver %s", oid, d.get("tg_id"))
 
     p_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t("order.cancel_btn", user), callback_data=f"p_cancel:{oid}")]])
     await call.message.edit_text(t('passenger.order_created', user, order_id=oid, distance=trip_dist, price=f"{price_val:.2f}"), reply_markup=p_kb)
