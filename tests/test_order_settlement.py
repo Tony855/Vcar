@@ -251,3 +251,110 @@ async def test_post_explicit_allocation_rejects_reserved_metadata(monkeypatch):
                 {"user_id": 20, "amount_minor": -900, "kind": "PASSENGER_FARE"},
             ],
         )
+
+
+class RecoveryConnection:
+    def __init__(self, *, status="PREPARED", rows=None):
+        self.status = status
+        self.rows = rows or []
+        self.calls = []
+
+    def transaction(self):
+        return FakeTransaction()
+
+    async def fetchrow(self, query, *args):
+        self.calls.append(("fetchrow", query, args))
+        if "FROM order_settlements" in query and "FOR UPDATE" in query:
+            return {
+                "id": 91, "order_id": 12, "currency": "USD",
+                "policy_version": "kh-v1", "status": self.status,
+            }
+        if "UPDATE order_settlements" in query:
+            if self.status == "PREPARED":
+                self.status = "POSTED"
+                return {"status": "POSTED"}
+            return None
+        raise AssertionError(f"unexpected query: {query}")
+
+    async def fetch(self, query, *args):
+        self.calls.append(("fetch", query, args))
+        assert "wallet_transactions" in query
+        assert "FOR UPDATE" in query
+        return self.rows
+
+
+def committed_settlement_rows():
+    return [
+        {
+            "id": 100, "wallet_id": 10, "order_id": 12, "amount_minor": 900,
+            "currency": "USD", "idempotency_key": "settlement:91:0",
+            "metadata": {"_settlement_id": 91, "_policy_version": "kh-v1",
+                         "_batch_key": "settlement:91", "_batch_index": 0},
+        },
+        {
+            "id": 101, "wallet_id": 20, "order_id": 12, "amount_minor": -900,
+            "currency": "USD", "idempotency_key": "settlement:91:1",
+            "metadata": {"_settlement_id": 91, "_policy_version": "kh-v1",
+                         "_batch_key": "settlement:91", "_batch_index": 1},
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_finalize_committed_allocation_recovers_crash_window(monkeypatch):
+    conn = RecoveryConnection(rows=committed_settlement_rows())
+    monkeypatch.setattr(settlement.db, "pool", Pool(conn))
+
+    result = await settlement.finalize_committed_allocation(settlement_id=91)
+
+    assert result == settlement.SettlementRecoveryResult(
+        settlement_id=91, order_id=12, status="POSTED",
+        ledger_count=2, recovered=True,
+    )
+    assert conn.status == "POSTED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rows", [
+    committed_settlement_rows()[:1],
+    [
+        {**committed_settlement_rows()[0], "amount_minor": 900},
+        {**committed_settlement_rows()[1], "amount_minor": -899},
+    ],
+    [
+        committed_settlement_rows()[0],
+        {**committed_settlement_rows()[1],
+         "metadata": {**committed_settlement_rows()[1]["metadata"], "_policy_version": "old"}},
+    ],
+    [
+        committed_settlement_rows()[0],
+        {**committed_settlement_rows()[1], "idempotency_key": "settlement:91:7"},
+    ],
+])
+async def test_finalize_committed_allocation_refuses_incomplete_or_mismatched_batch(monkeypatch, rows):
+    conn = RecoveryConnection(rows=rows)
+    monkeypatch.setattr(settlement.db, "pool", Pool(conn))
+
+    with pytest.raises(settlement.SettlementError):
+        await settlement.finalize_committed_allocation(settlement_id=91)
+
+    assert conn.status == "PREPARED"
+
+
+@pytest.mark.asyncio
+async def test_finalize_committed_allocation_is_idempotent_after_posted(monkeypatch):
+    conn = RecoveryConnection(status="POSTED")
+    monkeypatch.setattr(settlement.db, "pool", Pool(conn))
+
+    result = await settlement.finalize_committed_allocation(settlement_id=91)
+
+    assert result.status == "POSTED"
+    assert result.recovered is False
+    assert result.ledger_count == 0
+    assert not any(call[0] == "fetch" for call in conn.calls)
+
+
+@pytest.mark.asyncio
+async def test_finalize_committed_allocation_rejects_invalid_id(monkeypatch):
+    with pytest.raises(ValueError):
+        await settlement.finalize_committed_allocation(settlement_id=True)
