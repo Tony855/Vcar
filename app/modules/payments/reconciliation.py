@@ -79,11 +79,11 @@ async def reconcile_order_settlements() -> list[dict]:
                 )::bigint AS order_mismatch_count,
                 COUNT(*) FILTER (
                     WHERE t.id IS NOT NULL
-                      AND t.metadata->>'_batch_key' <> 'settlement:' || s.id::text
+                      AND t.metadata->>'_batch_key' IS DISTINCT FROM 'settlement:' || s.id::text
                 )::bigint AS batch_key_mismatch_count,
                 COUNT(*) FILTER (
                     WHERE t.id IS NOT NULL
-                      AND t.metadata->>'_policy_version' <> s.policy_version
+                      AND t.metadata->>'_policy_version' IS DISTINCT FROM s.policy_version
                 )::bigint AS policy_mismatch_count
             FROM order_settlements AS s
             LEFT JOIN wallet_transactions AS t
