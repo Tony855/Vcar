@@ -6,7 +6,7 @@ import asyncpg
 import pytest
 
 from app.db.core import db
-from app.modules.payments.ledger import WalletLedger, InsufficientFunds, IdempotencyConflict
+from app.modules.payments.ledger import WalletLedger, InsufficientFunds, IdempotencyConflict, WalletBalanceLimit
 
 
 @pytest.fixture
@@ -352,3 +352,36 @@ async def test_concurrent_wallet_debits_cannot_overdraw_balance(database_pool):
             await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id=$1", wallet_id)
             await conn.execute("DELETE FROM wallet_accounts WHERE id=$1", wallet_id)
             await conn.execute("DELETE FROM users WHERE id=$1", user_id)
+
+
+@pytest.mark.asyncio
+async def test_wallet_credit_cannot_overflow_signed_bigint_balance(database_pool):
+    async with database_pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            "INSERT INTO users (telegram_id, first_name) VALUES ($1, $2) RETURNING id",
+            998877665501, "wallet-overflow",
+        )
+        wallet_id = await conn.fetchval(
+            "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', $2) RETURNING id",
+            user_id, 2**63 - 11,
+        )
+
+    with pytest.raises(WalletBalanceLimit):
+        await WalletLedger.post(
+            user_id=user_id,
+            currency="USD",
+            amount_minor=11,
+            kind="TOPUP",
+            idempotency_key="wallet-overflow-credit-001",
+        )
+
+    async with database_pool.acquire() as conn:
+        balance = await conn.fetchval(
+            "SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet_id
+        )
+        count = await conn.fetchval(
+            "SELECT count(*) FROM wallet_transactions WHERE idempotency_key=$1",
+            "wallet-overflow-credit-001",
+        )
+    assert balance == 2**63 - 11
+    assert count == 0
