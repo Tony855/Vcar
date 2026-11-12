@@ -289,11 +289,10 @@ async def test_dispatch_expiry_cleanup_bounds_redis_script_batches(monkeypatch):
     try:
         await redis.zadd("driver:heartbeat", {member: stale_score for member in members})
         await redis.zadd("driver:location:version", {member: stale_score for member in members})
-        await redis.geoadd(
-            "driver:online",
-            [(104.9282 + index * 0.000001, 11.5564, member)
-             for index, member in enumerate(members)],
-        )
+        geo_values = []
+        for index, member in enumerate(members):
+            geo_values.extend((104.9282 + index * 0.000001, 11.5564, member))
+        await redis.geoadd("driver:online", geo_values)
 
         class CountingRedis:
             def __init__(self):
