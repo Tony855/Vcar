@@ -280,7 +280,7 @@ async def test_passenger_stream_uses_durable_outbox_when_redis_is_unavailable_at
     monkeypatch.setattr(passenger_router.asyncio, "sleep", no_wait)
 
     await passenger_router.passenger_order_stream(
-        websocket, 8, "single-use-ticket", last_event_id=3
+        websocket, 8, "single-use-ticket", last_event_id=0
     )
 
     assert redis.calls == 2
