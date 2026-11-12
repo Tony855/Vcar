@@ -12,6 +12,7 @@ import secrets
 import jwt
 
 from app.core.config import settings
+from app.core.security import require_strong_secret_key
 from app.db.core import db
 
 
@@ -38,9 +39,10 @@ async def issue_ws_ticket(access_token: str, scope: str) -> str:
     expected_role = _scope_role(scope)
     if expected_role is None:
         raise ValueError("Unsupported WebSocket scope")
+    secret_key = require_strong_secret_key(settings.secret_key)
     try:
         claims = jwt.decode(
-            access_token, settings.secret_key, algorithms=["HS256"],
+            access_token, secret_key, algorithms=["HS256"],
             options={"require": ["exp"]},
         )
     except jwt.PyJWTError as exc:
