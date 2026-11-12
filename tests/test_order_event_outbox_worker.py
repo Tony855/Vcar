@@ -208,7 +208,9 @@ async def test_outbox_worker_continues_when_retry_schedule_itself_fails():
     redis_client.publish = AsyncMock(side_effect=ConnectionError("Redis unavailable"))
 
     assert await dispatch_order_event_batch(redis_client, repository) == 0
-    repository.retry_status_event.assert_awaited_once_with(
-        22, "claim-token-22", pytest.approx(repository.retry_status_event.await_args.args[2])
-    )
+    repository.retry_status_event.assert_awaited_once()
+    outbox_id, lock_token, error = repository.retry_status_event.await_args.args
+    assert outbox_id == 22
+    assert lock_token == "claim-token-22"
+    assert isinstance(error, ConnectionError)
     repository.mark_status_event_delivered.assert_not_awaited()
