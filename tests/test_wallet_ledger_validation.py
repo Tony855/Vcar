@@ -116,7 +116,7 @@ async def test_wallet_ledger_rejects_blank_kind_before_database(monkeypatch, kin
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("amount", [2**63, -(2**63)])
+@pytest.mark.parametrize("amount", [2**63])
 async def test_wallet_ledger_rejects_amount_outside_signed_bigint(monkeypatch, amount):
     monkeypatch.setattr(ledger.db, "pool", None)
     with pytest.raises(ValueError, match="signed 64-bit"):
@@ -160,4 +160,24 @@ async def test_wallet_ledger_rejects_user_id_outside_positive_bigint(monkeypatch
         await ledger.WalletLedger.post(
             user_id=user_id, currency="USD", amount_minor=100,
             kind="TOPUP", idempotency_key="validation-user-bigint",
+        )
+
+
+@pytest.mark.asyncio
+async def test_wallet_ledger_accepts_minimum_signed_bigint_amount_before_database(monkeypatch):
+    class DatabaseReached(RuntimeError):
+        pass
+
+    class Pool:
+        def acquire(self):
+            raise DatabaseReached("validation passed; database access reached")
+
+    monkeypatch.setattr(ledger.db, "pool", Pool())
+    with pytest.raises(DatabaseReached, match="validation passed"):
+        await ledger.WalletLedger.post(
+            user_id=1,
+            currency="USD",
+            amount_minor=-(2**63),
+            kind="ADJUSTMENT",
+            idempotency_key="validation-min-signed-bigint",
         )
