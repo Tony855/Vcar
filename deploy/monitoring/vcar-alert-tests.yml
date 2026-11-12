@@ -16,6 +16,9 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+            exp_annotations:
+              summary: Redis dependency is unavailable
+              description: Vcar metrics can still be scraped, but Redis PING has failed for more than two minutes.
       - eval_time: 3m
         alertname: VcarBlackboxProbeFailed
         exp_alerts:
@@ -27,6 +30,12 @@ tests:
               severity: critical
               job: blackbox-vcar
               instance: http://osrm:5000/route/v1/driving/104.9,11.5;104.95,11.55
+            exp_annotations:
+              summary: Vcar OSRM route probe is failing
+              description: The configured Cambodia OSRM route probe has failed for more than two minutes.
+            exp_annotations:
+              summary: A Vcar HTTP or routing probe is failing
+              description: Blackbox Exporter has failed a configured Vcar health or OSRM route probe for more than two minutes.
       - eval_time: 3m
         alertname: VcarOSRMProbeFailed
         exp_alerts:
