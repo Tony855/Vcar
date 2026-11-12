@@ -98,12 +98,12 @@ class DispatchService:
         if not row:
             return False
         generation = int(row["driver_presence_generation"])
-        await db.redis.eval(
+        applied = await db.redis.eval(
             _SET_DRIVER_ONLINE, 3,
             "driver:online", "driver:heartbeat", f"driver:presence:generation:{driver_tid}",
             float(lng), float(lat), str(driver_tid), __import__("time").time(), generation,
         )
-        return True
+        return applied == 1
 
     @staticmethod
     async def go_offline(driver_tid):
@@ -122,12 +122,12 @@ class DispatchService:
         if not row:
             return False
         generation = int(row["driver_presence_generation"])
-        await db.redis.eval(
+        applied = await db.redis.eval(
             _SET_DRIVER_OFFLINE, 4,
             "driver:online", "driver:heartbeat", "driver:location:version",
             f"driver:presence:generation:{driver_tid}", str(driver_tid), generation,
         )
-        return True
+        return applied == 1
 
     @classmethod
     async def smart_dispatch(cls, pickup_lng, pickup_lat, top_n=3):
