@@ -30,7 +30,13 @@ if previous and tonumber(previous) > incoming_sample then
     return 0
 end
 redis.call('GEOADD', KEYS[1], ARGV[1], ARGV[2], ARGV[3])
-redis.call('ZADD', KEYS[2], tonumber(ARGV[5]), ARGV[3])
+-- Reconciliation may repair missing heartbeat state, but must never move a
+-- newer online transition backwards to the older durable GPS receipt time.
+local previous_heartbeat = redis.call('ZSCORE', KEYS[2], ARGV[3])
+local incoming_heartbeat = tonumber(ARGV[5])
+if not previous_heartbeat or tonumber(previous_heartbeat) < incoming_heartbeat then
+    redis.call('ZADD', KEYS[2], incoming_heartbeat, ARGV[3])
+end
 redis.call('ZADD', KEYS[3], incoming_sample, ARGV[3])
 return 1
 """
