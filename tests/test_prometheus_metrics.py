@@ -8,8 +8,6 @@ from app.web import server
 
 class MetricsConnection:
     async def fetchval(self, query):
-        if "COUNT(*) FROM order_event_outbox" in query:
-            return 3
         if "MIN(created_at)" in query:
             return 42.5
         if "available_at <= now()" in query:
@@ -19,6 +17,8 @@ class MetricsConnection:
         if "locked_at < now() - interval '5 minutes'" in query:
             return 1
         if "attempts >= 8" in query:
+            return 3
+        if "COUNT(*) FROM order_event_outbox" in query:
             return 3
         if "COUNT(*) FROM driver_locations" in query:
             return 8
