@@ -78,3 +78,30 @@ async def test_outbox_worker_recovers_event_id_for_legacy_payload():
     payload = json.loads(redis_client.publish.await_args.args[1])
     assert payload["event_id"] == 44
     assert payload["order_id"] == 11
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_uses_canonical_database_event_and_order_ids():
+    event = {
+        "id": 10,
+        "event_id": 50,
+        "order_id": 12,
+        "payload": {"event_id": 999, "order_id": 777, "status": "IN_PROGRESS"},
+    }
+    repository = type("Repository", (), {})()
+    repository.claim_status_events = AsyncMock(return_value=[event])
+    repository.mark_status_event_delivered = AsyncMock(return_value=True)
+    repository.retry_status_event = AsyncMock()
+    redis_client = type("Redis", (), {})()
+    redis_client.publish = AsyncMock(return_value=1)
+
+    assert await dispatch_order_event_batch(redis_client, repository) == 1
+    channel, raw_payload = redis_client.publish.await_args.args
+    import json
+    payload = json.loads(raw_payload)
+    assert channel == "order:status:12"
+    assert payload["event_id"] == 50
+    assert payload["order_id"] == 12
+    assert payload["status"] == "IN_PROGRESS"
+    repository.mark_status_event_delivered.assert_awaited_once_with(10)
+    repository.retry_status_event.assert_not_awaited()

@@ -24,8 +24,9 @@ async def dispatch_order_event_batch(redis_client, repository=OrderRepository, l
             if isinstance(payload, str):
                 payload = json.loads(payload)
             payload = dict(payload)
-            payload.setdefault("event_id", event["event_id"])
-            payload.setdefault("order_id", event["order_id"])
+            # Durable outbox columns are authoritative for deduplication and routing.
+            payload["event_id"] = event["event_id"]
+            payload["order_id"] = event["order_id"]
             await redis_client.publish(
                 f"order:status:{event['order_id']}",
                 json.dumps(payload, separators=(",", ":")),
