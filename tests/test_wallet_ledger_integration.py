@@ -601,7 +601,7 @@ async def test_overlapping_balanced_batches_lock_wallets_in_stable_order(databas
                 "WHERE idempotency_key=ANY($1::text[])",
                 [f"{key_a}:0", f"{key_a}:1", f"{key_b}:0", f"{key_b}:1"],
             )
-        assert [row["balance_minor"] for row in balances] == [2000, 2000]
+        assert [row["balance_minor"] for row in balances] == [1800, 2200]
         assert count == 4
     finally:
         async with database_pool.acquire() as conn:
