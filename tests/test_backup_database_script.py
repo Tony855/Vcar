@@ -11,7 +11,7 @@ def _run_backup(tmp_path, env_text, *, fail_list=False, preexisting_backup_dir_m
     bin_dir.mkdir()
     dump_log = tmp_path / "dump-args"
     (bin_dir / "pg_dump").write_text(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$DUMP_LOG\"\n"
+        "#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > \"$DUMP_LOG\"\n"
         "while (($#)); do if [[ \"$1\" == --file=* ]]; then "
         "printf 'test dump' > \"${1#--file=}\"; fi; shift; done\n",
         encoding="utf-8",
@@ -108,7 +108,7 @@ done
         tool.chmod(0o755)
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\\n",
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
         encoding="utf-8",
     )
     backup_dir = tmp_path / "backups"
@@ -141,7 +141,7 @@ done
 def test_backup_restricts_permissions_on_preexisting_backup_directory(tmp_path):
     result, backup_dir, _ = _run_backup(
         tmp_path,
-        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\\n",
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
         preexisting_backup_dir_mode=0o755,
     )
     assert result.returncode == 0, result.stderr
@@ -151,7 +151,7 @@ def test_backup_restricts_permissions_on_preexisting_backup_directory(tmp_path):
 def test_backup_does_not_publish_archive_when_integrity_listing_fails(tmp_path):
     result, backup_dir, _ = _run_backup(
         tmp_path,
-        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\\n",
+        "MIGRATION_DATABASE_URL=postgresql://owner:secret@localhost/vcar\n",
         fail_list=True,
     )
     assert result.returncode == 7
