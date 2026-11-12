@@ -102,7 +102,7 @@ async def test_wallet_ledger_rejects_blank_idempotency_key_before_database(monke
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["   ", "\\t\\n"])
+@pytest.mark.parametrize("kind", ["   ", "\t\n"])
 async def test_wallet_ledger_rejects_blank_kind_before_database(monkeypatch, kind):
     monkeypatch.setattr(ledger.db, "pool", None)
     with pytest.raises(ValueError, match="transaction kind"):
