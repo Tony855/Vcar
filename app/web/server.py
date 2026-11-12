@@ -10,7 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException, Response, Query, Header
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # 动态获取项目根目录
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -54,8 +54,15 @@ app.add_middleware(
 
 class LoginData(BaseModel): username: str; password: str
 class PriceUpdate(BaseModel):
-    base_fare: float = Field(ge=0, allow_inf_nan=False)
-    per_km: float = Field(ge=0, allow_inf_nan=False)
+    base_fare: float
+    per_km: float
+
+    @field_validator("base_fare", "per_km")
+    @classmethod
+    def validate_fare(cls, value: float) -> float:
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("fare must be a finite non-negative number")
+        return value
 class ReviewData(BaseModel): tg_id: int; status: str
 
 @app.on_event("startup")
