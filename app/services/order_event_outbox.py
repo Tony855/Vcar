@@ -31,7 +31,7 @@ async def dispatch_order_event_batch(redis_client, repository=OrderRepository, l
                 f"order:status:{event['order_id']}",
                 json.dumps(payload, separators=(",", ":")),
             )
-            acknowledged = await repository.mark_status_event_delivered(outbox_id)
+            acknowledged = await repository.mark_status_event_delivered(outbox_id, event["lock_token"])
             if acknowledged:
                 delivered += 1
             else:
@@ -47,7 +47,7 @@ async def dispatch_order_event_batch(redis_client, repository=OrderRepository, l
                 extra={"outbox_id": outbox_id, "event_id": event.get("event_id")},
             )
             try:
-                await repository.retry_status_event(outbox_id, exc)
+                await repository.retry_status_event(outbox_id, event["lock_token"], exc)
             except Exception:
                 logger.exception(
                     "Unable to schedule order status outbox retry",
