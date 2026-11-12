@@ -58,6 +58,12 @@ tests:
             exp_annotations:
               summary: Vcar driver presence reconciliation is stale
               description: The PostgreSQL-to-Redis driver presence repair has never succeeded or has not completed successfully for more than two minutes.
+          - exp_labels:
+              severity: warning
+              instance: never
+            exp_annotations:
+              summary: Vcar driver presence reconciliation is stale
+              description: The PostgreSQL-to-Redis driver presence repair has never succeeded or has not completed successfully for more than two minutes.
       - eval_time: 6m
         alertname: VcarOrderOutboxHighRetry
         exp_alerts:
