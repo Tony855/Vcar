@@ -10,7 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException, Response, Query, Header
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 
 # 动态获取项目根目录
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -57,12 +57,22 @@ class PriceUpdate(BaseModel):
     base_fare: float
     per_km: float
 
-    @field_validator("base_fare", "per_km")
+    @model_validator(mode="before")
     @classmethod
-    def validate_fare(cls, value: float) -> float:
-        if not math.isfinite(value) or value < 0:
-            raise ValueError("fare must be a finite non-negative number")
-        return value
+    def validate_fares(cls, values):
+        if not isinstance(values, dict):
+            return values
+        for field_name in ("base_fare", "per_km"):
+            value = values.get(field_name)
+            if isinstance(value, bool):
+                raise ValueError("fare must be a finite non-negative number")
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("fare must be a finite non-negative number")
+            if not math.isfinite(parsed) or parsed < 0:
+                raise ValueError("fare must be a finite non-negative number")
+        return values
 class ReviewData(BaseModel): tg_id: int; status: str
 
 @app.on_event("startup")
