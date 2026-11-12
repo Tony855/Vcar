@@ -3,6 +3,16 @@ rule_files:
 evaluation_interval: 1m
 tests:
   - interval: 1m
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: VcarBackupMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Vcar database backup telemetry is missing
+              description: The backup textfile metrics are absent; verify the scheduled backup job and node_exporter textfile collector configuration.
+  - interval: 1m
     input_series:
       - series: 'vcar_redis_available'
         values: '0+0x5'
