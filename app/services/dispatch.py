@@ -115,6 +115,11 @@ class DispatchService:
                     driver_presence_generation=driver_presence_generation+1
                 WHERE telegram_id=$1 AND driver_status='APPROVED'
                   AND driver_presence_generation < 9223372036854775807
+                  AND NOT EXISTS (
+                      SELECT 1 FROM orders
+                      WHERE orders.driver_id=users.id
+                        AND orders.status IN ('ACCEPTED','ARRIVED','IN_PROGRESS')
+                  )
                 RETURNING driver_presence_generation
                 """,
                 int(driver_tid),
@@ -156,7 +161,9 @@ class DispatchService:
                 """
                 SELECT id, telegram_id, rating, locale
                 FROM users
-                WHERE telegram_id = ANY($1) AND driver_status='APPROVED'
+                WHERE telegram_id = ANY($1)
+                  AND driver_status='APPROVED'
+                  AND driver_is_online IS TRUE
                 """,
                 telegram_ids,
             )

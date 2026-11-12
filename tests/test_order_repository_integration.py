@@ -27,8 +27,11 @@ async def database_pool(monkeypatch):
 async def _create_user(connection, suffix):
     row = await connection.fetchrow(
         """
-        INSERT INTO users (telegram_id, first_name, driver_status)
-        VALUES ($1, $2, 'APPROVED')
+        INSERT INTO users (
+            telegram_id, first_name, driver_status,
+            driver_is_online, driver_presence_generation
+        )
+        VALUES ($1, $2, 'APPROVED', TRUE, 1)
         RETURNING id
         """,
         int(uuid.uuid4().int % 8_000_000_000) + 1,
@@ -1461,4 +1464,72 @@ async def test_concurrent_duplicate_order_transition_emits_one_outbox_event(data
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)",
                 [passenger_id, driver_id],
+            )
+
+
+@pytest.mark.asyncio
+async def test_approved_but_offline_driver_cannot_accept_order(database_pool):
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "offline-accept-passenger")
+        driver_id = await _create_user(connection, "offline-accept-driver")
+        await connection.execute(
+            "UPDATE users SET driver_is_online=FALSE, driver_presence_generation=2 WHERE id=$1",
+            driver_id,
+        )
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is False
+        async with database_pool.acquire() as connection:
+            row = await connection.fetchrow(
+                "SELECT status, driver_id FROM orders WHERE id=$1", order["id"]
+            )
+            event_count = await connection.fetchval(
+                "SELECT COUNT(*) FROM order_events WHERE order_id=$1", order["id"]
+            )
+        assert row["status"] == "DISPATCHING"
+        assert row["driver_id"] is None
+        assert event_count == 1
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
+
+
+@pytest.mark.asyncio
+async def test_driver_cannot_go_offline_while_trip_is_active(database_pool, monkeypatch):
+    from app.db.core import db
+    from app.services.dispatch import DispatchService
+
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "active-offline-passenger")
+        driver_id = await _create_user(connection, "active-offline-driver")
+        telegram_id = await connection.fetchval(
+            "SELECT telegram_id FROM users WHERE id=$1", driver_id
+        )
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        monkeypatch.setattr(db, "redis", object())
+        assert await DispatchService.go_offline(str(telegram_id)) is False
+        async with database_pool.acquire() as connection:
+            state = await connection.fetchrow(
+                "SELECT driver_is_online FROM users WHERE id=$1", driver_id
+            )
+            order_status = await connection.fetchval(
+                "SELECT status FROM orders WHERE id=$1", order["id"]
+            )
+        assert state["driver_is_online"] is True
+        assert order_status == "ACCEPTED"
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
