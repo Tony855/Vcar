@@ -113,3 +113,51 @@ async def test_wallet_ledger_rejects_blank_kind_before_database(monkeypatch, kin
             kind=kind,
             idempotency_key="validation-kind-004",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("amount", [2**63, -(2**63)])
+async def test_wallet_ledger_rejects_amount_outside_signed_bigint(monkeypatch, amount):
+    monkeypatch.setattr(ledger.db, "pool", None)
+    with pytest.raises(ValueError, match="signed 64-bit"):
+        await ledger.WalletLedger.post(
+            user_id=1, currency="USD", amount_minor=amount,
+            kind="TOPUP", idempotency_key="validation-bigint-amount",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value,error", [
+    ("order_id", 0, "order_id"),
+    ("order_id", True, "order_id"),
+    ("order_id", 2**63, "order_id"),
+    ("provider_reference", "", "provider_reference"),
+    ("provider_reference", "x" * 129, "provider_reference"),
+    ("provider_reference", 123, "provider_reference"),
+    ("metadata", [], "metadata"),
+    ("metadata", {"bad": object()}, "metadata"),
+    ("metadata", {"bad": float("nan")}, "metadata"),
+])
+async def test_wallet_ledger_rejects_invalid_optional_fields_before_database(monkeypatch, field, value, error):
+    monkeypatch.setattr(ledger.db, "pool", None)
+    kwargs = {
+        "user_id": 1,
+        "currency": "USD",
+        "amount_minor": 100,
+        "kind": "TOPUP",
+        "idempotency_key": "validation-optional-fields",
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=error):
+        await ledger.WalletLedger.post(**kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_id", [2**63, -(2**63)])
+async def test_wallet_ledger_rejects_user_id_outside_positive_bigint(monkeypatch, user_id):
+    monkeypatch.setattr(ledger.db, "pool", None)
+    with pytest.raises(ValueError, match="user_id"):
+        await ledger.WalletLedger.post(
+            user_id=user_id, currency="USD", amount_minor=100,
+            kind="TOPUP", idempotency_key="validation-user-bigint",
+        )
