@@ -40,11 +40,12 @@ async def publish_driver_location(
 
     PostgreSQL is the durable source of truth. Redis is a realtime projection;
     its outage must not turn a committed GPS sample into an apparent API failure.
+    Returns True only when this sample was actually applied and published.
     """
     try:
         sample_at = datetime.fromisoformat(event["recorded_at"]).timestamp()
         encoded = json.dumps(event)
-        await redis_client.eval(
+        applied = await redis_client.eval(
             _PUBLISH_DRIVER_LOCATION,
             5,
             "driver:online",
@@ -65,4 +66,6 @@ async def publish_driver_location(
             extra={"telegram_id": telegram_id},
         )
         return False
-    return True
+    # The Lua script returns 0 when a newer/equal sample is already projected.
+    # Do not report that stale sample as realtime-published to the API caller.
+    return applied == 1
