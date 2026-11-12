@@ -93,6 +93,31 @@ async def reconcile_order_settlements() -> list[dict]:
             """
         )
 
+    # Also inspect ledger metadata that claims a settlement ID for which
+    # no immutable snapshot exists. The original snapshot-driven LEFT JOIN
+    # cannot see these orphan rows, so audit them independently.
+    async with db.pool.acquire() as connection:
+        orphan_rows = await connection.fetch(
+            """
+            SELECT
+                t.metadata->>'_settlement_id' AS settlement_id,
+                COUNT(*)::bigint AS ledger_count,
+                COALESCE(SUM(t.amount_minor), 0)::text AS ledger_sum_minor,
+                COUNT(DISTINCT t.currency)::bigint AS currency_count,
+                COUNT(DISTINCT t.order_id)::bigint AS order_count,
+                ARRAY_AGG(DISTINCT t.metadata->>'_batch_key') AS batch_keys
+            FROM wallet_transactions AS t
+            WHERE t.metadata ? '_settlement_id'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM order_settlements AS s
+                  WHERE s.id::text = t.metadata->>'_settlement_id'
+              )
+            GROUP BY t.metadata->>'_settlement_id'
+            ORDER BY t.metadata->>'_settlement_id'
+            """
+        )
+
     findings = []
     for row in rows:
         settlement_id = int(row["settlement_id"])
@@ -152,4 +177,18 @@ async def reconcile_order_settlements() -> list[dict]:
                 "ledger_sum_minor": ledger_sum,
                 "finding": finding,
             })
+    for row in orphan_rows:
+        findings.append({
+            "settlement_id": row["settlement_id"],
+            "order_id": None,
+            "status": "MISSING_SNAPSHOT",
+            "currency": None,
+            "policy_version": None,
+            "ledger_count": int(row["ledger_count"]),
+            "ledger_sum_minor": int(row["ledger_sum_minor"]),
+            "finding": "ORPHAN_SETTLEMENT_LEDGER",
+            "currency_count": int(row["currency_count"]),
+            "order_count": int(row["order_count"]),
+            "batch_keys": row["batch_keys"] or [],
+        })
     return findings
