@@ -24,11 +24,17 @@ PRESENCE_RECONCILIATION_STATE = {
 # new as the currently projected sample. No Pub/Sub is emitted: WebSocket
 # consumers already reconcile from PostgreSQL snapshots.
 _REPAIR_DRIVER = """
+local current_generation = redis.call('GET', KEYS[4])
+local incoming_generation = tonumber(ARGV[6])
+if current_generation and tonumber(current_generation) > incoming_generation then
+    return 0
+end
 local previous = redis.call('ZSCORE', KEYS[3], ARGV[3])
 local incoming_sample = tonumber(ARGV[4])
 if previous and tonumber(previous) > incoming_sample then
     return 0
 end
+redis.call('SET', KEYS[4], ARGV[6], 'EX', 2592000)
 redis.call('GEOADD', KEYS[1], ARGV[1], ARGV[2], ARGV[3])
 -- Reconciliation may repair missing heartbeat state, but must never move a
 -- newer online transition backwards to the older durable GPS receipt time.
@@ -57,6 +63,7 @@ return 0
 
 FRESH_DRIVERS_QUERY = """
     SELECT u.telegram_id,
+           u.driver_presence_generation,
            ST_X(l.position::geometry) AS longitude,
            ST_Y(l.position::geometry) AS latitude,
            l.recorded_at,
@@ -64,6 +71,7 @@ FRESH_DRIVERS_QUERY = """
     FROM users u
     JOIN driver_locations l ON l.driver_id=u.id
     WHERE u.driver_status='APPROVED'
+      AND u.driver_is_online IS TRUE
       AND l.received_at >= $1
       AND l.received_at <= $2
       AND l.recorded_at <= $2 + interval '30 seconds'
@@ -98,12 +106,40 @@ async def reconcile_driver_presence(redis_client, connection, *, now=None) -> di
         if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
             continue
         member = str(telegram_id)
+        generation = row["driver_presence_generation"]
+        if (
+            not isinstance(generation, int)
+            or isinstance(generation, bool)
+            or generation < 0
+        ):
+            continue
+        # Recheck and lock the durable online state while repairing Redis.
+        # An offline transition must wait for this repair, then invalidate it;
+        # a stale query snapshot must never resurrect a driver after that transition.
+        async with connection.transaction():
+            state = await connection.fetchrow(
+                """
+                SELECT driver_is_online, driver_presence_generation
+                FROM users
+                WHERE telegram_id=$1 AND driver_status='APPROVED'
+                FOR UPDATE
+                """,
+                telegram_id,
+            )
+            if (
+                not state
+                or not state["driver_is_online"]
+                or state["driver_presence_generation"] != generation
+            ):
+                continue
+            applied = await redis_client.eval(
+                _REPAIR_DRIVER, 4,
+                "driver:online", "driver:heartbeat", "driver:location:version",
+                "driver:presence:generation:" + member,
+                longitude, latitude, member, recorded_at.timestamp(),
+                received_at.timestamp(), generation,
+            )
         fresh_ids.add(member)
-        applied = await redis_client.eval(
-            _REPAIR_DRIVER, 3,
-            "driver:online", "driver:heartbeat", "driver:location:version",
-            longitude, latitude, member, recorded_at.timestamp(), received_at.timestamp(),
-        )
         repaired += int(applied == 1)
 
     # Iterate both indexes: a partial Redis write or old deployment may leave
