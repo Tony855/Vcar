@@ -134,8 +134,6 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
         await redis.zrem("driver:online", str(telegram_id))
         await redis.zrem("driver:heartbeat", str(telegram_id))
         await redis.delete(generation_key)
-        await pool.execute("DELETE FROM users WHERE telegram_id=$1", int(telegram_id))
-        await pool.close()
         await redis.aclose()
 
 
@@ -190,8 +188,6 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.delete(f"driver:presence:generation:{telegram_id}")
-        await pool.execute("DELETE FROM users WHERE telegram_id=$1", int(telegram_id))
-        await pool.close()
         await redis.aclose()
 
 
