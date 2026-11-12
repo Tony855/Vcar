@@ -78,3 +78,19 @@ def test_run_checks_rejects_ok_envelope_with_empty_route_payload(monkeypatch, ca
     monkeypatch.setattr(smoke_osrm.urllib.request, "urlopen", lambda *a, **k: Response())
     assert smoke_osrm.run_checks("http://osrm", {"route": "/route"}) == 1
     assert "FAIL route" in capsys.readouterr().err
+
+
+def test_validate_payload_rejects_non_finite_route_and_table_metrics():
+    assert not smoke_osrm.validate_payload(
+        "route", {"code": "Ok", "routes": [{"distance": float("inf"), "duration": 1}]}
+    )
+    assert not smoke_osrm.validate_payload(
+        "table",
+        {"code": "Ok", "durations": [[0, float("inf")], [1, 0]], "distances": [[0, 1], [1, 0]]},
+    )
+
+
+def test_validate_payload_rejects_invalid_nearest_coordinate():
+    assert not smoke_osrm.validate_payload(
+        "nearest", {"code": "Ok", "waypoints": [{"location": [float("nan"), 11.5]}]}
+    )
