@@ -62,7 +62,7 @@ async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(s
 async def test_stale_projection_result_is_reported_as_not_published(sample):
     redis = FakeRedis(result=0)
     result = await publish_driver_location(
-        redis, telegram_id=12345, longitude=104.9282, latitude=11.5564,
+        redis, presence_generation=1, telegram_id=12345, longitude=104.9282, latitude=11.5564,
         heartbeat_at=1794460000.0, event=sample,
     )
     assert result is False
@@ -73,7 +73,7 @@ async def test_stale_projection_result_is_reported_as_not_published(sample):
 async def test_redis_failure_is_reported_as_degraded_projection_not_exception(sample):
     redis = FakeRedis(fail=True)
     result = await publish_driver_location(
-        redis, telegram_id=12345, longitude=104.9282, latitude=11.5564,
+        redis, presence_generation=1, telegram_id=12345, longitude=104.9282, latitude=11.5564,
         heartbeat_at=1794460000.0, event=sample,
     )
     assert result is False
@@ -108,11 +108,11 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
             "recorded_at": "2026-11-12T05:00:01+00:00",
         }
         assert await publish_driver_location(
-            redis, telegram_id=telegram_id, longitude=104.9282,
+            redis, presence_generation=1, telegram_id=telegram_id, longitude=104.9282,
             latitude=11.557, heartbeat_at=1794460002.0, event=newer,
         ) is True
         assert await publish_driver_location(
-            redis, telegram_id=telegram_id, longitude=104.9282,
+            redis, presence_generation=1, telegram_id=telegram_id, longitude=104.9282,
             latitude=11.555, heartbeat_at=1794460003.0, event=older,
         ) is False
         message = await asyncio.wait_for(
