@@ -7,15 +7,16 @@ from app.modules.locations.redis_projection import publish_driver_location
 
 
 class FakeRedis:
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, result=1):
         self.fail = fail
+        self.result = result
         self.calls = []
 
     async def eval(self, *args):
         self.calls.append(args)
         if self.fail:
             raise ConnectionError("simulated Redis outage")
-        return 1
+        return self.result
 
 
 @pytest.fixture
@@ -52,6 +53,17 @@ async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(s
     assert values[8] == datetime.fromisoformat(sample["recorded_at"]).timestamp()
     assert values[9] == 1794460000.0
     assert json.loads(values[10]) == sample
+
+
+@pytest.mark.asyncio
+async def test_stale_projection_result_is_reported_as_not_published(sample):
+    redis = FakeRedis(result=0)
+    result = await publish_driver_location(
+        redis, telegram_id=12345, longitude=104.9282, latitude=11.5564,
+        heartbeat_at=1794460000.0, event=sample,
+    )
+    assert result is False
+    assert len(redis.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -92,11 +104,11 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
         assert await publish_driver_location(
             redis, telegram_id=telegram_id, longitude=104.9282,
             latitude=11.557, heartbeat_at=1794460002.0, event=newer,
-        )
+        ) is True
         assert await publish_driver_location(
             redis, telegram_id=telegram_id, longitude=104.9282,
             latitude=11.555, heartbeat_at=1794460003.0, event=older,
-        )
+        ) is False
         message = await asyncio.wait_for(
             pubsub.get_message(ignore_subscribe_messages=True, timeout=1), 2
         )
@@ -167,3 +179,4 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.aclose()
+}
