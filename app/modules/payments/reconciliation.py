@@ -44,3 +44,112 @@ async def reconcile_wallet_ledger() -> list[dict]:
                 "difference_minor": balance - ledger_balance,
             })
     return discrepancies
+
+
+async def reconcile_order_settlements() -> list[dict]:
+    """Audit settlement snapshots against their atomically posted wallet batches.
+
+    This is read-only. A PREPARED snapshot with a complete batch is reported as
+    recoverable and is never silently finalized here; an operator can retry the
+    idempotent posting operation after reviewing the exact allocation.
+    """
+    async with db.pool.acquire() as connection:
+        rows = await connection.fetch(
+            """
+            SELECT
+                s.id AS settlement_id,
+                s.order_id,
+                s.currency AS settlement_currency,
+                s.policy_version,
+                s.status,
+                COUNT(t.id)::bigint AS ledger_count,
+                COALESCE(SUM(t.amount_minor), 0)::text AS ledger_sum_minor,
+                COUNT(DISTINCT t.currency)::bigint AS currency_count,
+                COUNT(DISTINCT t.order_id)::bigint AS order_count,
+                COUNT(DISTINCT t.metadata->>'_batch_key')::bigint AS batch_key_count,
+                ARRAY_AGG(t.metadata->>'_batch_index' ORDER BY t.id)
+                    FILTER (WHERE t.id IS NOT NULL) AS batch_indexes,
+                COUNT(*) FILTER (
+                    WHERE t.id IS NOT NULL
+                      AND t.currency <> s.currency
+                )::bigint AS currency_mismatch_count,
+                COUNT(*) FILTER (
+                    WHERE t.id IS NOT NULL
+                      AND t.order_id IS DISTINCT FROM s.order_id
+                )::bigint AS order_mismatch_count,
+                COUNT(*) FILTER (
+                    WHERE t.id IS NOT NULL
+                      AND t.metadata->>'_batch_key' IS DISTINCT FROM 'settlement:' || s.id::text
+                )::bigint AS batch_key_mismatch_count,
+                COUNT(*) FILTER (
+                    WHERE t.id IS NOT NULL
+                      AND t.metadata->>'_policy_version' IS DISTINCT FROM s.policy_version
+                )::bigint AS policy_mismatch_count
+            FROM order_settlements AS s
+            LEFT JOIN wallet_transactions AS t
+              ON t.metadata->>'_settlement_id' = s.id::text
+            GROUP BY s.id, s.order_id, s.currency, s.policy_version, s.status
+            ORDER BY s.id
+            """
+        )
+
+    findings = []
+    for row in rows:
+        settlement_id = int(row["settlement_id"])
+        status = row["status"]
+        count = int(row["ledger_count"])
+        ledger_sum = int(row["ledger_sum_minor"])
+        indexes = row["batch_indexes"] or []
+        index_values = []
+        malformed_indexes = False
+        for value in indexes:
+            try:
+                parsed = int(value)
+                if str(parsed) != value or parsed < 0:
+                    malformed_indexes = True
+                index_values.append(parsed)
+            except (TypeError, ValueError):
+                malformed_indexes = True
+
+        if count == 0:
+            if status == "POSTED":
+                finding = "POSTED_WITHOUT_LEDGER"
+            elif status == "PREPARED":
+                finding = "AWAITING_POSTING"
+            else:
+                finding = "FAILED_WITHOUT_LEDGER"
+        else:
+            complete_batch = (
+                2 <= count <= 32
+                and ledger_sum == 0
+                and int(row["currency_count"]) == 1
+                and int(row["order_count"]) == 1
+                and int(row["batch_key_count"]) == 1
+                and sorted(index_values) == list(range(count))
+                and not malformed_indexes
+                and int(row["currency_mismatch_count"]) == 0
+                and int(row["order_mismatch_count"]) == 0
+                and int(row["batch_key_mismatch_count"]) == 0
+                and int(row["policy_mismatch_count"]) == 0
+            )
+            if not complete_batch:
+                finding = "INCONSISTENT_LEDGER_BATCH"
+            elif status == "PREPARED":
+                finding = "BATCH_COMMITTED_NEEDS_FINALIZATION"
+            elif status == "POSTED":
+                finding = "RECONCILED"
+            else:
+                finding = "FAILED_WITH_LEDGER_ENTRIES"
+
+        if finding != "RECONCILED":
+            findings.append({
+                "settlement_id": settlement_id,
+                "order_id": int(row["order_id"]),
+                "status": status,
+                "currency": row["settlement_currency"],
+                "policy_version": row["policy_version"],
+                "ledger_count": count,
+                "ledger_sum_minor": ledger_sum,
+                "finding": finding,
+            })
+    return findings
