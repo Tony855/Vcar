@@ -212,3 +212,105 @@ async def post_explicit_allocation(
         ledger_batch=batch,
         replayed=batch.replayed,
     )
+
+
+@dataclass(frozen=True)
+class SettlementRecoveryResult:
+    settlement_id: int
+    order_id: int
+    status: str
+    ledger_count: int
+    recovered: bool
+
+
+async def finalize_committed_allocation(*, settlement_id: int) -> SettlementRecoveryResult:
+    """Finalize a PREPARED snapshot only when its complete wallet batch is durable.
+
+    This repairs the crash window after WalletLedger.post_balanced_batch commits
+    but before post_explicit_allocation can mark the snapshot POSTED. It never
+    creates, deletes, or changes ledger rows and refuses partial or mismatched
+    batches. The snapshot row lock serializes concurrent recovery attempts.
+    """
+    if (
+        not isinstance(settlement_id, int)
+        or isinstance(settlement_id, bool)
+        or not 0 < settlement_id <= 2**63 - 1
+    ):
+        raise ValueError("settlement_id must be a positive signed 64-bit integer")
+
+    async with db.pool.acquire() as conn:
+        async with conn.transaction():
+            settlement = await conn.fetchrow(
+                """SELECT id, order_id, currency, policy_version, status
+                   FROM order_settlements WHERE id=$1 FOR UPDATE""",
+                settlement_id,
+            )
+            if not settlement:
+                raise SettlementError("settlement snapshot does not exist")
+            if settlement["status"] == "POSTED":
+                return SettlementRecoveryResult(
+                    settlement_id, settlement["order_id"], "POSTED", 0, False
+                )
+            if settlement["status"] != "PREPARED":
+                raise SettlementError("only PREPARED settlements can be recovered")
+
+            rows = await conn.fetch(
+                """SELECT id, wallet_id, order_id, amount_minor, currency,
+                          idempotency_key, metadata
+                   FROM wallet_transactions
+                   WHERE metadata->>'_settlement_id'=$1
+                   ORDER BY id
+                   FOR UPDATE""",
+                str(settlement_id),
+            )
+            count = len(rows)
+            if not 2 <= count <= 32:
+                raise SettlementError("committed settlement batch is missing or incomplete")
+
+            indexes = []
+            total = 0
+            wallet_ids = set()
+            for row in rows:
+                metadata = row["metadata"]
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError as exc:
+                        raise SettlementError("settlement ledger metadata is malformed") from exc
+                if not isinstance(metadata, dict):
+                    raise SettlementError("settlement ledger metadata is malformed")
+                batch_index = metadata.get("_batch_index")
+                if (
+                    isinstance(batch_index, bool)
+                    or not isinstance(batch_index, int)
+                    or batch_index < 0
+                    or metadata.get("_batch_key") != f"settlement:{settlement_id}"
+                    or metadata.get("_policy_version") != settlement["policy_version"]
+                    or row["currency"] != settlement["currency"]
+                    or row["order_id"] != settlement["order_id"]
+                    or row["idempotency_key"] != f"settlement:{settlement_id}:{batch_index}"
+                ):
+                    raise SettlementError("settlement ledger batch does not match its snapshot")
+                indexes.append(batch_index)
+                total += row["amount_minor"]
+                wallet_ids.add(row["wallet_id"])
+
+            if (
+                sorted(indexes) != list(range(count))
+                or len(wallet_ids) != count
+                or total != 0
+            ):
+                raise SettlementError("settlement ledger batch is partial or unbalanced")
+
+            updated = await conn.fetchrow(
+                """UPDATE order_settlements SET status='POSTED'
+                   WHERE id=$1 AND status='PREPARED'
+                   RETURNING status""",
+                settlement_id,
+            )
+            if not updated:
+                raise SettlementError("settlement status changed during recovery")
+
+            return SettlementRecoveryResult(
+                settlement_id, settlement["order_id"], "POSTED", count, True
+            )
