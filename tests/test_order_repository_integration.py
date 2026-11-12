@@ -1002,6 +1002,16 @@ async def test_rating_comment_is_bound_to_own_completed_order_and_persists(datab
         assert await OrderRepository.add_rating_comment(
             order["id"], passenger_id, "Smooth trip"
         ) is True
+        # A repeated callback must not silently replace the passenger's first comment.
+        assert await OrderRepository.add_rating_comment(
+            order["id"], passenger_id, "replacement comment"
+        ) is False
+        assert await OrderRepository.add_rating_comment(
+            2**63, passenger_id, "out-of-range order"
+        ) is False
+        assert await OrderRepository.add_rating_comment(
+            order["id"], 2**63, "out-of-range passenger"
+        ) is False
 
         async with database_pool.acquire() as connection:
             comment = await connection.fetchval(
