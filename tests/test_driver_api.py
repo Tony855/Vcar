@@ -30,7 +30,7 @@ class FakeConnection:
 
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query, args))
-        if "SELECT id FROM users" in query:
+        if "SELECT id FROM users" in query or "SELECT driver_status FROM users" in query:
             return self.driver
         if "INSERT INTO driver_locations" in query:
             return self.inserted
