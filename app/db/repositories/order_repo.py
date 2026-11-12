@@ -63,44 +63,46 @@ class OrderRepository:
                         LIMIT $1
                     )
                     UPDATE order_event_outbox AS outbox
-                    SET locked_at=now(), attempts=attempts+1
+                    SET locked_at=now(), lock_token=gen_random_uuid(), attempts=attempts+1
                     FROM candidates
                     WHERE outbox.id=candidates.id
-                    RETURNING outbox.id, outbox.event_id, outbox.order_id, outbox.payload, outbox.attempts
+                    RETURNING outbox.id, outbox.event_id, outbox.order_id, outbox.payload, outbox.attempts, outbox.lock_token
                     """,
                     batch_size,
                 )
             return [dict(row) for row in rows]
 
     @classmethod
-    async def mark_status_event_delivered(cls, outbox_id):
+    async def mark_status_event_delivered(cls, outbox_id, lock_token):
         async with db.pool.acquire() as connection:
             result = await connection.execute(
                 """
                 UPDATE order_event_outbox
-                SET delivered_at=now(), locked_at=NULL, last_error=NULL
-                WHERE id=$1 AND delivered_at IS NULL
+                SET delivered_at=now(), locked_at=NULL, lock_token=NULL, last_error=NULL
+                WHERE id=$1 AND lock_token=$2 AND delivered_at IS NULL
                 """,
                 outbox_id,
+                lock_token,
             )
             return result == "UPDATE 1"
 
     @classmethod
-    async def retry_status_event(cls, outbox_id, error):
+    async def retry_status_event(cls, outbox_id, lock_token, error):
         """Release a failed claim with capped exponential backoff."""
         safe_error = str(error).replace("\x00", "")[:1000]
         async with db.pool.acquire() as connection:
             result = await connection.execute(
                 """
                 UPDATE order_event_outbox
-                SET locked_at=NULL,
+                SET locked_at=NULL, lock_token=NULL,
                     available_at=now() + LEAST(interval '15 minutes',
                         interval '5 seconds' * power(2, LEAST(attempts, 8))),
                     last_error=$2
-                WHERE id=$1 AND delivered_at IS NULL
+                WHERE id=$1 AND lock_token=$3 AND delivered_at IS NULL
                 """,
                 outbox_id,
                 safe_error,
+                lock_token,
             )
             return result == "UPDATE 1"
 
