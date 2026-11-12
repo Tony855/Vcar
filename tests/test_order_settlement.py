@@ -102,3 +102,152 @@ def test_component_validation_rejects_invalid_amounts(components):
 ])
 async def test_prepare_rejects_invalid_contract_arguments(kwargs):
     with pytest.raises(ValueError): await settlement.OrderSettlement.prepare(**kwargs)
+
+
+class PostingConnection:
+    def __init__(self, status="PREPARED"):
+        self.status = status
+        self.calls = []
+
+    def transaction(self):
+        return FakeTransaction()
+
+    async def fetchrow(self, query, *args):
+        self.calls.append(("fetchrow", query, args))
+        if "FROM order_settlements" in query:
+            return {
+                "id": 91, "order_id": 12, "currency": "USD",
+                "policy_version": "kh-v1", "status": self.status,
+            }
+        raise AssertionError(f"unexpected query: {query}")
+
+    async def execute(self, query, *args):
+        self.calls.append(("execute", query, args))
+        if "UPDATE order_settlements" in query and self.status == "PREPARED":
+            self.status = "POSTED"
+        return "UPDATE 1"
+
+    async def fetchval(self, query, *args):
+        self.calls.append(("fetchval", query, args))
+        return self.status
+
+
+@pytest.mark.asyncio
+async def test_post_explicit_allocation_binds_snapshot_and_marks_posted(monkeypatch):
+    conn = PostingConnection()
+    monkeypatch.setattr(settlement.db, "pool", Pool(conn))
+    captured = {}
+
+    async def post_batch(**kwargs):
+        captured.update(kwargs)
+        return settlement.LedgerBatchResult(
+            kwargs["idempotency_key"], (), False
+        )
+
+    monkeypatch.setattr(settlement.WalletLedger, "post_balanced_batch", post_batch)
+    result = await settlement.post_explicit_allocation(
+        settlement_id=91,
+        legs=[
+            {"user_id": 10, "amount_minor": 900, "kind": "DRIVER_EARNING"},
+            {"user_id": 20, "amount_minor": -900, "kind": "PASSENGER_FARE"},
+        ],
+    )
+
+    assert result.status == "POSTED"
+    assert result.order_id == 12
+    assert captured["currency"] == "USD"
+    assert captured["order_id"] == 12
+    assert captured["idempotency_key"] == "settlement:91"
+    assert captured["legs"][0]["metadata"] == {
+        "_settlement_id": 91, "_policy_version": "kh-v1"
+    }
+    assert captured["legs"][1]["metadata"]["_settlement_id"] == 91
+    assert conn.status == "POSTED"
+
+
+@pytest.mark.asyncio
+async def test_post_explicit_allocation_retry_reuses_deterministic_batch_key(monkeypatch):
+    conn = PostingConnection()
+    monkeypatch.setattr(settlement.db, "pool", Pool(conn))
+    calls = []
+
+    async def post_batch(**kwargs):
+        calls.append(kwargs)
+        return settlement.LedgerBatchResult(
+            kwargs["idempotency_key"], (), len(calls) > 1
+        )
+
+    monkeypatch.setattr(settlement.WalletLedger, "post_balanced_batch", post_batch)
+    legs = [
+        {"user_id": 10, "amount_minor": 900, "kind": "DRIVER_EARNING"},
+        {"user_id": 20, "amount_minor": -900, "kind": "PASSENGER_FARE"},
+    ]
+    first = await settlement.post_explicit_allocation(settlement_id=91, legs=legs)
+    second = await settlement.post_explicit_allocation(settlement_id=91, legs=legs)
+
+    assert first.replayed is False
+    assert second.replayed is True
+    assert [call["idempotency_key"] for call in calls] == [
+        "settlement:91", "settlement:91"
+    ]
+    assert conn.status == "POSTED"
+
+
+@pytest.mark.asyncio
+async def test_post_explicit_allocation_keeps_snapshot_prepared_when_ledger_fails(monkeypatch):
+    conn = PostingConnection()
+    monkeypatch.setattr(settlement.db, "pool", Pool(conn))
+
+    async def fail_batch(**kwargs):
+        raise settlement.WalletError("insufficient funds")
+
+    monkeypatch.setattr(settlement.WalletLedger, "post_balanced_batch", fail_batch)
+    with pytest.raises(settlement.WalletError):
+        await settlement.post_explicit_allocation(
+            settlement_id=91,
+            legs=[
+                {"user_id": 10, "amount_minor": 900, "kind": "DRIVER_EARNING"},
+                {"user_id": 20, "amount_minor": -900, "kind": "PASSENGER_FARE"},
+            ],
+        )
+
+    assert conn.status == "PREPARED"
+    assert not any("UPDATE order_settlements" in call[1] for call in conn.calls if call[0] == "execute")
+
+
+@pytest.mark.asyncio
+async def test_post_explicit_allocation_rejects_failed_snapshot(monkeypatch):
+    conn = PostingConnection(status="FAILED")
+    monkeypatch.setattr(settlement.db, "pool", Pool(conn))
+    called = False
+
+    async def should_not_post(**kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("failed snapshot must not post")
+
+    monkeypatch.setattr(settlement.WalletLedger, "post_balanced_batch", should_not_post)
+    with pytest.raises(settlement.SettlementError):
+        await settlement.post_explicit_allocation(
+            settlement_id=91,
+            legs=[
+                {"user_id": 10, "amount_minor": 900, "kind": "DRIVER_EARNING"},
+                {"user_id": 20, "amount_minor": -900, "kind": "PASSENGER_FARE"},
+            ],
+        )
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_post_explicit_allocation_rejects_reserved_metadata(monkeypatch):
+    conn = PostingConnection()
+    monkeypatch.setattr(settlement.db, "pool", Pool(conn))
+    with pytest.raises(ValueError):
+        await settlement.post_explicit_allocation(
+            settlement_id=91,
+            legs=[
+                {"user_id": 10, "amount_minor": 900, "kind": "DRIVER_EARNING",
+                 "metadata": {"_settlement_id": 7}},
+                {"user_id": 20, "amount_minor": -900, "kind": "PASSENGER_FARE"},
+            ],
+        )
