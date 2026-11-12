@@ -131,3 +131,25 @@ def test_telegram_init_data_rejects_invalid_signed_bigint_user_ids(telegram_id):
     data = _telegram_init_data(token, telegram_id, int(time.time()))
     with pytest.raises(ValueError, match="user is invalid"):
         verify_telegram_webapp_init_data(data, token)
+
+
+@pytest.mark.asyncio
+async def test_admin_token_without_exp_is_rejected(monkeypatch):
+    secret = "missing-exp-admin-secret-" + "x" * 32
+    monkeypatch.setenv("SECRET_KEY", secret)
+    token = jwt.encode({"sub": "admin", "role": "admin"}, secret, algorithm="HS256")
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    with pytest.raises(HTTPException) as error:
+        await verify_token(credentials)
+    assert error.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_driver_token_without_exp_is_rejected(monkeypatch):
+    secret = "missing-exp-driver-secret-" + "x" * 32
+    monkeypatch.setenv("SECRET_KEY", secret)
+    token = jwt.encode({"sub": "12345", "role": "driver"}, secret, algorithm="HS256")
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    with pytest.raises(HTTPException) as error:
+        await verify_driver_token(credentials)
+    assert error.value.status_code == 401
