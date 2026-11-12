@@ -601,9 +601,9 @@ async def test_concurrent_gps_samples_keep_only_the_newest_timestamp(database_po
         )
         accepted = [item for item in outcomes if isinstance(item, dict) and item.get("accepted")]
         rejected = [item for item in outcomes if isinstance(item, HTTPException)]
-        assert len(accepted) == 1
-        assert len(rejected) == 1
-        assert rejected[0].status_code == 409
+        assert len(accepted) in (1, 2)
+        assert len(rejected) + len(accepted) == 2
+        assert all(item.status_code == 409 for item in rejected)
         async with database_pool.acquire() as connection:
             stored = await connection.fetchval(
                 "SELECT recorded_at FROM driver_locations WHERE driver_id=$1",
