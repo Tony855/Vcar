@@ -187,6 +187,8 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
         await redis.delete(f"driver:presence:generation:{telegram_id}")
+        await pool.execute("DELETE FROM users WHERE telegram_id=$1", int(telegram_id))
+        await pool.close()
         await redis.aclose()
 
 
@@ -255,13 +257,27 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
     from app.db.core import db
     from app.services.dispatch import DispatchService
 
+    import asyncpg
+
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
     telegram_id = f"6{uuid.uuid4().int % 900000000}"
     try:
         monkeypatch.setattr(db, "redis", redis)
+        monkeypatch.setattr(db, "pool", pool)
+        await pool.execute(
+            "INSERT INTO users (telegram_id, driver_status) VALUES ($1, 'APPROVED')",
+            int(telegram_id),
+        )
         generation_key = f"driver:presence:generation:{telegram_id}"
         await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
         online_generation = int(await redis.get(generation_key))
+        db_state = await pool.fetchrow(
+            "SELECT driver_is_online, driver_presence_generation FROM users WHERE telegram_id=$1",
+            int(telegram_id),
+        )
+        assert db_state["driver_is_online"] is True
+        assert db_state["driver_presence_generation"] == online_generation
 
         assert await redis.zscore("driver:heartbeat", telegram_id) is not None
         position = (await redis.geopos("driver:online", telegram_id))[0]
@@ -273,6 +289,12 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
         await DispatchService.go_offline(telegram_id)
         offline_generation = int(await redis.get(generation_key))
         assert offline_generation > online_generation
+        db_state = await pool.fetchrow(
+            "SELECT driver_is_online, driver_presence_generation FROM users WHERE telegram_id=$1",
+            int(telegram_id),
+        )
+        assert db_state["driver_is_online"] is False
+        assert db_state["driver_presence_generation"] == offline_generation
 
         assert await redis.zscore("driver:heartbeat", telegram_id) is None
         assert await redis.zscore("driver:location:version", telegram_id) is None
