@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import math
 import os
 import secrets
 import sys
@@ -8,7 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException, Response, Query, Header
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # 动态获取项目根目录
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +32,7 @@ from app.modules.payments.router import router as wallet_router
 from app.modules.orders.router import router as driver_orders_router
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 _outbox_stop_event = None
 _outbox_worker_task = None
 _presence_stop_event = None
@@ -50,7 +53,18 @@ app.add_middleware(
 )
 
 class LoginData(BaseModel): username: str; password: str
-class PriceUpdate(BaseModel): base_fare: float; per_km: float
+class PriceUpdate(BaseModel):
+    base_fare: float
+    per_km: float
+
+
+def _validate_price_update_values(base_fare: float, per_km: float) -> None:
+    for value in (base_fare, per_km):
+        if not math.isfinite(value) or value < 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Fare values must be finite and non-negative",
+            )
 class ReviewData(BaseModel): tg_id: int; status: str
 
 @app.on_event("startup")
@@ -145,22 +159,40 @@ async def get_admin_orders():
         rows = await c.fetch("SELECT o.id, o.status, o.distance_km, o.price_estimate, o.driver_id, du.plate_number as driver_plate FROM orders o LEFT JOIN users du ON o.driver_id=du.id ORDER BY o.id DESC LIMIT 50")
         return [dict(r) for r in rows]
 
+
+def _parse_pricing_settings(rows):
+    """Parse persisted fare settings, falling back safely on invalid values."""
+    defaults = {"base_fare": 1.0, "per_km_rate": 0.5}
+    parsed = dict(defaults)
+    for row in rows:
+        key = row["key"]
+        if key not in defaults:
+            continue
+        try:
+            value = float(row["value"])
+        except (TypeError, ValueError, OverflowError):
+            logger.warning("Invalid pricing setting %s; using default %s", key, defaults[key])
+            continue
+        if not math.isfinite(value):
+            logger.warning("Non-finite pricing setting %s; using default %s", key, defaults[key])
+            continue
+        parsed[key] = value
+    return parsed
+
 @app.get("/api/pricing", dependencies=[Depends(verify_token)])
 async def get_pricing():
     async with db.pool.acquire() as c:
         # 只查起步价和每公里，防止把客服字符串转 float 报错
         rows = await c.fetch("SELECT key, value FROM settings WHERE key IN ('base_fare', 'per_km_rate')")
-        data = {}
-        for r in rows:
-            try: data[r['key']] = float(r['value'])
-            except: data[r['key']] = 0.0
+        data = _parse_pricing_settings(rows)
         return {
-            "base_fare": data.get('base_fare', 1.0),
-            "per_km": data.get('per_km_rate', 0.5)
+            "base_fare": data["base_fare"],
+            "per_km": data["per_km_rate"],
         }
 
 @app.post("/api/pricing", dependencies=[Depends(verify_token)])
 async def set_pricing(price: PriceUpdate):
+    _validate_price_update_values(price.base_fare, price.per_km)
     async with db.pool.acquire() as c:
         await c.execute("UPDATE settings SET value=$1 WHERE key='base_fare'", str(price.base_fare))
         await c.execute("UPDATE settings SET value=$1 WHERE key='per_km_rate'", str(price.per_km))
