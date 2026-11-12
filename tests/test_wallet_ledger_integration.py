@@ -246,3 +246,109 @@ async def test_idempotency_replay_requires_same_provider_reference_and_audit_met
             await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id=$1", wallet_id)
             await conn.execute("DELETE FROM wallet_accounts WHERE id=$1", wallet_id)
             await conn.execute("DELETE FROM users WHERE id=$1", user_id)
+
+
+@pytest.mark.asyncio
+async def test_wallet_ledger_rolls_back_balance_when_transaction_insert_fails(database_pool):
+    """A failed ledger insert must roll back the preceding balance update."""
+    telegram_id = int(uuid.uuid4().int % 8_000_000_000) + 1
+    async with database_pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            "INSERT INTO users (telegram_id, first_name) VALUES ($1, 'wallet-rollback') RETURNING id",
+            telegram_id,
+        )
+        wallet_id = await conn.fetchval(
+            "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', 1000) RETURNING id",
+            user_id,
+        )
+
+    suffix = uuid.uuid4().hex[:12]
+    function_name = f"vcar_fail_wallet_insert_{suffix}"
+    trigger_name = f"vcar_fail_wallet_insert_trigger_{suffix}"
+    key = f"wallet-rollback-{uuid.uuid4()}"
+    async with database_pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            CREATE FUNCTION {function_name}() RETURNS trigger AS $$
+            BEGIN
+                RAISE EXCEPTION 'injected wallet ledger insert failure';
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        await conn.execute(
+            f"CREATE TRIGGER {trigger_name} BEFORE INSERT ON wallet_transactions "
+            f"FOR EACH ROW EXECUTE FUNCTION {function_name}()"
+        )
+    try:
+        with pytest.raises(Exception, match="injected wallet ledger insert failure"):
+            await WalletLedger.post(
+                user_id=user_id,
+                currency="USD",
+                amount_minor=-300,
+                kind="WITHDRAWAL",
+                idempotency_key=key,
+            )
+        async with database_pool.acquire() as conn:
+            balance = await conn.fetchval(
+                "SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet_id
+            )
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM wallet_transactions WHERE idempotency_key=$1", key
+            )
+        assert balance == 1000
+        assert count == 0
+    finally:
+        async with database_pool.acquire() as conn:
+            await conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON wallet_transactions")
+            await conn.execute(f"DROP FUNCTION IF EXISTS {function_name}()")
+            await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id=$1", wallet_id)
+            await conn.execute("DELETE FROM wallet_accounts WHERE id=$1", wallet_id)
+            await conn.execute("DELETE FROM users WHERE id=$1", user_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_wallet_debits_cannot_overdraw_balance(database_pool):
+    """Row locking and the conditional update allow only affordable concurrent debits."""
+    telegram_id = int(uuid.uuid4().int % 8_000_000_000) + 1
+    async with database_pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            "INSERT INTO users (telegram_id, first_name) VALUES ($1, 'wallet-debit-race') RETURNING id",
+            telegram_id,
+        )
+        wallet_id = await conn.fetchval(
+            "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', 1000) RETURNING id",
+            user_id,
+        )
+
+    keys = [f"wallet-debit-race-{uuid.uuid4()}" for _ in range(2)]
+    try:
+        outcomes = await asyncio.gather(
+            *[
+                WalletLedger.post(
+                    user_id=user_id,
+                    currency="USD",
+                    amount_minor=-700,
+                    kind="WITHDRAWAL",
+                    idempotency_key=key,
+                )
+                for key in keys
+            ],
+            return_exceptions=True,
+        )
+        assert sum(not isinstance(result, Exception) for result in outcomes) == 1
+        assert sum(isinstance(result, InsufficientFunds) for result in outcomes) == 1
+        async with database_pool.acquire() as conn:
+            balance = await conn.fetchval(
+                "SELECT balance_minor FROM wallet_accounts WHERE id=$1", wallet_id
+            )
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM wallet_transactions WHERE wallet_id=$1", wallet_id
+            )
+        assert balance == 300
+        assert count == 1
+    finally:
+        async with database_pool.acquire() as conn:
+            await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id=$1", wallet_id)
+            await conn.execute("DELETE FROM wallet_accounts WHERE id=$1", wallet_id)
+            await conn.execute("DELETE FROM users WHERE id=$1", user_id)
