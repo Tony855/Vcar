@@ -334,3 +334,88 @@ async def test_unapproved_driver_cannot_accept_order_even_if_called_directly(dat
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_order_transition_rolls_back_when_outbox_append_fails(database_pool, monkeypatch):
+    """The order row, event history and outbox must commit or roll back together."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "rollback-passenger")
+        driver_id = await _create_user(connection, "rollback-driver")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        original_append = OrderRepository._append_event
+
+        async def append_then_fail(connection, *args, **kwargs):
+            await original_append(connection, *args, **kwargs)
+            raise RuntimeError("injected outbox persistence failure")
+
+        monkeypatch.setattr(OrderRepository, "_append_event", append_then_fail)
+        with pytest.raises(RuntimeError, match="injected outbox persistence failure"):
+            await OrderRepository.update_status(
+                order["id"], "ARRIVED", "ACCEPTED",
+                actor_user_id=driver_id, actor_role="DRIVER",
+            )
+
+        async with database_pool.acquire() as connection:
+            row = await connection.fetchrow(
+                "SELECT status FROM orders WHERE id=$1", order["id"]
+            )
+            event_statuses = await connection.fetch(
+                "SELECT to_status FROM order_events WHERE order_id=$1 ORDER BY id",
+                order["id"],
+            )
+            outbox_statuses = await connection.fetch(
+                "SELECT payload->>'status' AS status FROM order_event_outbox WHERE order_id=$1 ORDER BY id",
+                order["id"],
+            )
+        assert row["status"] == "ACCEPTED"
+        assert [item["to_status"] for item in event_statuses] == ["DISPATCHING", "ACCEPTED"]
+        assert [item["status"] for item in outbox_statuses] == ["DISPATCHING", "ACCEPTED"]
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_outbox_workers_claim_disjoint_events(database_pool):
+    """SKIP LOCKED workers must never receive the same pending outbox row."""
+    async with database_pool.acquire() as connection:
+        passenger_a = await _create_user(connection, "claim-passenger-a")
+        passenger_b = await _create_user(connection, "claim-passenger-b")
+
+    order_a = await OrderRepository.create(
+        passenger_a, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    order_b = await OrderRepository.create(
+        passenger_b, 104.9, 11.5, 104.96, 11.56, 6.0, 4.0
+    )
+    try:
+        batches = await asyncio.gather(
+            OrderRepository.claim_status_events(limit=1),
+            OrderRepository.claim_status_events(limit=1),
+        )
+        claimed_ids = [row["id"] for batch in batches for row in batch]
+        assert len(claimed_ids) == 2
+        assert len(set(claimed_ids)) == 2
+        async with database_pool.acquire() as connection:
+            locked = await connection.fetchval(
+                "SELECT COUNT(*) FROM order_event_outbox WHERE id = ANY($1) AND locked_at IS NOT NULL",
+                claimed_ids,
+            )
+        assert locked == 2
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute(
+                "DELETE FROM orders WHERE id = ANY($1)", [order_a["id"], order_b["id"]]
+            )
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_a, passenger_b]
+            )
