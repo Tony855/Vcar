@@ -24,12 +24,14 @@ return removed
 """
 
 _SET_DRIVER_ONLINE = """
+redis.call('INCR', KEYS[3])
 redis.call('GEOADD', KEYS[1], ARGV[1], ARGV[2], ARGV[3])
 redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3])
 return 1
 """
 
 _SET_DRIVER_OFFLINE = """
+redis.call('INCR', KEYS[4])
 redis.call('ZREM', KEYS[1], ARGV[1])
 redis.call('ZREM', KEYS[2], ARGV[1])
 redis.call('ZREM', KEYS[3], ARGV[1])
@@ -75,7 +77,7 @@ class DispatchService:
     async def go_online(driver_tid, lng, lat):
         await db.redis.eval(
             _SET_DRIVER_ONLINE, 2,
-            "driver:online", "driver:heartbeat",
+            "driver:online", "driver:heartbeat", f"driver:presence:generation:{driver_tid}",
             float(lng), float(lat), str(driver_tid), __import__("time").time(),
         )
 
@@ -84,7 +86,7 @@ class DispatchService:
         await db.redis.eval(
             _SET_DRIVER_OFFLINE, 3,
             "driver:online", "driver:heartbeat", "driver:location:version",
-            str(driver_tid),
+            f"driver:presence:generation:{driver_tid}", str(driver_tid),
         )
 
     @classmethod
