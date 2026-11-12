@@ -385,3 +385,46 @@ async def test_wallet_credit_cannot_overflow_signed_bigint_balance(database_pool
         )
     assert balance == 2**63 - 11
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_user_can_hold_and_post_to_independent_usd_and_khr_wallets(database_pool):
+    telegram_id = int(uuid.uuid4().int % 8_000_000_000) + 1
+    async with database_pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            "INSERT INTO users (telegram_id, first_name) VALUES ($1, 'multi-currency-wallet') RETURNING id",
+            telegram_id,
+        )
+        usd_wallet_id = await conn.fetchval(
+            "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', 0) RETURNING id",
+            user_id,
+        )
+        khr_wallet_id = await conn.fetchval(
+            "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'KHR', 0) RETURNING id",
+            user_id,
+        )
+
+    try:
+        usd = await WalletLedger.post(
+            user_id=user_id, currency="USD", amount_minor=1250,
+            kind="TOPUP", idempotency_key=f"multi-currency-usd-{uuid.uuid4()}",
+        )
+        khr = await WalletLedger.post(
+            user_id=user_id, currency="KHR", amount_minor=50000,
+            kind="TOPUP", idempotency_key=f"multi-currency-khr-{uuid.uuid4()}",
+        )
+        assert usd.wallet_id == usd_wallet_id
+        assert usd.balance_minor == 1250
+        assert khr.wallet_id == khr_wallet_id
+        assert khr.balance_minor == 50000
+        async with database_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, currency, balance_minor FROM wallet_accounts WHERE user_id=$1 ORDER BY currency",
+                user_id,
+            )
+        assert [(row["currency"], row["balance_minor"]) for row in rows] == [("KHR", 50000), ("USD", 1250)]
+    finally:
+        async with database_pool.acquire() as conn:
+            await conn.execute("DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)", [usd_wallet_id, khr_wallet_id])
+            await conn.execute("DELETE FROM wallet_accounts WHERE id = ANY($1)", [usd_wallet_id, khr_wallet_id])
+            await conn.execute("DELETE FROM users WHERE id=$1", user_id)

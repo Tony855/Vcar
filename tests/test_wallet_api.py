@@ -21,6 +21,7 @@ class FakeConnection:
             "balance_minor": 1234,
             "created_at": datetime(2026, 11, 12, tzinfo=timezone.utc),
         }
+        self.wallets = {self.wallet["currency"]: self.wallet}
         self.transactions = transactions or []
         self.fetchval_calls = []
         self.execute_calls = []
@@ -37,6 +38,8 @@ class FakeConnection:
 
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query, args))
+        if "FROM wallet_accounts WHERE user_id=$1 AND currency=$2" in query:
+            return self.wallets.get(args[1])
         return self.wallet
 
     async def fetch(self, query, *args):
@@ -105,17 +108,27 @@ def test_wallet_open_creates_or_returns_account_for_authenticated_user(wallet_cl
     assert response.json()["balance_minor"] == 1234
     assert connection.fetchval_calls[0][1] == (7003003,)
     assert connection.execute_calls[0][1] == (41, "USD")
+    assert connection.fetchrow_calls[0][1] == (41, "USD")
 
 
-def test_wallet_open_rejects_currency_change_for_existing_account(wallet_client):
+def test_wallet_open_supports_independent_usd_and_khr_accounts(wallet_client):
     client, connection, token = wallet_client
-    connection.wallet["currency"] = "KHR"
+    connection.wallets["KHR"] = {
+        "id": 8,
+        "currency": "KHR",
+        "balance_minor": 0,
+        "created_at": datetime(2026, 11, 12, tzinfo=timezone.utc),
+    }
     response = client.post(
         "/api/v1/wallet/me",
         headers={"Authorization": f"Bearer {token()}"},
-        json={"currency": "USD"},
+        json={"currency": "KHR"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 200
+    assert response.json()["id"] == 8
+    assert response.json()["currency"] == "KHR"
+    assert connection.execute_calls[0][1] == (41, "KHR")
+    assert connection.fetchrow_calls[0][1] == (41, "KHR")
 
 
 def test_wallet_transactions_are_scoped_to_authenticated_user_and_pagination(wallet_client):
