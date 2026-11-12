@@ -64,6 +64,11 @@ echo "[4/7] Installing Python dependencies and applying migrations..."
 python3 -m venv .venv
 .venv/bin/pip install --disable-pip-version-check -q --upgrade pip
 .venv/bin/pip install --disable-pip-version-check -q -r requirements.txt
+# Take and verify a database backup before any schema or Alembic migration.
+# A failed backup aborts the installer because the script runs with set -e.
+echo "Creating a verified pre-migration database backup..."
+VCAR_ENV_FILE="$PROJECT_DIR/.env" VCAR_BACKUP_DIR="${VCAR_BACKUP_DIR:-/var/backups/vcar}" \
+  bash "$PROJECT_DIR/scripts/backup_database.sh"
 PGPASSWORD="$MIGRATION_DB_PASSWORD" psql -h 127.0.0.1 -U vcar -d vcar -v ON_ERROR_STOP=1 -f app/db/schema.sql >/dev/null
 DATABASE_URL="$DATABASE_URL" MIGRATION_DATABASE_URL="$MIGRATION_DATABASE_URL" .venv/bin/alembic upgrade head
 
