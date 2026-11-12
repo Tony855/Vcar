@@ -36,7 +36,7 @@ def sample():
 async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(sample):
     redis = FakeRedis()
     result = await publish_driver_location(
-        redis, telegram_id=12345, longitude=104.9282, latitude=11.5564,
+        redis, presence_generation=1, telegram_id=12345, longitude=104.9282, latitude=11.5564,
         heartbeat_at=1794460000.0, event=sample,
     )
     assert result is True
@@ -44,15 +44,18 @@ async def test_projection_uses_one_atomic_script_for_presence_and_both_streams(s
     script, key_count, *values = redis.calls[0]
     assert "ZSCORE" in script and "GEOADD" in script
     assert "ZREMRANGEBYSCORE" in script and script.count("PUBLISH") == 2
-    assert key_count == 5
-    assert values[:5] == [
+    assert key_count == 6
+    assert values[:6] == [
         "driver:online", "driver:heartbeat", "driver:location:version",
         "driver:location:12345", "fleet:locations",
+        "driver:presence:generation:12345",
     ]
-    assert values[5:8] == [104.9282, 11.5564, "12345"]
-    assert values[8] == datetime.fromisoformat(sample["recorded_at"]).timestamp()
-    assert values[9] == 1794460000.0
-    assert json.loads(values[10]) == sample
+    assert values[6:9] == [104.9282, 11.5564, "12345"]
+    assert values[9] == datetime.fromisoformat(sample["recorded_at"]).timestamp()
+    assert values[10] == 1794460000.0
+    assert json.loads(values[11]) == sample
+    assert values[12] == 1
+    assert "current_generation" in script and "ARGV[7]" in script
 
 
 @pytest.mark.asyncio
@@ -89,8 +92,11 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
     telegram_id = int(f"8{uuid.uuid4().int % 900000000}")
     channel = f"driver:location:{telegram_id}"
+    generation_key = f"driver:presence:generation:{telegram_id}"
     pubsub = redis.pubsub()
     try:
+        await redis.set(generation_key, 1)
+        await redis.zadd("driver:heartbeat", {str(telegram_id): 1794460000.0})
         await pubsub.subscribe(channel)
         await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=False, timeout=1), 2)
         newer = {
@@ -126,6 +132,8 @@ async def test_real_redis_projection_rejects_late_older_samples(sample):
         await redis.zrem("driver:heartbeat", str(telegram_id))
         await redis.zrem("driver:location:version", str(telegram_id))
         await redis.zrem("driver:online", str(telegram_id))
+        await redis.zrem("driver:heartbeat", str(telegram_id))
+        await redis.delete(generation_key)
         await redis.aclose()
 
 
@@ -178,6 +186,7 @@ async def test_real_redis_dispatch_removes_expired_driver_from_geo_index(monkeyp
         await redis.zrem("driver:heartbeat", telegram_id)
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
+        await redis.delete(f"driver:presence:generation:{telegram_id}")
         await redis.aclose()
 
 
@@ -250,7 +259,9 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
     telegram_id = f"6{uuid.uuid4().int % 900000000}"
     try:
         monkeypatch.setattr(db, "redis", redis)
+        generation_key = f"driver:presence:generation:{telegram_id}"
         await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
+        online_generation = int(await redis.get(generation_key))
 
         assert await redis.zscore("driver:heartbeat", telegram_id) is not None
         position = (await redis.geopos("driver:online", telegram_id))[0]
@@ -260,6 +271,8 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
 
         await redis.zadd("driver:location:version", {telegram_id: 123.0})
         await DispatchService.go_offline(telegram_id)
+        offline_generation = int(await redis.get(generation_key))
+        assert offline_generation > online_generation
 
         assert await redis.zscore("driver:heartbeat", telegram_id) is None
         assert await redis.zscore("driver:location:version", telegram_id) is None
@@ -320,4 +333,50 @@ async def test_dispatch_expiry_cleanup_bounds_redis_script_batches(monkeypatch):
         await redis.zrem("driver:heartbeat", *members)
         await redis.zrem("driver:location:version", *members)
         await redis.zrem("driver:online", *members)
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_offline_transition_fences_an_in_flight_gps_projection(sample):
+    import os
+    import uuid
+
+    from redis.asyncio import Redis
+
+    from app.services.dispatch import DispatchService
+
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    telegram_id = f"5{uuid.uuid4().int % 900000000}"
+    generation_key = f"driver:presence:generation:{telegram_id}"
+    channel = f"driver:location:{telegram_id}"
+    pubsub = redis.pubsub()
+    try:
+        await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
+        captured = int(await redis.get(generation_key))
+        await pubsub.subscribe(channel)
+        await pubsub.get_message(ignore_subscribe_messages=False, timeout=1)
+
+        # Simulate a driver pressing Offline after the request captured its token
+        # but before its PostgreSQL transaction finishes and Redis projection runs.
+        await DispatchService.go_offline(telegram_id)
+        result = await publish_driver_location(
+            redis,
+            presence_generation=captured,
+            telegram_id=int(telegram_id),
+            longitude=104.9282,
+            latitude=11.5564,
+            heartbeat_at=1794460000.0,
+            event={**sample, "telegram_id": int(telegram_id)},
+        )
+
+        assert result is False
+        assert await redis.zscore("driver:heartbeat", telegram_id) is None
+        assert await redis.geopos("driver:online", telegram_id) == [None]
+        assert await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.05) is None
+    finally:
+        await pubsub.aclose()
+        await redis.zrem("driver:heartbeat", telegram_id)
+        await redis.zrem("driver:location:version", telegram_id)
+        await redis.zrem("driver:online", telegram_id)
+        await redis.delete(generation_key)
         await redis.aclose()
