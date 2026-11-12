@@ -913,6 +913,7 @@ async def test_order_ratings_are_authorized_idempotent_and_directional(database_
         assert by_id[passenger_id]["rating_count"] == 2
     finally:
         async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM reviews WHERE order_id=$1", order["id"])
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)",
@@ -958,6 +959,7 @@ async def test_concurrent_duplicate_order_rating_updates_aggregate_once(database
         assert aggregate["rating_count"] == 2
     finally:
         async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM reviews WHERE order_id=$1", order["id"])
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
@@ -1017,6 +1019,7 @@ async def test_rating_comment_is_bound_to_own_completed_order_and_persists(datab
         assert legacy["rating"] == 5
     finally:
         async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM reviews WHERE order_id=$1", order["id"])
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)",
@@ -1079,6 +1082,7 @@ async def test_rating_legacy_projection_rolls_back_with_rating_insert(database_p
         async with database_pool.acquire() as connection:
             await connection.execute("DROP TRIGGER IF EXISTS reject_rating_projection ON reviews")
             await connection.execute("DROP FUNCTION IF EXISTS reject_rating_projection()")
+            await connection.execute("DELETE FROM reviews WHERE order_id=$1", order["id"])
             await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
