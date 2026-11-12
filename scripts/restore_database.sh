@@ -50,7 +50,7 @@ trap restart_services EXIT
 echo "Stopping Vcar services before restore..."
 SERVICES_STOPPED=1
 systemctl stop vcar-bot vcar-web
-pg_restore --clean --if-exists --no-owner --no-acl --exit-on-error \
+pg_restore --clean --if-exists --no-owner --no-acl --exit-on-error --single-transaction \
   --dbname="$MIGRATION_DATABASE_URL" "$1"
 
 echo "Restore completed. Restarting services..."
