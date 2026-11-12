@@ -281,6 +281,7 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
         await redis.zrem("driver:heartbeat", telegram_id)
         await redis.zrem("driver:location:version", telegram_id)
         await redis.zrem("driver:online", telegram_id)
+        await redis.delete(f"driver:presence:generation:{telegram_id}")
         await redis.aclose()
 
 
@@ -343,9 +344,11 @@ async def test_offline_transition_fences_an_in_flight_gps_projection(sample):
 
     from redis.asyncio import Redis
 
+    from app.db.core import db
     from app.services.dispatch import DispatchService
 
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    monkeypatch.setattr(db, "redis", redis)
     telegram_id = f"5{uuid.uuid4().int % 900000000}"
     generation_key = f"driver:presence:generation:{telegram_id}"
     channel = f"driver:location:{telegram_id}"
