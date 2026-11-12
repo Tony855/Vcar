@@ -20,7 +20,10 @@ def _claims(authorization: str | None, allowed_roles: set[str]) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
     try:
-        claims = jwt.decode(authorization[7:], settings.secret_key, algorithms=["HS256"])
+        claims = jwt.decode(
+            authorization[7:], settings.secret_key, algorithms=["HS256"],
+            options={"require": ["exp"]},
+        )
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
     role = claims.get("role")

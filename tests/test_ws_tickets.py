@@ -64,3 +64,15 @@ async def test_ticket_issuer_rejects_wrong_role_and_invalid_scope(fake_redis):
         await ws_tickets.issue_ws_ticket(token(secret, role="driver"), "admin-fleet")
     with pytest.raises(ValueError):
         await ws_tickets.issue_ws_ticket(token(secret), "unrestricted")
+
+
+@pytest.mark.asyncio
+async def test_ticket_issuer_rejects_access_token_without_exp(fake_redis):
+    _, secret = fake_redis
+    token_without_exp = jwt.encode(
+        {"sub": "12345", "role": "admin"},
+        secret,
+        algorithm="HS256",
+    )
+    with pytest.raises(ValueError, match="Invalid or expired"):
+        await ws_tickets.issue_ws_ticket(token_without_exp, "admin-fleet")

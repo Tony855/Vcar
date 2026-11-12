@@ -191,3 +191,14 @@ async def test_order_stream_rejects_malformed_passenger_ticket_subject_before_da
     assert websocket.close_code == 4401
     assert websocket.accepted is False
     assert connection.fetchval_calls == []
+
+
+def test_passenger_claims_rejects_token_without_exp(jwt_secret):
+    token_without_exp = jwt.encode(
+        {"sub": "1001", "role": "passenger"},
+        jwt_secret,
+        algorithm="HS256",
+    )
+    with pytest.raises(HTTPException) as error:
+        passenger_router.passenger_claims("Bearer " + token_without_exp)
+    assert error.value.status_code == 401
