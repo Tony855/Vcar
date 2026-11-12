@@ -214,3 +214,82 @@ async def test_outbox_worker_continues_when_retry_schedule_itself_fails():
     assert lock_token == "claim-token-22"
     assert isinstance(error, ConnectionError)
     repository.mark_status_event_delivered.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("poll_interval", [0, -1, True, float("nan"), float("inf"), "1"])
+async def test_outbox_worker_rejects_invalid_poll_intervals(poll_interval):
+    from app.services.order_event_outbox import run_order_event_outbox_worker
+
+    with pytest.raises(ValueError, match="poll_interval"):
+        await run_order_event_outbox_worker(
+            stop_event=type("Stop", (), {"is_set": lambda self: True})(),
+            poll_interval=poll_interval,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch_size", [0, -1, 501, True, 1.5, "10"])
+async def test_outbox_worker_rejects_invalid_batch_sizes(batch_size):
+    from app.services.order_event_outbox import run_order_event_outbox_worker
+
+    with pytest.raises(ValueError, match="batch_size"):
+        await run_order_event_outbox_worker(
+            stop_event=type("Stop", (), {"is_set": lambda self: True})(),
+            batch_size=batch_size,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -1, 501, True, 1.5, "10"])
+async def test_outbox_dispatch_rejects_invalid_batch_limits(limit):
+    from app.services.order_event_outbox import dispatch_order_event_batch
+
+    repository = type("Repository", (), {})()
+    repository.claim_status_events = AsyncMock()
+    with pytest.raises(ValueError, match="batch limit"):
+        await dispatch_order_event_batch(object(), repository, limit=limit)
+    repository.claim_status_events.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_accepts_maximum_supported_batch_size():
+    from app.services.order_event_outbox import run_order_event_outbox_worker
+
+    stop = type("Stop", (), {"is_set": lambda self: True})()
+    await run_order_event_outbox_worker(stop, poll_interval=0.01, batch_size=500)
+
+
+@pytest.mark.asyncio
+async def test_outbox_worker_picks_up_redis_after_runtime_reconnection(monkeypatch):
+    from app.db.core import db
+    from app.services import order_event_outbox as outbox
+
+    redis_client = object()
+    observed = []
+
+    async def dispatch(redis, *, limit):
+        observed.append((redis, limit))
+        return 0
+
+    class ReconnectingStop:
+        def __init__(self):
+            self.waits = 0
+
+        def is_set(self):
+            return self.waits >= 2
+
+        async def wait(self):
+            self.waits += 1
+            if self.waits == 1:
+                monkeypatch.setattr(db, "redis", redis_client)
+            return True
+
+    monkeypatch.setattr(db, "redis", None)
+    monkeypatch.setattr(outbox, "dispatch_order_event_batch", dispatch)
+
+    await outbox.run_order_event_outbox_worker(
+        ReconnectingStop(), poll_interval=0.01, batch_size=25
+    )
+
+    assert observed == [(redis_client, 25)]

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 
 from app.db.core import db
 from app.db.repositories.order_repo import OrderRepository
@@ -15,6 +16,8 @@ async def dispatch_order_event_batch(redis_client, repository=OrderRepository, l
     cause the same event to be published again. Consumers should deduplicate by
     the stable event_id included in every payload.
     """
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 500:
+        raise ValueError("outbox batch limit must be an integer between 1 and 500")
     events = await repository.claim_status_events(limit=limit)
     delivered = 0
     for event in events:
@@ -60,6 +63,19 @@ async def run_order_event_outbox_worker(
     stop_event, poll_interval=1.0, batch_size=100
 ):
     """Continuously dispatch durable order status events until shutdown."""
+    if (
+        isinstance(poll_interval, bool)
+        or not isinstance(poll_interval, (int, float))
+        or not math.isfinite(poll_interval)
+        or poll_interval <= 0
+    ):
+        raise ValueError("poll_interval must be a finite positive number")
+    if (
+        not isinstance(batch_size, int)
+        or isinstance(batch_size, bool)
+        or not 1 <= batch_size <= 500
+    ):
+        raise ValueError("batch_size must be an integer between 1 and 500")
     while not stop_event.is_set():
         try:
             redis_client = db.redis
