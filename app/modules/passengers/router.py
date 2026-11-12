@@ -61,7 +61,10 @@ def passenger_claims(authorization: str | None) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
     try:
-        claims = jwt.decode(authorization[7:], settings.secret_key, algorithms=["HS256"])
+        claims = jwt.decode(
+            authorization[7:], settings.secret_key, algorithms=["HS256"],
+            options={"require": ["exp"]},
+        )
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired passenger token") from exc
     if claims.get("role") != "passenger" or not is_valid_telegram_subject(claims.get("sub")):
