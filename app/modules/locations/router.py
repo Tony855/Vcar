@@ -45,7 +45,7 @@ async def update_driver_location(
     async with db.pool.acquire() as conn:
         async with conn.transaction():
             driver = await conn.fetchrow(
-                "SELECT id FROM users WHERE telegram_id=$1 AND driver_status='APPROVED'",
+                "SELECT id FROM users WHERE telegram_id=$1 AND driver_status='APPROVED' FOR UPDATE",
                 telegram_id,
             )
             if not driver:
