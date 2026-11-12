@@ -343,7 +343,55 @@ class OrderRepository:
                     """,
                     score, ratee_user_id,
                 )
+
+                # Keep the legacy driver-review projection in the same transaction.
+                # The reviews table represents passenger feedback about a driver;
+                # driver-to-passenger scores remain in the directional table only.
+                if actor_role == "PASSENGER":
+                    existing_review = await connection.fetchval(
+                        "SELECT id FROM reviews WHERE order_id=$1 AND driver_id=$2",
+                        oid, ratee_user_id,
+                    )
+                    if existing_review:
+                        await connection.execute(
+                            "UPDATE reviews SET rating=$1, passenger_id=$2 WHERE id=$3",
+                            score, actor_user_id, existing_review,
+                        )
+                    else:
+                        await connection.execute(
+                            "INSERT INTO reviews (order_id, driver_id, passenger_id, rating) "
+                            "VALUES ($1, $2, $3, $4)",
+                            oid, ratee_user_id, actor_user_id, score,
+                        )
                 return True
+
+    @classmethod
+    async def add_rating_comment(cls, oid, passenger_user_id, comment):
+        """Attach a bounded comment only to the passenger's own completed-order rating."""
+        if (
+            not isinstance(oid, int) or isinstance(oid, bool) or oid <= 0
+            or not isinstance(passenger_user_id, int)
+            or isinstance(passenger_user_id, bool) or passenger_user_id <= 0
+            or not isinstance(comment, str) or not comment.strip()
+            or len(comment) > 1000
+        ):
+            return False
+        async with db.pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                UPDATE order_ratings AS rating
+                SET comment=$1
+                FROM orders AS order_row
+                WHERE rating.order_id=$2
+                  AND rating.rater_role='PASSENGER'
+                  AND rating.rater_user_id=$3
+                  AND order_row.id=rating.order_id
+                  AND order_row.customer_id=$3
+                  AND order_row.status='COMPLETED'
+                """,
+                comment.strip(), oid, passenger_user_id,
+            )
+            return result == "UPDATE 1"
 
     @staticmethod
     async def get_customer_orders(cid):
