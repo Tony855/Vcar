@@ -47,7 +47,13 @@ class OrderRepository:
     @classmethod
     async def claim_status_events(cls, limit=100):
         """Claim undelivered status events for a dispatcher using SKIP LOCKED."""
-        batch_size = max(1, min(int(limit), 500))
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 500
+        ):
+            raise ValueError("outbox claim limit must be an integer between 1 and 500")
+        batch_size = limit
         async with db.pool.acquire() as connection:
             async with connection.transaction():
                 rows = await connection.fetch(
