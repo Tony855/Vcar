@@ -555,3 +555,61 @@ async def test_gps_location_rolls_back_when_trip_track_insert_fails(database_poo
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_gps_samples_keep_only_the_newest_timestamp(database_pool, monkeypatch):
+    """Concurrent requests cannot let an older GPS sample overwrite a newer one."""
+    from datetime import datetime, timedelta, timezone
+    from fastapi import HTTPException
+
+    from app.modules.locations import router as locations_router
+
+    async with database_pool.acquire() as connection:
+        driver_id = await _create_user(connection, "gps-concurrency-driver")
+        telegram_id = await connection.fetchval(
+            "SELECT telegram_id FROM users WHERE id=$1", driver_id
+        )
+
+    class RedisProjection:
+        async def geoadd(self, *args):
+            return 1
+
+        async def zadd(self, *args):
+            return 1
+
+        async def zremrangebyscore(self, *args):
+            return 0
+
+        async def publish(self, *args):
+            return 1
+
+    monkeypatch.setattr(locations_router.db, "redis", RedisProjection())
+    latest_time = datetime.now(timezone.utc) - timedelta(seconds=1)
+    older_time = latest_time - timedelta(seconds=1)
+    older = locations_router.LocationUpdate(
+        latitude=11.5, longitude=104.9, recorded_at=older_time
+    )
+    newer = locations_router.LocationUpdate(
+        latitude=11.6, longitude=105.0, recorded_at=latest_time
+    )
+    try:
+        outcomes = await asyncio.gather(
+            locations_router.update_driver_location(older, {"sub": str(telegram_id)}),
+            locations_router.update_driver_location(newer, {"sub": str(telegram_id)}),
+            return_exceptions=True,
+        )
+        accepted = [item for item in outcomes if isinstance(item, dict) and item.get("accepted")]
+        rejected = [item for item in outcomes if isinstance(item, HTTPException)]
+        assert len(accepted) == 1
+        assert len(rejected) == 1
+        assert rejected[0].status_code == 409
+        async with database_pool.acquire() as connection:
+            stored = await connection.fetchval(
+                "SELECT recorded_at FROM driver_locations WHERE driver_id=$1",
+                driver_id,
+            )
+        assert stored == latest_time
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM users WHERE id=$1", driver_id)
