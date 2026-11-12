@@ -269,8 +269,16 @@ async def test_driver_online_and_offline_transitions_update_presence_atomically(
             int(telegram_id),
         )
         generation_key = f"driver:presence:generation:{telegram_id}"
+        # Simulate Redis retaining a generation from before a PostgreSQL restore.
+        await redis.set(generation_key, 99, ex=2592000)
         await DispatchService.go_online(telegram_id, 104.9282, 11.5564)
         online_generation = int(await redis.get(generation_key))
+        db_generation = await pool.fetchval(
+            "SELECT driver_presence_generation FROM users WHERE telegram_id=$1",
+            int(telegram_id),
+        )
+        assert online_generation == db_generation
+        assert online_generation < 99
         db_state = await pool.fetchrow(
             "SELECT driver_is_online, driver_presence_generation FROM users WHERE telegram_id=$1",
             int(telegram_id),
