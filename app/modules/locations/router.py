@@ -43,50 +43,51 @@ async def update_driver_location(
 
     telegram_id = int(claims["sub"])
     async with db.pool.acquire() as conn:
-        driver = await conn.fetchrow(
-            "SELECT id FROM users WHERE telegram_id=$1 AND driver_status='APPROVED'",
-            telegram_id,
-        )
-        if not driver:
-            raise HTTPException(status_code=403, detail="Approved driver account required")
-        latest = await conn.fetchval("SELECT recorded_at FROM driver_locations WHERE driver_id=$1", driver["id"])
-        if not is_newer_sample(recorded_at, latest):
-            raise HTTPException(status_code=409, detail="GPS sample is not newer than the last accepted sample")
-        point = f"SRID=4326;POINT({payload.longitude} {payload.latitude})"
-        accepted_location = await conn.fetchrow(
-            """
-            INSERT INTO driver_locations
-                (driver_id, telegram_id, position, accuracy_m, heading_deg, speed_mps, recorded_at, received_at)
-            VALUES ($1, $2, ST_GeogFromText($3), $4, $5, $6, $7, now())
-            ON CONFLICT (driver_id) DO UPDATE SET
-                telegram_id=EXCLUDED.telegram_id, position=EXCLUDED.position,
-                accuracy_m=EXCLUDED.accuracy_m, heading_deg=EXCLUDED.heading_deg,
-                speed_mps=EXCLUDED.speed_mps, recorded_at=EXCLUDED.recorded_at,
-                received_at=now()
-            WHERE driver_locations.recorded_at < EXCLUDED.recorded_at
-            RETURNING driver_id
-            """,
-            driver["id"], telegram_id, point, payload.accuracy_m,
-            payload.heading_deg, payload.speed_mps, recorded_at,
-        )
-        if accepted_location is None:
-            raise HTTPException(status_code=409, detail="GPS sample was superseded by a newer update")
-        active_order = await conn.fetchval(
-            """
-            SELECT id FROM orders
-            WHERE driver_id=$1 AND status IN ('ACCEPTED','ARRIVED','IN_PROGRESS')
-            ORDER BY id DESC LIMIT 1
-            """,
-            driver["id"],
-        )
-        if active_order:
-            await conn.execute(
-                """
-                INSERT INTO trip_tracks (order_id, driver_id, position, accuracy_m, recorded_at)
-                VALUES ($1, $2, ST_GeogFromText($3), $4, $5)
-                """,
-                active_order, driver["id"], point, payload.accuracy_m, recorded_at,
+        async with conn.transaction():
+            driver = await conn.fetchrow(
+                "SELECT id FROM users WHERE telegram_id=$1 AND driver_status='APPROVED'",
+                telegram_id,
             )
+            if not driver:
+                raise HTTPException(status_code=403, detail="Approved driver account required")
+            latest = await conn.fetchval("SELECT recorded_at FROM driver_locations WHERE driver_id=$1", driver["id"])
+            if not is_newer_sample(recorded_at, latest):
+                raise HTTPException(status_code=409, detail="GPS sample is not newer than the last accepted sample")
+            point = f"SRID=4326;POINT({payload.longitude} {payload.latitude})"
+            accepted_location = await conn.fetchrow(
+                """
+                INSERT INTO driver_locations
+                    (driver_id, telegram_id, position, accuracy_m, heading_deg, speed_mps, recorded_at, received_at)
+                VALUES ($1, $2, ST_GeogFromText($3), $4, $5, $6, $7, now())
+                ON CONFLICT (driver_id) DO UPDATE SET
+                    telegram_id=EXCLUDED.telegram_id, position=EXCLUDED.position,
+                    accuracy_m=EXCLUDED.accuracy_m, heading_deg=EXCLUDED.heading_deg,
+                    speed_mps=EXCLUDED.speed_mps, recorded_at=EXCLUDED.recorded_at,
+                    received_at=now()
+                WHERE driver_locations.recorded_at < EXCLUDED.recorded_at
+                RETURNING driver_id
+                """,
+                driver["id"], telegram_id, point, payload.accuracy_m,
+                payload.heading_deg, payload.speed_mps, recorded_at,
+            )
+            if accepted_location is None:
+                raise HTTPException(status_code=409, detail="GPS sample was superseded by a newer update")
+            active_order = await conn.fetchval(
+                """
+                SELECT id FROM orders
+                WHERE driver_id=$1 AND status IN ('ACCEPTED','ARRIVED','IN_PROGRESS')
+                ORDER BY id DESC LIMIT 1
+                """,
+                driver["id"],
+            )
+            if active_order:
+                await conn.execute(
+                    """
+                    INSERT INTO trip_tracks (order_id, driver_id, position, accuracy_m, recorded_at)
+                    VALUES ($1, $2, ST_GeogFromText($3), $4, $5)
+                    """,
+                    active_order, driver["id"], point, payload.accuracy_m, recorded_at,
+                )
 
     event = {
         "telegram_id": telegram_id,
