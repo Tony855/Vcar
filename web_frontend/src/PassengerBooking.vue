@@ -42,6 +42,7 @@ let reconnectTimer
 let reconnectAttempts = 0
 let connectingOrderSocket = false
 let orderStreamStopped = false
+let passengerSessionRequest
 
 const coords = point => `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`
 function setMarker(point, type) {
@@ -56,17 +57,49 @@ function setMarker(point, type) {
   }
 }
 async function authenticate() {
-  const initData = window.Telegram?.WebApp?.initData
-  if (!initData) { authState.value = '请从乘客 Telegram 机器人打开'; return }
-  window.Telegram.WebApp.ready()
-  window.Telegram.WebApp.expand()
+  if (passengerSessionRequest) return passengerSessionRequest
+  passengerSessionRequest = (async () => {
+    const initData = window.Telegram?.WebApp?.initData
+    if (!initData) {
+      authState.value = '请从乘客 Telegram 机器人打开'
+      return false
+    }
+    window.Telegram.WebApp.ready()
+    window.Telegram.WebApp.expand()
+    try {
+      const response = await axios.post('/api/passenger/session', { init_data: initData })
+      token.value = response.data.token
+      authState.value = '身份验证成功'
+      return true
+    } catch {
+      authState.value = '身份验证失败'
+      error.value = 'Telegram 身份验证失败，请重新打开小程序'
+      return false
+    }
+  })()
   try {
-    const response = await axios.post('/api/passenger/session', { init_data: initData })
-    token.value = response.data.token
-    authState.value = '身份验证成功'
-  } catch {
-    authState.value = '身份验证失败'
-    error.value = 'Telegram 身份验证失败，请重新打开小程序'
+    return await passengerSessionRequest
+  } finally {
+    passengerSessionRequest = undefined
+  }
+}
+
+// Passenger access tokens expire after 30 minutes. Refresh the Telegram
+// WebApp session once after a 401, then retry the original request exactly once.
+async function passengerApi(method, url, data) {
+  const request = () => axios({
+    method,
+    url,
+    data,
+    headers: { Authorization: `Bearer ${token.value}` }
+  })
+  try {
+    return await request()
+  } catch (err) {
+    if (err.response?.status !== 401) throw err
+    const refreshed = await authenticate()
+    if (!refreshed) throw err
+    return await request()
   }
 }
 function useMyLocation() {
@@ -81,10 +114,10 @@ async function book() {
   submitting.value = true
   error.value = ''
   try {
-    const response = await axios.post('/api/passenger/orders', {
+    const response = await passengerApi('post', '/api/passenger/orders', {
       pickup_lat: pickup.value.lat, pickup_lng: pickup.value.lng,
       dropoff_lat: dropoff.value.lat, dropoff_lng: dropoff.value.lng
-    }, { headers: { Authorization: `Bearer ${token.value}` } })
+    })
     order.value = response.data
     connectOrderStream()
     pollTimer = window.setInterval(refreshOrder, 10000)
@@ -116,9 +149,9 @@ async function connectOrderStream() {
   if (!order.value || !token.value || connectingOrderSocket || orderStreamStopped) return
   connectingOrderSocket = true
   try {
-    const response = await axios.post('/api/ws-ticket', {
+    const response = await passengerApi('post', '/api/ws-ticket', {
       scope: `passenger-order:${order.value.order_id}`
-    }, { headers: { Authorization: `Bearer ${token.value}` } })
+    })
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const cursor = lastOrderEventId > 0 ? `&last_event_id=${lastOrderEventId}` : ''
     const socket = new WebSocket(`${protocol}//${location.host}/api/passenger/orders/${order.value.order_id}/stream?ticket=${encodeURIComponent(response.data.ticket)}${cursor}`)
@@ -164,9 +197,7 @@ async function connectOrderStream() {
 async function refreshOrder() {
   if (!order.value) return
   try {
-    const response = await axios.get(`/api/passenger/orders/${order.value.order_id}`, {
-      headers: { Authorization: `Bearer ${token.value}` }
-    })
+    const response = await passengerApi('get', `/api/passenger/orders/${order.value.order_id}`)
     order.value = { ...order.value, ...response.data }
     if (['COMPLETED', 'CANCELLED'].includes(order.value.status)) {
       if (pollTimer) window.clearInterval(pollTimer)
