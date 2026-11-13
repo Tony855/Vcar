@@ -6,7 +6,7 @@
 
 1. 克隆代码并进入仓库目录。
 2. 执行 `sudo bash deploy/install.sh`。
-3. 编辑项目目录中的 `.env`，配置两个 Telegram Bot Token、数据库连接和 Redis 连接。
+3. 安装向导自动生成数据库凭据和 JWT 密钥，并交互创建管理员账号；不在安装时收集 Telegram Bot Token。登录管理后台“Bot 配置”页，分别配置乘客 Bot 与司机 Bot。Token 会先经 Telegram 验证，再加密保存。
 4. 生成 JWT 密钥：
 
    ```bash
@@ -33,9 +33,7 @@
 OSRM 使用 MLD 算法，监听端口默认只绑定到 127.0.0.1:5000。地图文件和预处理产物不会提交到 Git。
 
 ```bash
-bash scripts/download_map_data.sh
-docker compose -f docker-compose.osrm.yml --profile prepare run --rm osrm-prepare
-docker compose -f docker-compose.osrm.yml up -d osrm
+sudo bash deploy/install-osrm.sh
 ```
 
 确认 OSRM 健康并完成 Route/Table 冒烟测试后，再在 Vcar 的 `.env` 中设置 `OSRM_ENABLED=true` 并重启 Bot/Web。未启用时保留旧版距离估算兼容模式；启用后价格使用 OSRM 道路距离，派单优先使用 OSRM Table ETA。OSRM 故障时派单排序可回退为 GEO 距离，但计价不会静默退回直线距离。\n\n检查路由服务：

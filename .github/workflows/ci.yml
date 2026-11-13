@@ -58,7 +58,7 @@ jobs:
       - name: Validate locked Python dependencies
         run: uv sync --locked --all-groups
       - run: uv run --no-sync python -m compileall -q app migrations tests
-      - run: bash -n deploy/install.sh scripts/*.sh
+      - run: bash -n deploy/install.sh deploy/install-osrm.sh scripts/*.sh
       - name: Validate Prometheus alert rules
         run: docker run --rm --entrypoint promtool -v "$PWD/deploy/monitoring:/etc/prometheus:ro" prom/prometheus:v3.5.0 check rules /etc/prometheus/vcar-alert-rules.yml
       - name: Evaluate Prometheus alert behavior
