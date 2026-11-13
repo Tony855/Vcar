@@ -461,11 +461,18 @@ async def health_ready():
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
     if full_path.startswith("api/"): return {"error": "API Not Found"}
-    file_path = os.path.join(static_dir, full_path)
-    if os.path.isfile(file_path):
+    # Resolve both the root and requested path before serving. A plain
+    # os.path.join() allows ../ segments (and symlinks) to escape static_dir.
+    static_root = os.path.realpath(static_dir)
+    file_path = os.path.realpath(os.path.join(static_root, full_path))
+    try:
+        is_within_static_root = os.path.commonpath((static_root, file_path)) == static_root
+    except ValueError:
+        is_within_static_root = False
+    if is_within_static_root and os.path.isfile(file_path):
         return FileResponse(file_path)
     # 强制禁止缓存 index.html
-    response = FileResponse(os.path.join(static_dir, "index.html"))
+    response = FileResponse(os.path.join(static_root, "index.html"))
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
