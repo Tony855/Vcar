@@ -13,6 +13,9 @@ export DEBIAN_FRONTEND=noninteractive
 bash "$PROJECT_DIR/scripts/check_supported_os.sh" /etc/os-release
 echo "[1/7] Installing runtime dependencies..."
 apt-get update -qq
+# Minimal Debian/Ubuntu images may not ship curl or a CA bundle. Install the
+# HTTPS bootstrap prerequisites before invoking the NodeSource setup script.
+apt-get install -y -qq ca-certificates curl
 curl -fsSL https://deb.nodesource.com/setup_26.x | bash - >/dev/null 2>&1
 apt-get install -y -qq postgresql postgresql-client postgresql-contrib postgis redis-server python3 python3-venv python3-pip python3-dev build-essential libpq-dev curl nodejs acl >/dev/null
 systemctl enable --now postgresql redis-server
