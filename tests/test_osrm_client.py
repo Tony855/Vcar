@@ -94,3 +94,11 @@ async def test_table_rejects_invalid_coordinate_indexes(indexes):
     client = OSRMClient(base_url="http://osrm")
     with pytest.raises(ValueError):
         await client.table([(104.9, 11.5), (104.95, 11.55)], sources=indexes)
+
+
+@pytest.mark.asyncio
+async def test_match_rejects_more_than_osrm_configured_coordinate_limit():
+    client = OSRMClient(base_url="http://osrm")
+    coordinates = [(104.9, 11.5)] * 101
+    with pytest.raises(ValueError, match="Too many coordinates"):
+        await client.match(coordinates)

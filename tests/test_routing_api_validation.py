@@ -58,3 +58,15 @@ def test_nearest_request_rejects_invalid_coordinate(bad):
 def test_nearest_request_rejects_non_integer_number(bad):
     with pytest.raises(ValidationError):
         NearestRequest.model_validate({"coordinate": [104.9, 11.5], "number": bad})
+
+
+def test_match_request_rejects_more_than_osrm_configured_coordinate_limit():
+    coordinates = [[104.9, 11.5]] * 101
+    with pytest.raises(ValidationError):
+        MatchRequest.model_validate({"coordinates": coordinates})
+
+
+def test_match_request_accepts_osrm_maximum_coordinate_count():
+    coordinates = [[104.9, 11.5]] * 100
+    request = MatchRequest.model_validate({"coordinates": coordinates})
+    assert len(request.coordinates) == 100

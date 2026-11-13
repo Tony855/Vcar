@@ -13,6 +13,7 @@ class RoutingError(RuntimeError):
 
 
 Coordinate = tuple[float, float]  # longitude, latitude
+MAX_MATCHING_COORDINATES = 100  # matches docker-compose.osrm.yml --max-matching-size default
 
 
 class OSRMClient:
@@ -126,6 +127,8 @@ class OSRMClient:
         timestamps: Sequence[int] | None = None,
         radiuses: Sequence[float] | None = None,
     ) -> dict[str, Any]:
+        if len(coordinates) > MAX_MATCHING_COORDINATES:
+            raise ValueError("Too many coordinates for one OSRM Match request")
         path = self._coordinates_path(coordinates)
         params: dict[str, Any] = {"overview": "full", "geometries": "geojson", "steps": "true"}
         if timestamps is not None:

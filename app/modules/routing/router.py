@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.security import verify_token
 from app.core.config import settings
-from app.infrastructure.osrm.client import OSRMClient, RoutingError
+from app.infrastructure.osrm.client import MAX_MATCHING_COORDINATES, OSRMClient, RoutingError
 
 router = APIRouter(
     prefix="/routing",
@@ -99,7 +99,7 @@ class TableRequest(BaseModel):
 
 
 class MatchRequest(BaseModel):
-    coordinates: list[tuple[float, float]] = Field(min_length=2, max_length=10_000)
+    coordinates: list[tuple[float, float]] = Field(min_length=2, max_length=MAX_MATCHING_COORDINATES)
     timestamps: list[int] | None = None
     radiuses: list[float] | None = None
 
