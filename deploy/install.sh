@@ -109,6 +109,13 @@ lines = [line for line in p.read_text().splitlines() if not line.startswith(('MI
 p.write_text('\n'.join(lines) + '\n')
 p.chmod(0o600)
 PY
+python3 - <<'PY'
+from pathlib import Path
+p = Path('.env')
+lines = [line for line in p.read_text().splitlines() if not line.startswith(('MIGRATION_DATABASE_URL=', 'PASSENGER_BOT_TOKEN=', 'DRIVER_BOT_TOKEN='))]
+p.write_text('\n'.join(lines) + '\n')
+p.chmod(0o600)
+PY
 grep -v '^MIGRATION_DATABASE_URL=' .env > .env.runtime
 chown root:vcar .env.runtime
 chmod 640 .env.runtime
@@ -125,7 +132,7 @@ while true; do
  if [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" && ${#ADMIN_PASSWORD} -ge 12 ]]; then break; fi
  echo "Passwords must match and contain at least 12 characters." >&2
 done
-ADMIN_PASSWORD_HASH="$(.venv/bin/python -c 'import sys; from app.core.security import hash_password; print(hash_password(sys.stdin.read().rstrip('\\n')))' <<< "$ADMIN_PASSWORD")"
+ADMIN_PASSWORD_HASH="$(.venv/bin/python -c 'import sys; from app.core.security import hash_password; print(hash_password(sys.stdin.read().rstrip()))' <<< "$ADMIN_PASSWORD")"
 unset ADMIN_PASSWORD ADMIN_PASSWORD_CONFIRM
 read -r -p "Public domain for HTTPS/Nginx (leave blank to skip): " VCAR_DOMAIN
 if [[ -n "$VCAR_DOMAIN" && ! "$VCAR_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then echo "Invalid domain name." >&2; exit 1; fi
