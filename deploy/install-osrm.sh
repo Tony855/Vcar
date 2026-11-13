@@ -4,6 +4,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 if [[ "$EUID" -ne 0 ]]; then echo "Run this installer as root." >&2; exit 1; fi
 cd "$ROOT_DIR"
 command -v apt-get >/dev/null || { echo "OSRM installer supports Ubuntu/Debian only." >&2; exit 1; }
+apt-get update -qq
 apt-get install -y -qq curl
 if ! command -v docker >/dev/null 2>&1; then
   echo "Installing Docker Engine and Compose plugin..."
