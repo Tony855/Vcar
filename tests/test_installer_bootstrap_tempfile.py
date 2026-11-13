@@ -30,3 +30,11 @@ def test_installer_creates_target_database_before_applying_role_grants():
     assert create_database in script
     assert apply_role_grants in script
     assert script.index(create_database) < script.index(apply_role_grants)
+
+
+def test_installer_installs_curl_and_ca_certificates_before_nodesource_bootstrap():
+    script = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
+    prerequisites = "apt-get install -y -qq ca-certificates curl"
+    nodesource = "curl -fsSL https://deb.nodesource.com/setup_26.x"
+    assert prerequisites in script
+    assert script.index("apt-get update -qq") < script.index(prerequisites) < script.index(nodesource)
