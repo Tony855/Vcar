@@ -8,10 +8,12 @@ apt-get update -qq
 apt-get install -y -qq curl
 if ! command -v docker >/dev/null 2>&1; then
   echo "Installing Docker Engine and Compose plugin..."
-  apt-get update -qq
-  apt-get install -y docker.io docker-compose-v2 curl
-  systemctl enable --now docker
+  apt-get install -y docker.io docker-compose-v2
+elif ! docker compose version >/dev/null 2>&1; then
+  echo "Installing the missing Docker Compose plugin..."
+  apt-get install -y docker-compose-v2
 fi
+systemctl enable --now docker
 docker compose version >/dev/null
 if [[ -s data/osrm/cambodia-latest.osrm.mldgr ]]; then
   read -r -p "Cambodia routing data already exists. Reuse it? [Y/n] " reuse
