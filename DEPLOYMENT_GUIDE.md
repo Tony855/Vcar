@@ -4,38 +4,19 @@
 
 ## 首次安装
 
-1. 克隆代码并进入仓库目录。
-2. 执行 `sudo bash deploy/install.sh`。
-3. 编辑项目目录中的 `.env`，配置两个 Telegram Bot Token、数据库连接和 Redis 连接。
-4. 生成 JWT 密钥：
-
-   ```bash
-   openssl rand -hex 32
-   ```
-
-   将输出写入 `SECRET_KEY`。
-
-5. 生成管理员密码哈希（密码至少 12 位）：
-
-   ```bash
-   .venv/bin/python -c "from app.core.security import hash_password; print(hash_password('替换为强密码'))"
-   ```
-
-   将输出写入 `ADMIN_PASSWORD_HASH`，并设置 `ADMIN_USERNAME`。不要把明文密码写入仓库或工单。
-
-6. 如前后端使用不同源，设置 `CORS_ORIGINS` 为明确的可信来源列表；不要使用通配符。
-7. 启动服务：`systemctl restart vcar-bot vcar-web`。
-
-安装脚本会在导入现有基础 schema 后执行 Alembic 迁移，创建订单事件历史表。已有部署升级时，应先备份，再手动执行 `.venv/bin/alembic upgrade head`。\n\n旧版本的硬编码管理员密码已移除。未配置 `SECRET_KEY` 和 `ADMIN_PASSWORD_HASH` 时，管理后台登录会拒绝服务；必须先完成密钥初始化再切换新版本。
+1. 克隆仓库并进入项目目录。
+2. 执行 sudo bash deploy/install.sh。
+3. 按提示创建管理员用户名和密码；可选填写已解析到本机的域名并申请 Let's Encrypt 证书。安装器自动安装依赖、初始化 PostgreSQL/PostGIS 与 Redis、生成数据库凭据和 JWT 密钥、执行迁移、构建前端并配置 systemd。
+4. 打开管理后台，进入“Bot 配置”，分别录入乘客 Bot 与司机 Bot Token。服务端会先向 Telegram 验证，再加密存入数据库；Token 不会写入 .env 或返回给浏览器。两个 Bot 都配置后，Bot 工作进程自动启动；修改或移除配置后约 5 秒内热重载。
+5. 未配置域名时，Web 默认只监听 127.0.0.1:8080。可通过 SSH 隧道访问：ssh -L 8080:127.0.0.1:8080 user@服务器地址，然后打开 http://127.0.0.1:8080/admin/。不要为了方便直接把未加密的管理后台暴露到公网。
+6. 安装完成后检查：systemctl status vcar-web vcar-bot 和 curl -fsS http://127.0.0.1:8080/health/ready。
 
 ## OSRM（柬埔寨）部署
 
 OSRM 使用 MLD 算法，监听端口默认只绑定到 127.0.0.1:5000。地图文件和预处理产物不会提交到 Git。
 
 ```bash
-bash scripts/download_map_data.sh
-docker compose -f docker-compose.osrm.yml --profile prepare run --rm osrm-prepare
-docker compose -f docker-compose.osrm.yml up -d osrm
+sudo bash deploy/install-osrm.sh
 ```
 
 确认 OSRM 健康并完成 Route/Table 冒烟测试后，再在 Vcar 的 `.env` 中设置 `OSRM_ENABLED=true` 并重启 Bot/Web。未启用时保留旧版距离估算兼容模式；启用后价格使用 OSRM 道路距离，派单优先使用 OSRM Table ETA。OSRM 故障时派单排序可回退为 GEO 距离，但计价不会静默退回直线距离。\n\n检查路由服务：

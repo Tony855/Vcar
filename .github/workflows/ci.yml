@@ -58,7 +58,7 @@ jobs:
       - name: Validate locked Python dependencies
         run: uv sync --locked --all-groups
       - run: uv run --no-sync python -m compileall -q app migrations tests
-      - run: bash -n deploy/install.sh scripts/*.sh
+      - run: bash -n deploy/install.sh deploy/install-osrm.sh scripts/*.sh
       - name: Validate Prometheus alert rules
         run: docker run --rm --entrypoint promtool -v "$PWD/deploy/monitoring:/etc/prometheus:ro" prom/prometheus:v3.5.0 check rules /etc/prometheus/vcar-alert-rules.yml
       - name: Evaluate Prometheus alert behavior
@@ -79,7 +79,7 @@ jobs:
           fi
           current_revision="$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT version_num FROM alembic_version")"
           wallet_count="$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM wallet_accounts WHERE user_id=$probe_user_id")"
-          test "$current_revision" = "20261113_0009"
+          test "$current_revision" = "20261113_0010"
           test "$wallet_count" = "2"
           docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DELETE FROM wallet_accounts WHERE user_id=$probe_user_id; DELETE FROM users WHERE id=$probe_user_id"
       - run: uv run --no-sync alembic downgrade 20261111_0001 && uv run --no-sync alembic upgrade head

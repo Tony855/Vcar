@@ -74,6 +74,20 @@
             </el-col>
           </el-row>
         </el-tab-pane>
+        <el-tab-pane label="🤖 Bot 配置" name="bots">
+          <el-row :gutter="20">
+            <el-col :xs="24" :md="12" v-for="bot in botTypes" :key="bot.key">
+              <el-card>
+                <template #header>{{ bot.label }}</template>
+                <el-tag :type="botStatus[bot.key] ? 'success' : 'warning'">{{ botStatus[bot.key] ? '已配置' : '待配置' }}</el-tag>
+                <el-input v-model="botTokens[bot.key]" type="password" show-password autocomplete="new-password" placeholder="输入新的 Telegram Bot Token" style="margin: 14px 0" />
+                <el-button type="primary" :disabled="!botTokens[bot.key]" @click="saveBot(bot.key)">验证并保存</el-button>
+                <el-button type="danger" plain :disabled="!botStatus[bot.key]" @click="removeBot(bot.key)">移除</el-button>
+              </el-card>
+            </el-col>
+          </el-row>
+          <el-alert title="Token 先向 Telegram 验证，再加密存入数据库；页面不会回显已保存的 Token。两个 Bot 都配置后，工作进程自动启动或热重载。" type="info" :closable="false" style="margin-top: 16px" />
+        </el-tab-pane>
         <el-tab-pane label="🗺️ 实时车队" name="fleet">
           <FleetMap v-if="activeTab === 'fleet'" :token="token" />
         </el-tab-pane>
@@ -100,6 +114,9 @@ const statsData = ref({ total_orders: 0, active_orders: 0, total_users: 0, drive
 const orders = ref([])
 const pricing = ref({ base_fare: 1, per_km: 0.5 })
 const supportConfig = ref({ username: '' })
+const botTypes = [{ key: 'passenger', label: '乘客 Bot' }, { key: 'driver', label: '司机 Bot' }]
+const botTokens = ref({ passenger: '', driver: '' })
+const botStatus = ref({ passenger: false, driver: false })
 
 const statsDisplay = computed(() => ({
   orders: { label: "总订单", value: statsData.value.total_orders },
@@ -128,6 +145,25 @@ const logout = () => {
   isLoggedIn.value = false
 }
 
+const fetchBotStatus = async () => {
+  const { data } = await api.get('/config/bots')
+  botStatus.value = { passenger: data.passenger_configured, driver: data.driver_configured }
+}
+
+const saveBot = async (kind) => {
+  try {
+    await api.post('/config/bots/' + kind, { token: botTokens.value[kind] })
+    botTokens.value[kind] = ''
+    await fetchBotStatus()
+    ElMessage.success('Bot Token 已验证保存，工作进程将自动重载')
+  } catch (error) { ElMessage.error(error.response?.data?.detail || 'Bot Token 验证或保存失败') }
+}
+
+const removeBot = async (kind) => {
+  try { await api.delete('/config/bots/' + kind); await fetchBotStatus(); ElMessage.success('Bot 配置已移除') }
+  catch { ElMessage.error('移除 Bot 配置失败') }
+}
+
 const fetchAdminData = async () => {
   try {
     const [s, o, p, sup] = await Promise.all([
@@ -137,6 +173,7 @@ const fetchAdminData = async () => {
     orders.value = o.data
     pricing.value = p.data
     supportConfig.value = sup.data
+    await fetchBotStatus()
   } catch (e) { if (e.response?.status === 401) logout() }
 }
 

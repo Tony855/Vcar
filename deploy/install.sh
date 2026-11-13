@@ -102,6 +102,13 @@ setfacl -R -m u:vcar:rX "$PROJECT_DIR"
 chown root:root .env
 chmod 600 .env
 setfacl -m u:vcar:--- "$PROJECT_DIR/.env"
+python3 - <<'PY'
+from pathlib import Path
+p = Path('.env')
+lines = [line for line in p.read_text().splitlines() if not line.startswith(('MIGRATION_DATABASE_URL=', 'PASSENGER_BOT_TOKEN=', 'DRIVER_BOT_TOKEN='))]
+p.write_text('\n'.join(lines) + '\n')
+p.chmod(0o600)
+PY
 grep -v '^MIGRATION_DATABASE_URL=' .env > .env.runtime
 chown root:vcar .env.runtime
 chmod 640 .env.runtime
@@ -109,7 +116,44 @@ setfacl -m u:vcar:r-- "$PROJECT_DIR/.env.runtime"
 install -d -o vcar -g vcar -m 750 /var/lib/vcar
 install -d -o vcar -g vcar -m 750 /var/log/vcar
 
-echo "[7/7] Installing hardened systemd units..."
+echo "[7/8] Initializing administrator account (Telegram Bot tokens are configured later in the admin UI)..."
+read -r -p "Administrator username [admin]: " ADMIN_USERNAME_INPUT
+ADMIN_USERNAME_INPUT="${ADMIN_USERNAME_INPUT:-admin}"
+while true; do
+ read -r -s -p "Administrator password (minimum 12 characters): " ADMIN_PASSWORD; echo
+ read -r -s -p "Confirm administrator password: " ADMIN_PASSWORD_CONFIRM; echo
+ if [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" && ${#ADMIN_PASSWORD} -ge 12 ]]; then break; fi
+ echo "Passwords must match and contain at least 12 characters." >&2
+done
+ADMIN_PASSWORD_HASH="$(.venv/bin/python -c 'import sys; from app.core.security import hash_password; print(hash_password(sys.stdin.read().rstrip()))' <<< "$ADMIN_PASSWORD")"
+unset ADMIN_PASSWORD ADMIN_PASSWORD_CONFIRM
+read -r -p "Public domain for HTTPS/Nginx (leave blank to skip): " VCAR_DOMAIN
+if [[ -n "$VCAR_DOMAIN" && ! "$VCAR_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then echo "Invalid domain name." >&2; exit 1; fi
+.venv/bin/python - "$PROJECT_DIR/.env" "$ADMIN_USERNAME_INPUT" "$ADMIN_PASSWORD_HASH" "$VCAR_DOMAIN" <<'PY'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+values = {"ADMIN_USERNAME": sys.argv[2], "ADMIN_PASSWORD_HASH": sys.argv[3]}
+domain = sys.argv[4].strip()
+if domain:
+ values["CORS_ORIGINS"] = f"https://{domain}"
+lines = path.read_text().splitlines()
+seen, output = set(), []
+for line in lines:
+ key = line.split("=", 1)[0] if "=" in line and not line.lstrip().startswith("#") else None
+ if key in values:
+  output.append(f"{key}={values[key]}"); seen.add(key)
+ else: output.append(line)
+for key, value in values.items():
+ if key not in seen: output.append(f"{key}={value}")
+path.write_text("\n".join(output) + "\n")
+path.chmod(0o600)
+PY
+chown root:root .env; chmod 600 .env
+grep -v '^MIGRATION_DATABASE_URL=' .env > .env.runtime
+chown root:vcar .env.runtime; chmod 640 .env.runtime
+setfacl -m u:vcar:r-- "$PROJECT_DIR/.env.runtime"
+echo "[8/8] Installing hardened systemd units..."
 for unit in vcar-bot vcar-web; do
   cat > "/etc/systemd/system/$unit.service" <<UNIT
 [Unit]
@@ -141,7 +185,7 @@ UMask=0027
 ReadWritePaths=/var/lib/vcar /var/log/vcar
 UNIT
   if [[ "$unit" == "vcar-web" ]]; then
-    sed -i "s#ExecStart=.*#ExecStart=$PROJECT_DIR/.venv/bin/uvicorn app.web.server:app --host 0.0.0.0 --port 8080#" "/etc/systemd/system/$unit.service"
+    sed -i "s#ExecStart=.*#ExecStart=$PROJECT_DIR/.venv/bin/uvicorn app.web.server:app --host 127.0.0.1 --port 8080#" "/etc/systemd/system/$unit.service"
   fi
   cat >> "/etc/systemd/system/$unit.service" <<'UNIT'
 [Install]
@@ -152,6 +196,21 @@ done
 systemctl daemon-reload
 systemctl enable vcar-bot vcar-web
 
-echo "Installation complete. Configure Bot tokens and ADMIN_PASSWORD_HASH in $PROJECT_DIR/.env, then run:"
-echo "  systemctl restart vcar-bot vcar-web"
-echo "No production services are restarted automatically by this script."
+if [[ -n "$VCAR_DOMAIN" ]]; then
+ apt-get install -y -qq nginx certbot python3-certbot-nginx
+ sed "s/__VCAR_DOMAIN__/$VCAR_DOMAIN/g" "$PROJECT_DIR/deploy/nginx-vcar.conf" > /etc/nginx/sites-available/vcar
+ ln -sfn /etc/nginx/sites-available/vcar /etc/nginx/sites-enabled/vcar
+ nginx -t; systemctl enable --now nginx
+ read -r -p "Obtain and configure Let's Encrypt HTTPS now? [y/N] " obtain_tls
+ if [[ "$obtain_tls" =~ ^[Yy]$ ]]; then
+  read -r -p "Certificate email: " CERT_EMAIL
+  certbot --nginx -d "$VCAR_DOMAIN" --redirect --agree-tos --no-eff-email -m "$CERT_EMAIL"
+ fi
+fi
+systemctl daemon-reload
+systemctl enable --now vcar-web vcar-bot
+curl --fail --retry 15 --retry-delay 2 http://127.0.0.1:8080/health/ready
+echo
+echo "Installation complete. Sign in with the administrator credentials you just created."
+echo "Configure both Telegram Bots in the admin UI. The Bot worker waits safely until both are configured."
+echo "OSRM is optional and independent: sudo bash deploy/install-osrm.sh"
