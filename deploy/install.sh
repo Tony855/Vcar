@@ -109,13 +109,6 @@ lines = [line for line in p.read_text().splitlines() if not line.startswith(('MI
 p.write_text('\n'.join(lines) + '\n')
 p.chmod(0o600)
 PY
-python3 - <<'PY'
-from pathlib import Path
-p = Path('.env')
-lines = [line for line in p.read_text().splitlines() if not line.startswith(('MIGRATION_DATABASE_URL=', 'PASSENGER_BOT_TOKEN=', 'DRIVER_BOT_TOKEN='))]
-p.write_text('\n'.join(lines) + '\n')
-p.chmod(0o600)
-PY
 grep -v '^MIGRATION_DATABASE_URL=' .env > .env.runtime
 chown root:vcar .env.runtime
 chmod 640 .env.runtime
