@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.security import verify_token
+from app.core.config import settings
 from app.infrastructure.osrm.client import OSRMClient, RoutingError
 
 router = APIRouter(
@@ -143,6 +144,8 @@ def _routing_error(exc: Exception) -> HTTPException:
 
 @router.post("/route")
 async def route(request: RouteRequest):
+    if not settings.osrm_enabled:
+        raise HTTPException(status_code=503, detail="Routing service is disabled")
     try:
         return await _client.route(
             request.coordinates,
@@ -155,6 +158,8 @@ async def route(request: RouteRequest):
 
 @router.post("/table")
 async def table(request: TableRequest):
+    if not settings.osrm_enabled:
+        raise HTTPException(status_code=503, detail="Routing service is disabled")
     try:
         return await _client.table(
             request.coordinates,
@@ -167,6 +172,8 @@ async def table(request: TableRequest):
 
 @router.post("/match")
 async def match(request: MatchRequest):
+    if not settings.osrm_enabled:
+        raise HTTPException(status_code=503, detail="Routing service is disabled")
     try:
         return await _client.match(
             request.coordinates,
@@ -179,6 +186,8 @@ async def match(request: MatchRequest):
 
 @router.post("/nearest")
 async def nearest(request: NearestRequest):
+    if not settings.osrm_enabled:
+        raise HTTPException(status_code=503, detail="Routing service is disabled")
     try:
         return await _client.nearest(request.coordinate, number=request.number)
     except (RoutingError, ValueError) as exc:
