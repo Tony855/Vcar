@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel, Field, ConfigDict
 
 from app.core.security import verify_driver_token
+from app.core.config import settings
 from app.modules.auth.ws_tickets import consume_ws_ticket
 from app.db.core import db
 from app.modules.locations.gps import is_newer_sample, build_location_snapshot
@@ -245,6 +246,8 @@ async def driver_navigation_route(
     request: NavigationRequest,
     claims: dict = Depends(verify_driver_token),
 ):
+    if not settings.osrm_enabled:
+        raise HTTPException(status_code=503, detail="Navigation service is disabled")
     try:
         from app.infrastructure.osrm.client import OSRMClient, RoutingError
         result = await OSRMClient().route(
@@ -264,6 +267,8 @@ async def driver_navigation_match(
     request: NavigationRequest,
     claims: dict = Depends(verify_driver_token),
 ):
+    if not settings.osrm_enabled:
+        raise HTTPException(status_code=503, detail="Navigation service is disabled")
     try:
         from app.infrastructure.osrm.client import OSRMClient, RoutingError
         return await OSRMClient().match(request.coordinates)
