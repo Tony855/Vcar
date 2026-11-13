@@ -292,3 +292,21 @@ def test_load_acceptance_keeps_latency_ceilings_opt_in():
     assert not meets_acceptance_thresholds(
         report, 0.99, max_connect_p95_ms=100
     )
+
+
+def test_fleet_event_validation_requires_the_expected_gps_sample_when_requested():
+    import json
+
+    event = {
+        "telegram_id": 123,
+        "latitude": 11.5,
+        "longitude": 104.9,
+        "recorded_at": "2026-11-12T00:00:00+00:00",
+    }
+    encoded = json.dumps(event)
+    assert is_fleet_location_event(
+        encoded, expected_recorded_at=event["recorded_at"]
+    )
+    assert not is_fleet_location_event(
+        encoded, expected_recorded_at="2026-11-12T00:00:01+00:00"
+    )
