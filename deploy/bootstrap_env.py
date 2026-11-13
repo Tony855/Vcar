@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import os
 import secrets
 from pathlib import Path
@@ -68,10 +70,23 @@ secret = values.get("SECRET_KEY", "")
 if len(secret.encode()) < 32 or secret.startswith("REPLACE_"):
     secret = secrets.token_hex(32)
 
+# Preserve the legacy SECRET_KEY-derived Fernet key on first upgrade so Bot
+# tokens encrypted by earlier releases remain readable. Thereafter this key
+# is independent and can survive routine JWT/session SECRET_KEY rotation.
+encryption_key = values.get("BOT_CREDENTIALS_ENCRYPTION_KEY", "").strip()
+if not encryption_key:
+    encryption_key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest()).decode()
+try:
+    if len(base64.urlsafe_b64decode(encryption_key.encode())) != 32:
+        raise ValueError
+except (ValueError, TypeError):
+    raise SystemExit("BOT_CREDENTIALS_ENCRYPTION_KEY must be a valid Fernet key")
+
 updates = {
     "DATABASE_URL": runtime_url,
     "MIGRATION_DATABASE_URL": migration_url,
     "SECRET_KEY": secret,
+    "BOT_CREDENTIALS_ENCRYPTION_KEY": encryption_key,
 }
 seen = set()
 out = []
