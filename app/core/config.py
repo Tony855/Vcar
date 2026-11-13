@@ -8,6 +8,7 @@ class Settings:
     driver_bot_token: str
     database_url: str
     secret_key: str
+    bot_credentials_encryption_key: str
     redis_url: str
     admin_username: str
     admin_password_hash: str
@@ -32,6 +33,7 @@ class Settings:
             driver_bot_token=os.getenv("DRIVER_BOT_TOKEN", ""),
             database_url=os.getenv("DATABASE_URL", "").strip(),
             secret_key=os.getenv("SECRET_KEY", ""),
+            bot_credentials_encryption_key=os.getenv("BOT_CREDENTIALS_ENCRYPTION_KEY", "").strip(),
             redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
             admin_username=os.getenv("ADMIN_USERNAME", "admin"),
             admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
