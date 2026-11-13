@@ -78,10 +78,23 @@ async def load_order_stream_bootstrap(
         SELECT event_id, payload FROM order_event_outbox
         WHERE order_id=$1 AND event_id>$2
         ORDER BY event_id
+        LIMIT $3
         """,
         order_id,
         cursor,
+        max_replay + 1,
     )
+    # The count and row fetch use separate READ COMMITTED snapshots. A burst of
+    # committed events between them can exceed the earlier count, so enforce the
+    # replay ceiling in the query itself and fall back if the sentinel row exists.
+    if len(rows) > max_replay:
+        return {
+            "type": "snapshot",
+            "order_id": order_id,
+            "status": status,
+            "last_event_id": latest_event_id,
+            "resync_required": True,
+        }
     events = []
     for row in rows:
         payload = row["payload"]
