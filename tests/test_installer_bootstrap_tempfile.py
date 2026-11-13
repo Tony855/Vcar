@@ -20,3 +20,13 @@ def test_installer_verifies_database_backup_before_schema_or_alembic_migrations(
     assert backup in script
     assert script.index(backup) < script.index(schema) < script.index(migration)
     assert 'set -Eeuo pipefail' in script
+
+
+
+def test_installer_creates_target_database_before_applying_role_grants():
+    script = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
+    create_database = 'createdb -O vcar vcar'
+    apply_role_grants = 'psql -d vcar -v ON_ERROR_STOP=1 -f \'$BOOTSTRAP_SQL\''
+    assert create_database in script
+    assert apply_role_grants in script
+    assert script.index(create_database) < script.index(apply_role_grants)

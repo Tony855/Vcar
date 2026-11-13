@@ -54,10 +54,12 @@ chmod 600 "$BOOTSTRAP_SQL"
 if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='vcar'\"" | grep -q 1; then
   su - postgres -c "createuser vcar"
 fi
+# The target database must exist before the role bootstrap SQL can grant
+# CONNECT/SCHEMA/table privileges on it.
+su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='vcar'\"" | grep -q 1 || su - postgres -c "createdb -O vcar vcar"
 su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -f '$BOOTSTRAP_SQL'"
 rm -f "$BOOTSTRAP_SQL"
 trap - EXIT
-su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='vcar'\"" | grep -q 1 || su - postgres -c "createdb -O vcar vcar"
 su - postgres -c "psql -d vcar -v ON_ERROR_STOP=1 -c \"CREATE EXTENSION IF NOT EXISTS postgis\""
 
 echo "[4/7] Installing Python dependencies and applying migrations..."
