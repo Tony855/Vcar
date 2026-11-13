@@ -50,8 +50,8 @@ async def test_reconnect_replays_events_after_client_cursor_in_order():
     connection = FakeConnection(
         latest=14,
         events=[
-            {"payload": {"event_id": 13, "status": "ARRIVED"}},
-            {"payload": json.dumps({"event_id": 14, "status": "IN_PROGRESS"})},
+            {"event_id": 13, "payload": {"event_id": 999, "order_id": 777, "status": "ARRIVED"}},
+            {"event_id": 14, "payload": json.dumps({"event_id": 998, "order_id": 776, "status": "IN_PROGRESS"})},
         ],
     )
     result = await load_order_stream_bootstrap(
@@ -108,8 +108,8 @@ async def test_passenger_stream_replays_and_deduplicates_pubsub_overlap(monkeypa
         async def fetch(self, query, *args):
             assert "ORDER BY event_id" in query
             return [
-                {"payload": {"event_id": 4, "order_id": 8, "status": "ARRIVED"}},
-                {"payload": {"event_id": 5, "order_id": 8, "status": "IN_PROGRESS"}},
+                {"event_id": 4, "payload": {"event_id": 404, "order_id": 999, "status": "ARRIVED"}},
+                {"event_id": 5, "payload": {"event_id": 505, "order_id": 999, "status": "IN_PROGRESS"}},
             ]
 
     class Acquire:
@@ -207,8 +207,8 @@ async def test_passenger_stream_uses_durable_outbox_when_redis_is_unavailable_at
             return {"status": "COMPLETED", "latest_event_id": 4}
 
         async def fetch(self, query, *args):
-            return [{"payload": {
-                "event_id": 4, "order_id": 8, "status": "COMPLETED"
+            return [{"event_id": 4, "payload": {
+                "event_id": 404, "order_id": 999, "status": "COMPLETED"
             }}]
 
     class Acquire:
@@ -313,8 +313,8 @@ async def test_passenger_stream_recovers_committed_events_after_pubsub_disconnec
             return {"status": "COMPLETED", "latest_event_id": 6}
 
         async def fetch(self, query, *args):
-            return [{"payload": {
-                "event_id": 6, "order_id": 8, "status": "COMPLETED"
+            return [{"event_id": 6, "payload": {
+                "event_id": 606, "order_id": 999, "status": "COMPLETED"
             }}]
 
     class Acquire:

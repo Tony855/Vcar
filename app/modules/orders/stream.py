@@ -75,7 +75,7 @@ async def load_order_stream_bootstrap(
 
     rows = await connection.fetch(
         """
-        SELECT payload FROM order_event_outbox
+        SELECT event_id, payload FROM order_event_outbox
         WHERE order_id=$1 AND event_id>$2
         ORDER BY event_id
         """,
@@ -88,7 +88,10 @@ async def load_order_stream_bootstrap(
         if isinstance(payload, str):
             payload = json.loads(payload)
         payload = dict(payload)
-        payload.setdefault("order_id", order_id)
+        # The durable outbox columns are authoritative; never trust IDs copied
+        # into a historical JSON payload when advancing the client event cursor.
+        payload["event_id"] = int(row["event_id"])
+        payload["order_id"] = order_id
         events.append(payload)
     return {
         "type": "replay",
