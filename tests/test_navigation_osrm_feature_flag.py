@@ -42,7 +42,7 @@ async def test_driver_navigation_rejects_requests_when_osrm_is_disabled(monkeypa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "endpoint,request",
+    "endpoint,payload",
     [
         (
             __import__("app.modules.routing.router", fromlist=["route"]).route,
@@ -70,7 +70,7 @@ async def test_driver_navigation_rejects_requests_when_osrm_is_disabled(monkeypa
         ),
     ],
 )
-async def test_routing_api_rejects_requests_when_osrm_is_disabled(monkeypatch, endpoint, request):
+async def test_routing_api_rejects_requests_when_osrm_is_disabled(monkeypatch, endpoint, payload):
     from app.modules.routing import router as routing_router
 
     monkeypatch.setattr(
@@ -86,7 +86,7 @@ async def test_routing_api_rejects_requests_when_osrm_is_disabled(monkeypatch, e
     monkeypatch.setattr(routing_router, "_client", UnexpectedClient())
 
     with pytest.raises(HTTPException) as exc:
-        await endpoint(request)
+        await endpoint(payload)
 
     assert exc.value.status_code == 503
     assert exc.value.detail == "Routing service is disabled"
