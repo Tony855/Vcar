@@ -87,6 +87,7 @@ async function authenticate() {
 // Passenger access tokens expire after 30 minutes. Refresh the Telegram
 // WebApp session once after a 401, then retry the original request exactly once.
 async function passengerApi(method, url, data) {
+  const failedToken = token.value
   const request = () => axios({
     method,
     url,
@@ -97,8 +98,13 @@ async function passengerApi(method, url, data) {
     return await request()
   } catch (err) {
     if (err.response?.status !== 401) throw err
-    const refreshed = await authenticate()
-    if (!refreshed) throw err
+    // Another request may already have refreshed this token while this
+    // response was in flight. Reuse the newer token instead of creating
+    // another Telegram session for the same expiry wave.
+    if (token.value === failedToken) {
+      const refreshed = await authenticate()
+      if (!refreshed) throw err
+    }
     return await request()
   }
 }
