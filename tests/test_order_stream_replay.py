@@ -27,6 +27,8 @@ class FakeConnection:
     async def fetch(self, query, *args):
         self.calls.append((query, args))
         assert "ORDER BY event_id" in query
+        assert "LIMIT $3" in query
+        assert args == (8, 12, 501) or args == (8, 12, 3)
         return self.events
 
 
@@ -71,6 +73,32 @@ async def test_large_gap_requests_snapshot_instead_of_unbounded_replay():
     assert result["type"] == "snapshot"
     assert result["resync_required"] is True
     assert result["last_event_id"] == 1000
+
+
+@pytest.mark.asyncio
+async def test_replay_query_hard_caps_rows_if_events_arrive_after_count_check():
+    connection = FakeConnection(
+        latest=14,
+        count=2,
+        events=[
+            {"event_id": 13, "payload": {"status": "ARRIVED"}},
+            {"event_id": 14, "payload": {"status": "IN_PROGRESS"}},
+            {"event_id": 15, "payload": {"status": "COMPLETED"}},
+        ],
+    )
+    result = await load_order_stream_bootstrap(
+        connection, order_id=8, last_event_id=12, max_replay=2
+    )
+    assert result == {
+        "type": "snapshot",
+        "order_id": 8,
+        "status": "IN_PROGRESS",
+        "last_event_id": 14,
+        "resync_required": True,
+    }
+    fetch_query, fetch_args = connection.calls[-1]
+    assert "LIMIT $3" in fetch_query
+    assert fetch_args == (8, 12, 3)
 
 
 @pytest.mark.asyncio
