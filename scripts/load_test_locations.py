@@ -48,7 +48,9 @@ def is_fleet_snapshot_frame(payload: str) -> bool:
     )
 
 
-def is_fleet_location_event(payload: str) -> bool:
+def is_fleet_location_event(
+    payload: str, *, expected_recorded_at: str | None = None
+) -> bool:
     try:
         event = json.loads(payload)
     except (TypeError, json.JSONDecodeError):
@@ -77,6 +79,10 @@ def is_fleet_location_event(payload: str) -> bool:
         and math.isfinite(longitude)
         and isinstance(recorded_at, str)
         and bool(recorded_at.strip())
+        and (
+            expected_recorded_at is None
+            or recorded_at == expected_recorded_at
+        )
     )
 
 
@@ -280,11 +286,17 @@ async def run(args: argparse.Namespace) -> int:
                 await response.read()
                 messages_sent += 1
 
-            async def receive_one(ws):
+            async def receive_one(ws, expected_recorded_at):
                 nonlocal failures, frames_received
                 try:
                     message = await ws.receive(timeout=args.receive_timeout)
-                    if message.type == aiohttp.WSMsgType.TEXT and is_fleet_location_event(message.data):
+                    if (
+                        message.type == aiohttp.WSMsgType.TEXT
+                        and is_fleet_location_event(
+                            message.data,
+                            expected_recorded_at=expected_recorded_at,
+                        )
+                    ):
                         frames_received += 1
                     else:
                         failures += 1
@@ -292,7 +304,9 @@ async def run(args: argparse.Namespace) -> int:
                     failures += 1
 
             fanout_started = time.monotonic()
-            await asyncio.gather(*(receive_one(ws) for ws in sockets))
+            await asyncio.gather(
+                *(receive_one(ws, now.isoformat()) for ws in sockets)
+            )
             fanout_latencies.append((time.monotonic() - fanout_started) * 1000)
 
         reconnect_attempts = 0
