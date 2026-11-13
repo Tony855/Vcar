@@ -23,6 +23,7 @@ from app.services.driver_presence_projection import PRESENCE_RECONCILIATION_STAT
 from app.services.order_event_outbox import run_order_event_outbox_worker
 from app.services.driver_presence_projection import run_driver_presence_reconciliation_worker
 from app.core.security import verify_token, verify_driver_token, create_access_token, verify_password
+from app.services.bot_credentials import encrypt_token
 from app.modules.routing.router import router as routing_router
 from app.modules.auth.router import router as auth_router
 from app.modules.auth.ws_router import router as ws_auth_router
@@ -130,6 +131,9 @@ class PriceUpdate(BaseModel):
 class SupportUpdate(BaseModel):
     username: str
 
+class BotTokenUpdate(BaseModel):
+    token: str = Field(min_length=20, max_length=256)
+
 # ================= 1. 鉴权与登录 =================
 # ================= 1. 鉴权与登录 =================
 @app.post("/api/login")
@@ -197,6 +201,57 @@ async def set_pricing(price: PriceUpdate):
         await c.execute("UPDATE settings SET value=$1 WHERE key='base_fare'", str(price.base_fare))
         await c.execute("UPDATE settings SET value=$1 WHERE key='per_km_rate'", str(price.per_km))
     return {"status": "ok"}
+
+
+@app.get("/api/config/bots", dependencies=[Depends(verify_token)])
+async def get_bot_config():
+    async with db.pool.acquire() as connection:
+        rows = await connection.fetch(
+            "SELECT key FROM settings WHERE key IN "
+            "('bot_token_passenger_enc', 'bot_token_driver_enc')"
+        )
+    configured = {row["key"] for row in rows}
+    return {
+        "passenger_configured": "bot_token_passenger_enc" in configured,
+        "driver_configured": "bot_token_driver_enc" in configured,
+    }
+
+
+@app.post("/api/config/bots/{bot_type}", dependencies=[Depends(verify_token)])
+async def set_bot_config(bot_type: str, data: BotTokenUpdate):
+    from aiogram import Bot
+    if bot_type not in ("passenger", "driver"):
+        raise HTTPException(status_code=404, detail="Unknown Bot type")
+    token = data.token.strip()
+    if not token or any(character.isspace() for character in token):
+        raise HTTPException(status_code=422, detail="Invalid Telegram Bot token")
+    probe = None
+    try:
+        probe = Bot(token=token)
+        await probe.get_me()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Telegram rejected this Bot token")
+    finally:
+        if probe is not None:
+            await probe.session.close()
+    encrypted = encrypt_token(token)
+    async with db.pool.acquire() as connection:
+        await connection.execute(
+            "INSERT INTO settings(key, value) VALUES($1, $2) "
+            "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
+            f"bot_token_{bot_type}_enc", encrypted,
+        )
+    return {"status": "saved", "configured": True, "reload": "within 5 seconds"}
+
+
+@app.delete("/api/config/bots/{bot_type}", dependencies=[Depends(verify_token)])
+async def delete_bot_config(bot_type: str):
+    if bot_type not in ("passenger", "driver"):
+        raise HTTPException(status_code=404, detail="Unknown Bot type")
+    async with db.pool.acquire() as connection:
+        await connection.execute("DELETE FROM settings WHERE key=$1", f"bot_token_{bot_type}_enc")
+    return {"status": "removed", "configured": False}
+
 
 @app.get("/api/config/support", dependencies=[Depends(verify_token)])
 async def get_support_config():
