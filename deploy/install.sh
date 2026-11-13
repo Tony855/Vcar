@@ -102,6 +102,13 @@ setfacl -R -m u:vcar:rX "$PROJECT_DIR"
 chown root:root .env
 chmod 600 .env
 setfacl -m u:vcar:--- "$PROJECT_DIR/.env"
+python3 - <<'PY'
+from pathlib import Path
+p = Path('.env')
+lines = [line for line in p.read_text().splitlines() if not line.startswith(('MIGRATION_DATABASE_URL=', 'PASSENGER_BOT_TOKEN=', 'DRIVER_BOT_TOKEN='))]
+p.write_text('\n'.join(lines) + '\n')
+p.chmod(0o600)
+PY
 grep -v '^MIGRATION_DATABASE_URL=' .env > .env.runtime
 chown root:vcar .env.runtime
 chmod 640 .env.runtime
@@ -111,16 +118,17 @@ install -d -o vcar -g vcar -m 750 /var/log/vcar
 
 echo "[7/8] Initializing administrator account (Telegram Bot tokens are configured later in the admin UI)..."
 read -r -p "Administrator username [admin]: " ADMIN_USERNAME_INPUT
-ADMIN_USERNAME_INPUT="\${ADMIN_USERNAME_INPUT:-admin}"
+ADMIN_USERNAME_INPUT="${ADMIN_USERNAME_INPUT:-admin}"
 while true; do
  read -r -s -p "Administrator password (minimum 12 characters): " ADMIN_PASSWORD; echo
  read -r -s -p "Confirm administrator password: " ADMIN_PASSWORD_CONFIRM; echo
- if [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" && \${#ADMIN_PASSWORD} -ge 12 ]]; then break; fi
+ if [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" && ${#ADMIN_PASSWORD} -ge 12 ]]; then break; fi
  echo "Passwords must match and contain at least 12 characters." >&2
 done
-ADMIN_PASSWORD_HASH="$(.venv/bin/python -c 'import sys; from app.core.security import hash_password; print(hash_password(sys.stdin.read()))' <<< "$ADMIN_PASSWORD")"
+ADMIN_PASSWORD_HASH="$(.venv/bin/python -c 'import sys; from app.core.security import hash_password; print(hash_password(sys.stdin.read().rstrip('\\n')))' <<< "$ADMIN_PASSWORD")"
 unset ADMIN_PASSWORD ADMIN_PASSWORD_CONFIRM
 read -r -p "Public domain for HTTPS/Nginx (leave blank to skip): " VCAR_DOMAIN
+if [[ -n "$VCAR_DOMAIN" && ! "$VCAR_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then echo "Invalid domain name." >&2; exit 1; fi
 .venv/bin/python - "$PROJECT_DIR/.env" "$ADMIN_USERNAME_INPUT" "$ADMIN_PASSWORD_HASH" "$VCAR_DOMAIN" <<'PY'
 import sys
 from pathlib import Path
