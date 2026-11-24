@@ -232,10 +232,10 @@ async def test_real_redis_reconciliation_repairs_500_drivers_and_prunes_orphans(
     ]
     racing_id = f"racing-{uuid.uuid4().hex}"
     try:
-        await redis.geoadd(
-            "driver:online",
-            [(104.9, 11.5, member) for member in stale_ids + [racing_id]],
-        )
+        async with redis.pipeline(transaction=False) as pipe:
+            for member in stale_ids + [racing_id]:
+                pipe.geoadd("driver:online", (104.9, 11.5, member))
+            await pipe.execute()
         await redis.zadd("driver:heartbeat", {
             **{member: now.timestamp() - 600 for member in stale_ids},
             racing_id: now.timestamp() + 1,
