@@ -124,13 +124,13 @@ ALTER DEFAULT PRIVILEGES FOR ROLE vcar IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vcar_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE vcar IN SCHEMA public
     GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO vcar_app;
-DO $
+DO $wallet_ledger$
 BEGIN
     IF to_regclass('public.wallet_transactions') IS NOT NULL THEN
         REVOKE UPDATE, DELETE ON TABLE public.wallet_transactions FROM vcar_app;
     END IF;
 END
-$;
+$wallet_ledger$;
 """
     sql_path = Path(args.write_role_sql)
     sql_path.write_text(sql)
