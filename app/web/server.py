@@ -5,7 +5,7 @@ import os
 import secrets
 import sys
 import aiohttp
-from fastapi import FastAPI, Depends, HTTPException, Response, Query, Header
+from fastapi import FastAPI, Depends, HTTPException, Response, Query, Header, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +23,7 @@ from app.services.driver_presence_projection import PRESENCE_RECONCILIATION_STAT
 from app.services.order_event_outbox import run_order_event_outbox_worker
 from app.services.driver_presence_projection import run_driver_presence_reconciliation_worker
 from app.core.security import verify_token, verify_driver_token, create_access_token, verify_password
+from app.web.login_rate_limit import consume_login_attempt, clear_identity_login_attempts
 from app.services.bot_credentials import encrypt_token
 from app.modules.routing.router import router as routing_router
 from app.modules.auth.router import router as auth_router
@@ -137,11 +138,25 @@ class BotTokenUpdate(BaseModel):
 # ================= 1. 鉴权与登录 =================
 # ================= 1. 鉴权与登录 =================
 @app.post("/api/login")
-async def login(data: LoginData):
+async def login(data: LoginData, request: Request):
     if not settings.admin_password_hash:
         raise HTTPException(status_code=503, detail="管理员账号尚未初始化")
+    client_ip = request.client.host if request.client else "unknown"
+    if db.redis is None:
+        raise HTTPException(status_code=503, detail="登录保护服务暂不可用")
+    try:
+        await consume_login_attempt(db.redis, client_ip, data.username)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Admin login rate limiter unavailable")
+        raise HTTPException(status_code=503, detail="登录保护服务暂不可用") from exc
     if data.username != settings.admin_username or not verify_password(data.password, settings.admin_password_hash):
         raise HTTPException(status_code=401, detail="账号或密码错误")
+    try:
+        await clear_identity_login_attempts(db.redis, client_ip, data.username)
+    except Exception:
+        logger.exception("Failed to clear successful admin login counter")
     return {"token": create_access_token(subject=settings.admin_username, role="admin")}
 
 # ================= 2. 管理后台接口 =================
