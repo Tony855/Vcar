@@ -55,6 +55,15 @@ groups:
           summary: Vcar driver presence reconciliation is stale
           description: The PostgreSQL-to-Redis driver presence repair has never succeeded or has not completed successfully for more than two minutes.
 
+      - alert: VcarOrderOutboxExpiredClaims
+        expr: vcar_order_event_outbox_expired_claims > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Vcar order event dispatcher has expired claims
+          description: One or more order events have remained locked beyond the five-minute worker lease and require dispatcher recovery investigation.
+
       - alert: VcarOrderOutboxHighRetry
         expr: vcar_order_event_outbox_high_retry > 0
         for: 5m
