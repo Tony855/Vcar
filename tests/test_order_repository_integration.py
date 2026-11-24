@@ -1732,3 +1732,65 @@ async def test_concurrent_passenger_and_driver_cancellation_commit_one_fee_and_e
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_different_settlement_snapshots_for_one_order_have_one_winner(database_pool):
+    """The order row lock must serialize competing policy snapshots."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "settlement-race-passenger")
+        driver_id = await _create_user(connection, "settlement-race-driver")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        for new_status, old_status in (
+            ("ARRIVED", "ACCEPTED"),
+            ("IN_PROGRESS", "ARRIVED"),
+            ("COMPLETED", "IN_PROGRESS"),
+        ):
+            assert await OrderRepository.update_status(
+                order["id"], new_status, old_status,
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ) is True
+
+        outcomes = await asyncio.gather(
+            OrderSettlement.prepare(
+                order_id=order["id"], currency="USD",
+                policy_version="race-policy-a",
+                idempotency_key=f"settlement-race-a-{uuid.uuid4()}",
+                components={"gross_fare_minor": 500, "driver_share_minor": 400},
+            ),
+            OrderSettlement.prepare(
+                order_id=order["id"], currency="USD",
+                policy_version="race-policy-b",
+                idempotency_key=f"settlement-race-b-{uuid.uuid4()}",
+                components={"gross_fare_minor": 500, "driver_share_minor": 350},
+            ),
+            return_exceptions=True,
+        )
+        successes = [item for item in outcomes if not isinstance(item, Exception)]
+        conflicts = [item for item in outcomes if isinstance(item, SettlementConflict)]
+        assert len(successes) == 1
+        assert len(conflicts) == 1
+
+        async with database_pool.acquire() as connection:
+            rows = await connection.fetch(
+                "SELECT currency, policy_version, idempotency_key, components, status "
+                "FROM order_settlements WHERE order_id=$1",
+                order["id"],
+            )
+        assert len(rows) == 1
+        assert rows[0]["status"] == "PREPARED"
+        assert rows[0]["policy_version"] in {"race-policy-a", "race-policy-b"}
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute(
+                "DELETE FROM order_settlements WHERE order_id=$1", order["id"]
+            )
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
