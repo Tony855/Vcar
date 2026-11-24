@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
@@ -19,6 +21,19 @@ import logging
 router = Router()
 logger = logging.getLogger(__name__)
 class PaxStates(StatesGroup): pickup = State(); dropoff = State(); confirm = State()
+def booking_idempotency_data(chat_id, message_id, user_id, plat, plng, dlat, dlng, trip_dist, price_val):
+    """Return a stable key for repeated taps on the same Telegram confirmation message."""
+    key = f"tg-confirm:{int(chat_id)}:{int(message_id)}"
+    fingerprint_payload = [
+        int(user_id), float(plat), float(plng), float(dlat), float(dlng),
+        float(trip_dist), float(price_val),
+    ]
+    encoded = json.dumps(
+        fingerprint_payload, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return key, hashlib.sha256(encoded).hexdigest()
+
+
 def t(key, user, **vars):
     if isinstance(user, dict):
         loc = user.get('locale', 'zh')
@@ -227,8 +242,21 @@ async def confirm_order(call: CallbackQuery, state: FSMContext, driver_bot):
     await state.clear()
     await call.message.edit_text(t("passenger.calling_msg", user))
 
-    order = await OrderRepository.create(user['id'], plng, plat, dlng, dlat, trip_dist, price_val)
-    oid = order['id']
+    idempotency_key, request_fingerprint = booking_idempotency_data(
+        call.message.chat.id, call.message.message_id, user["id"],
+        plat, plng, dlat, dlng, trip_dist, price_val,
+    )
+    order = await OrderRepository.create(
+        user["id"], plng, plat, dlng, dlat, trip_dist, price_val,
+        idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint,
+    )
+    oid = order["id"]
+
+    # A repeated callback for this confirmation message must not send the
+    # same order to drivers a second time.
+    if order.get("replayed"):
+        return
 
     drivers = await DispatchService.smart_dispatch(plng, plat, top_n=3)
     if not drivers:
