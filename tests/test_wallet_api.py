@@ -381,3 +381,77 @@ def test_wallet_api_rejects_weak_signing_secret(wallet_client, monkeypatch):
     )
     assert response.status_code == 503
     assert connection.fetch_calls == []
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    [
+        ("insufficient", 409, "Wallet balance cannot become negative"),
+        ("balance_limit", 409, "Wallet balance exceeds the supported maximum"),
+        ("idempotency", 409, "Idempotency key conflict"),
+        ("wallet", 404, "Wallet account does not exist"),
+    ],
+)
+def test_admin_wallet_adjustment_maps_ledger_failures_to_safe_http_errors(
+    wallet_client, monkeypatch, error, expected_status, expected_detail
+):
+    from app.modules.payments.ledger import (
+        IdempotencyConflict,
+        InsufficientFunds,
+        WalletBalanceLimit,
+        WalletError,
+    )
+
+    client, _, token = wallet_client
+    exceptions = {
+        "insufficient": InsufficientFunds("internal balance detail"),
+        "balance_limit": WalletBalanceLimit("internal limit detail"),
+        "idempotency": IdempotencyConflict("internal idempotency detail"),
+        "wallet": WalletError("Wallet account does not exist"),
+    }
+
+    async def fail_post(**kwargs):
+        raise exceptions[error]
+
+    monkeypatch.setattr(wallet_router.WalletLedger, "post", fail_post)
+    response = client.post(
+        "/api/v1/wallet/admin/adjust",
+        headers={"Authorization": f"Bearer {token('admin', 'admin-operator-1')}"},
+        json={
+            "user_id": 41,
+            "currency": "USD",
+            "amount_minor": 500,
+            "reason": "Approved support correction",
+            "idempotency_key": f"admin-adjustment-error-{error}",
+        },
+    )
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == expected_detail
+    assert "internal" not in response.text
+
+
+def test_admin_wallet_adjustment_rejects_non_admin_without_ledger_write(
+    wallet_client, monkeypatch
+):
+    client, _, token = wallet_client
+    called = False
+
+    async def forbidden_post(**kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("ledger must not be called for non-admin")
+
+    monkeypatch.setattr(wallet_router.WalletLedger, "post", forbidden_post)
+    response = client.post(
+        "/api/v1/wallet/admin/adjust",
+        headers={"Authorization": f"Bearer {token('passenger', '7003003')}"},
+        json={
+            "user_id": 41,
+            "currency": "USD",
+            "amount_minor": 500,
+            "reason": "Approved support correction",
+            "idempotency_key": "admin-adjustment-forbidden-001",
+        },
+    )
+    assert response.status_code == 403
+    assert called is False
