@@ -2034,3 +2034,60 @@ async def test_settlement_crash_window_recovery_is_concurrent_and_idempotent(dat
                 "DELETE FROM users WHERE id=ANY($1)",
                 [passenger_id, driver_id, platform_id],
             )
+
+
+@pytest.mark.asyncio
+async def test_cancellation_fee_is_recorded_without_wallet_side_effects(database_pool):
+    """A recorded cancellation fee must not debit or credit any wallet."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "cancel-fee-ledger-passenger")
+        driver_id = await _create_user(connection, "cancel-fee-ledger-driver")
+        wallet_rows = await connection.fetch(
+            """
+            INSERT INTO wallet_accounts (user_id, currency, balance_minor)
+            VALUES ($1, 'USD', 0), ($2, 'USD', 0)
+            RETURNING id
+            """,
+            passenger_id, driver_id,
+        )
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        assert await OrderRepository.cancel_with_fee(
+            order["id"], passenger_id, "PASSENGER", fee=Decimal("1.25")
+        ) is True
+
+        async with database_pool.acquire() as connection:
+            order_row = await connection.fetchrow(
+                "SELECT status, cancel_fee FROM orders WHERE id=$1", order["id"]
+            )
+            wallets = await connection.fetch(
+                "SELECT id, balance_minor FROM wallet_accounts WHERE id=ANY($1)",
+                [row["id"] for row in wallet_rows],
+            )
+            ledger_count = await connection.fetchval(
+                "SELECT count(*) FROM wallet_transactions WHERE wallet_id=ANY($1)",
+                [row["id"] for row in wallet_rows],
+            )
+
+        assert order_row["status"] == "CANCELLED"
+        assert order_row["cancel_fee"] == Decimal("1.25")
+        assert {row["balance_minor"] for row in wallets} == {0}
+        assert ledger_count == 0
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM wallet_transactions WHERE wallet_id=ANY($1)",
+                [row["id"] for row in wallet_rows],
+            )
+            await connection.execute(
+                "DELETE FROM wallet_accounts WHERE id=ANY($1)",
+                [row["id"] for row in wallet_rows],
+            )
+            await connection.execute(
+                "DELETE FROM users WHERE id=ANY($1)", [passenger_id, driver_id]
+            )
