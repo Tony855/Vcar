@@ -140,9 +140,9 @@ def test_booking_api_creates_order_with_priced_route(api_client, monkeypatch):
         pricing_calls.append(coordinates)
         return 6.25, 4.75
 
-    async def create(*values):
-        create_calls.append(values)
-        return {"id": 991}
+    async def create(*values, **kwargs):
+        create_calls.append((values, kwargs))
+        return {"id": 991, "replayed": False}
 
     monkeypatch.setattr(PricingService, "estimate", estimate)
     monkeypatch.setattr(OrderRepository, "create", create)
@@ -164,9 +164,41 @@ def test_booking_api_creates_order_with_priced_route(api_client, monkeypatch):
         "price_estimate": 4.75,
     }
     assert pricing_calls == [(11.55, 104.92, 11.57, 104.95)]
-    assert create_calls == [(41, 104.92, 11.55, 104.95, 11.57, 6.25, 4.75)]
+    assert create_calls == [(
+        (41, 104.92, 11.55, 104.95, 11.57, 6.25, 4.75),
+        {"idempotency_key": None, "request_fingerprint": None},
+    )]
     assert connection.fetchval_calls
 
+
+
+def test_booking_api_passes_idempotency_key_and_returns_replay_status(api_client, monkeypatch):
+    client, connection, token = api_client
+    calls = []
+
+    async def estimate(*_coordinates):
+        return 6.25, 4.75
+
+    async def create(*values, **kwargs):
+        calls.append(kwargs)
+        return {"id": 993, "replayed": len(calls) > 1}
+
+    monkeypatch.setattr(PricingService, "estimate", estimate)
+    monkeypatch.setattr(OrderRepository, "create", create)
+    payload = {
+        "pickup_lat": 11.55, "pickup_lng": 104.92,
+        "dropoff_lat": 11.57, "dropoff_lng": 104.95,
+    }
+    headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "booking-attempt-993"}
+
+    first = client.post("/api/passenger/orders", headers=headers, json=payload)
+    replay = client.post("/api/passenger/orders", headers=headers, json=payload)
+
+    assert first.status_code == 201
+    assert replay.status_code == 200
+    assert first.json()["order_id"] == replay.json()["order_id"] == 993
+    assert calls[0]["idempotency_key"] == calls[1]["idempotency_key"] == "booking-attempt-993"
+    assert calls[0]["request_fingerprint"] == calls[1]["request_fingerprint"]
 
 def test_booking_api_returns_service_unavailable_when_route_quote_fails(api_client, monkeypatch):
     client, connection, token = api_client
@@ -177,9 +209,9 @@ def test_booking_api_returns_service_unavailable_when_route_quote_fails(api_clie
     monkeypatch.setattr(PricingService, "estimate", unavailable)
     create_calls = []
 
-    async def create(*values):
-        create_calls.append(values)
-        return {"id": 992}
+    async def create(*values, **kwargs):
+        create_calls.append((values, kwargs))
+        return {"id": 992, "replayed": False}
 
     monkeypatch.setattr(OrderRepository, "create", create)
 
