@@ -87,7 +87,7 @@ curl 'http://127.0.0.1:5000/route/v1/driving/104.9282,11.5564;104.9500,11.5700?o
 - `DATABASE_URL` is the application runtime connection and must use the restricted `vcar_app` login.
 - `MIGRATION_DATABASE_URL` is reserved for the schema owner `vcar` and is used only by Alembic and installer schema import.
 - The installer upgrades legacy `DATABASE_URL=...vcar...` configurations by preserving that owner URL as `MIGRATION_DATABASE_URL`, generating a separate runtime login, and applying table/sequence grants plus default privileges for future Alembic objects.
-- The application role receives SELECT/INSERT/UPDATE/DELETE and sequence privileges by default, but targeted safeguards revoke UPDATE/DELETE on wallet ledger history and DELETE on orders, order events, event outbox, and settlement snapshots. Settlement status updates remain guarded by a database transition trigger. The runtime role has no table ownership or schema DDL privileges; CI verifies these restrictions.
+- The application role receives SELECT/INSERT/UPDATE/DELETE and sequence privileges by default, but targeted safeguards revoke UPDATE/DELETE on wallet ledger history and order event history, plus DELETE on orders, event outbox, and settlement snapshots. Settlement status updates remain guarded by a database transition trigger. The runtime role has no table ownership or schema DDL privileges; CI verifies these restrictions.
 - Do not put the migration-owner URL in application-only containers or expose it to web workers. Keep it only in the protected installer/migration environment.
 - Existing deployments must take a database backup before running the updated installer. The installer does not run automatically against a live production host as part of this repository change.
 
