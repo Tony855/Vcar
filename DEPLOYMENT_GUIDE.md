@@ -165,3 +165,8 @@ HAVING count(*) > 1;
 ```
 
 只要查询返回记录，就不能直接降级到该迁移之前。优先方案是在维护窗口内恢复升级前的、已验证的完整备份；若升级后已经产生真实账务数据，应保留当前 schema 并采用向前修复/新迁移，不得把降级当作数据回滚。即使查询为空，也必须先完成备份、在副本上演练完整 downgrade/upgrade，并核对钱包余额与交易账本后再批准变更。
+
+
+### Outbox 租约恢复告警
+- Prometheus 指标 `vcar_order_event_outbox_expired_claims` 统计超过 5 分钟租约仍未释放的订单事件；`VcarOrderOutboxExpiredClaims` 在连续 2 分钟大于 0 时触发 critical 告警。
+- 告警后先检查 dispatcher 进程、Redis、PostgreSQL 连接池和最近错误日志；不要直接删除 Outbox 行或修改订单事件历史。租约过期后 Worker 可重新领取，重复发布由稳定的 `event_id` 去重。
