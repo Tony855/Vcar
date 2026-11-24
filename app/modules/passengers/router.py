@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -15,7 +16,7 @@ from app.core.security import (
 )
 from app.db.core import db
 from app.modules.auth.ws_tickets import consume_ws_ticket
-from app.db.repositories.order_repo import OrderRepository
+from app.db.repositories.order_repo import OrderRepository, IdempotencyConflict
 from app.services.pricing import PricingService
 from app.infrastructure.osrm.client import RoutingError
 from app.modules.orders.stream import load_order_stream_bootstrap
@@ -81,7 +82,9 @@ def passenger_claims(authorization: str | None) -> dict:
 @router.post("/orders", status_code=201)
 async def create_booking(
     request: BookingRequest,
+    response: Response,
     authorization: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=1, max_length=128),
 ):
     claims = passenger_claims(authorization)
     async with db.pool.acquire() as conn:
@@ -97,10 +100,23 @@ async def create_booking(
         )
     except (RoutingError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="Unable to calculate a safe route quote") from exc
-    order = await OrderRepository.create(
-        customer_id, request.pickup_lng, request.pickup_lat,
-        request.dropoff_lng, request.dropoff_lat, distance_km, price,
-    )
+    request_fingerprint = hashlib.sha256(
+        json.dumps(
+            [request.pickup_lat, request.pickup_lng, request.dropoff_lat, request.dropoff_lng],
+            separators=(",", ":"), allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    try:
+        order = await OrderRepository.create(
+            customer_id, request.pickup_lng, request.pickup_lat,
+            request.dropoff_lng, request.dropoff_lat, distance_km, price,
+            idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint if idempotency_key else None,
+        )
+    except IdempotencyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if order.get("replayed"):
+        response.status_code = 200
     return {"order_id": order["id"], "status": "DISPATCHING", "distance_km": distance_km, "price_estimate": price}
 
 
