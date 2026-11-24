@@ -209,9 +209,9 @@ def test_booking_api_returns_service_unavailable_when_route_quote_fails(api_clie
     monkeypatch.setattr(PricingService, "estimate", unavailable)
     create_calls = []
 
-    async def create(*values):
-        create_calls.append(values)
-        return {"id": 992}
+    async def create(*values, **kwargs):
+        create_calls.append((values, kwargs))
+        return {"id": 992, "replayed": False}
 
     monkeypatch.setattr(OrderRepository, "create", create)
 
