@@ -1798,8 +1798,8 @@ async def test_concurrent_conflicting_settlement_allocations_post_exactly_one_ba
         )
         successes = [item for item in outcomes if not isinstance(item, Exception)]
         conflicts = [item for item in outcomes if isinstance(item, IdempotencyConflict)]
-        assert len(successes) == 1
-        assert len(conflicts) == 1
+        assert len(successes) == 1, f"expected one settlement batch winner, outcomes={outcomes!r}"
+        assert len(conflicts) == 1, f"expected one idempotency conflict, outcomes={outcomes!r}"
         assert successes[0].status == "POSTED"
 
         async with database_pool.acquire() as connection:
