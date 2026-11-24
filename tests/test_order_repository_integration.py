@@ -1909,3 +1909,128 @@ async def test_concurrent_conflicting_settlement_allocations_post_exactly_one_ba
                 "DELETE FROM users WHERE id = ANY($1)",
                 [passenger_id, driver_id, platform_id],
             )
+
+
+@pytest.mark.asyncio
+async def test_settlement_crash_window_recovery_is_concurrent_and_idempotent(database_pool):
+    """Recover a durable ledger batch when the process died before POSTED."""
+    from app.modules.payments.reconciliation import reconcile_order_settlements
+    from app.modules.payments.settlement import finalize_committed_allocation
+
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "settlement-recovery-passenger")
+        driver_id = await _create_user(connection, "settlement-recovery-driver")
+        platform_id = await _create_user(connection, "settlement-recovery-platform")
+        wallet_ids = await connection.fetch(
+            """
+            INSERT INTO wallet_accounts (user_id, currency, balance_minor)
+            VALUES ($1, 'USD', 0), ($2, 'USD', 0), ($3, 'USD', 0)
+            RETURNING id
+            """,
+            passenger_id, driver_id, platform_id,
+        )
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9282, 11.5564, 104.9500, 11.5700, 5.0, 3.5
+    )
+    topup_key = f"settlement-recovery-topup-{uuid.uuid4()}"
+    settlement_id = None
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        for new_status, old_status in (
+            ("ARRIVED", "ACCEPTED"),
+            ("IN_PROGRESS", "ARRIVED"),
+            ("COMPLETED", "IN_PROGRESS"),
+        ):
+            assert await OrderRepository.update_status(
+                order["id"], new_status, old_status,
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ) is True
+
+        await WalletLedger.post(
+            user_id=passenger_id, currency="USD", amount_minor=1000,
+            kind="TOPUP", idempotency_key=topup_key,
+            metadata={"source": "settlement-recovery-fixture"},
+        )
+        prepared = await OrderSettlement.prepare(
+            order_id=order["id"], currency="USD",
+            policy_version="integration-recovery-v1",
+            idempotency_key=f"settlement-recovery-{uuid.uuid4()}",
+            components={"gross_fare_minor": 350},
+        )
+        settlement_id = prepared.settlement_id
+
+        # Simulate the crash boundary: the atomic wallet batch committed,
+        # but the process never updated order_settlements.status to POSTED.
+        await WalletLedger.post_balanced_batch(
+            currency="USD",
+            idempotency_key=f"settlement:{settlement_id}",
+            order_id=order["id"],
+            legs=[
+                {"user_id": passenger_id, "amount_minor": -350, "kind": "TEST_FARE",
+                 "metadata": {"_settlement_id": settlement_id,
+                              "_policy_version": "integration-recovery-v1"}},
+                {"user_id": driver_id, "amount_minor": 300, "kind": "TEST_DRIVER_CREDIT",
+                 "metadata": {"_settlement_id": settlement_id,
+                              "_policy_version": "integration-recovery-v1"}},
+                {"user_id": platform_id, "amount_minor": 50, "kind": "TEST_PLATFORM_CREDIT",
+                 "metadata": {"_settlement_id": settlement_id,
+                              "_policy_version": "integration-recovery-v1"}},
+            ],
+        )
+
+        async with database_pool.acquire() as connection:
+            assert await connection.fetchval(
+                "SELECT status FROM order_settlements WHERE id=$1", settlement_id
+            ) == "PREPARED"
+            assert await connection.fetchval(
+                "SELECT COUNT(*) FROM wallet_transactions WHERE metadata->>'_settlement_id'=$1",
+                str(settlement_id),
+            ) == 3
+
+        recovered_a, recovered_b = await asyncio.gather(
+            finalize_committed_allocation(settlement_id=settlement_id),
+            finalize_committed_allocation(settlement_id=settlement_id),
+        )
+        assert recovered_a.status == recovered_b.status == "POSTED"
+        assert sorted([recovered_a.recovered, recovered_b.recovered]) == [False, True]
+
+        async with database_pool.acquire() as connection:
+            status = await connection.fetchval(
+                "SELECT status FROM order_settlements WHERE id=$1", settlement_id
+            )
+            ledger_rows = await connection.fetch(
+                "SELECT amount_minor FROM wallet_transactions "
+                "WHERE metadata->>'_settlement_id'=$1",
+                str(settlement_id),
+            )
+            balances = await connection.fetch(
+                "SELECT balance_minor FROM wallet_accounts WHERE id=ANY($1)",
+                [row["id"] for row in wallet_ids],
+            )
+        assert status == "POSTED"
+        assert len(ledger_rows) == 3
+        assert sum(row["amount_minor"] for row in ledger_rows) == 0
+        assert sorted(row["balance_minor"] for row in balances) == [50, 300, 650]
+
+        findings = await reconcile_order_settlements()
+        assert not [item for item in findings if item["settlement_id"] == settlement_id]
+    finally:
+        async with database_pool.acquire() as connection:
+            if settlement_id is not None:
+                await connection.execute(
+                    "DELETE FROM order_settlements WHERE id=$1", settlement_id
+                )
+            await connection.execute(
+                "DELETE FROM wallet_transactions WHERE wallet_id=ANY($1)",
+                [row["id"] for row in wallet_ids],
+            )
+            await connection.execute(
+                "DELETE FROM wallet_accounts WHERE id=ANY($1)",
+                [row["id"] for row in wallet_ids],
+            )
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id=ANY($1)",
+                [passenger_id, driver_id, platform_id],
+            )
