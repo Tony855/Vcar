@@ -201,11 +201,14 @@ class DispatchService:
             telegram_ids = [int(driver[0]) for driver in raw_drivers]
             user_rows = await connection.fetch(
                 """
-                SELECT id, telegram_id, rating, locale
-                FROM users
-                WHERE telegram_id = ANY($1)
-                  AND driver_status='APPROVED'
-                  AND driver_is_online IS TRUE
+                SELECT u.id, u.telegram_id, u.rating, u.locale
+                FROM users u
+                JOIN driver_locations l ON l.driver_id=u.id
+                WHERE u.telegram_id = ANY($1)
+                  AND u.driver_status='APPROVED'
+                  AND u.driver_is_online IS TRUE
+                  AND l.received_at >= now() - interval '120 seconds'
+                  AND l.received_at <= now()
                 """,
                 telegram_ids,
             )
