@@ -1752,6 +1752,12 @@ async def test_concurrent_conflicting_settlement_allocations_post_exactly_one_ba
             """,
             passenger_id, driver_id, platform_id,
         )
+        # The debit leg must be fundable; this test exercises idempotency,
+        # not insufficient-funds handling.
+        await connection.execute(
+            "UPDATE wallet_accounts SET balance_minor=1000 WHERE user_id=$1 AND currency='USD'",
+            passenger_id,
+        )
 
     order = await OrderRepository.create(
         passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
