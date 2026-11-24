@@ -17,17 +17,30 @@ class FakeRedis:
         self.generations = {}
         self.newer_members = set(newer_members)
         self.repaired = []
+        self.scan_calls = []
+        self.scan_snapshots = {}
 
     async def eval(self, script, key_count, *args):
         if script == _REMOVE_STALE_DRIVER:
-            _keys, member, cutoff = args[:3], args[3], args[4]
-            current = self.heartbeat.get(member)
-            if member in self.newer_members or (current is not None and current > float(cutoff)):
-                return 0
-            self.heartbeat.pop(member, None)
-            self.online.discard(member)
-            self.versions.pop(member, None)
-            return 1
+            _keys = args[:3]
+            cutoff = float(args[3])
+            removed = 0
+            for member in args[4:]:
+                current = self.heartbeat.get(member)
+                if member in self.newer_members or (
+                    current is not None and current > cutoff
+                ):
+                    continue
+                existed = (
+                    current is not None
+                    or member in self.online
+                    or member in self.versions
+                )
+                self.heartbeat.pop(member, None)
+                self.online.discard(member)
+                self.versions.pop(member, None)
+                removed += int(existed)
+            return removed
         if script == _REPAIR_DRIVER:
             _keys, longitude, latitude, member, recorded, received, generation = args[:4], *args[4:]
             # The reconciliation caller has revalidated the exact durable
@@ -48,12 +61,23 @@ class FakeRedis:
         self.repaired.append((member, float(longitude), float(latitude)))
         return 1
 
-    async def zrange(self, key, start, end):
-        if key == "driver:heartbeat":
-            return sorted(self.heartbeat)
-        if key == "driver:online":
-            return sorted(self.online)
-        raise AssertionError(key)
+    async def zscan(self, key, cursor=0, count=10):
+        self.scan_calls.append((key, count))
+        if cursor == 0 or key not in self.scan_snapshots:
+            if key == "driver:heartbeat":
+                snapshot = sorted(self.heartbeat)
+            elif key == "driver:online":
+                snapshot = sorted(self.online)
+            else:
+                raise AssertionError(key)
+            self.scan_snapshots[key] = snapshot
+        snapshot = self.scan_snapshots[key]
+        batch = snapshot[cursor:cursor + count]
+        next_cursor = cursor + len(batch)
+        if next_cursor >= len(snapshot):
+            next_cursor = 0
+            self.scan_snapshots.pop(key, None)
+        return next_cursor, {member: 0.0 for member in batch}
 
 
 class FakeConnection:
@@ -118,6 +142,27 @@ async def test_reconciliation_repairs_fresh_database_rows_and_removes_stale_memb
     assert connection.args[1] == now
     assert "driver_is_online IS TRUE" in connection.query
     assert redis.generations == {"1001": 1, "1002": 1}
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_scans_large_stale_indexes_in_bounded_batches():
+    now = datetime.now(timezone.utc)
+    redis = FakeRedis(
+        heartbeat={
+            f"stale-{index:04d}": now.timestamp() - 600
+            for index in range(1205)
+        }
+    )
+
+    result = await reconcile_driver_presence(redis, FakeConnection([]), now=now)
+
+    heartbeat_batches = [
+        count for key, count in redis.scan_calls if key == "driver:heartbeat"
+    ]
+    assert heartbeat_batches == [500, 500, 500]
+    assert result == {"database_fresh": 0, "repaired": 0, "stale_removed": 1205}
+    assert redis.heartbeat == {}
+    assert redis.online == set()
 
 
 @pytest.mark.asyncio
