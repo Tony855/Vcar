@@ -131,6 +131,18 @@ BEGIN
     END IF;
 END
 $wallet_ledger$;
+DO $order_audit$
+DECLARE
+    table_name text;
+BEGIN
+    FOREACH table_name IN ARRAY ARRAY['orders', 'order_events', 'order_event_outbox', 'order_settlements']
+    LOOP
+        IF to_regclass(format('public.%I', table_name)) IS NOT NULL THEN
+            EXECUTE format('REVOKE DELETE ON TABLE public.%I FROM vcar_app', table_name);
+        END IF;
+    END LOOP;
+END
+$order_audit$;
 """
     sql_path = Path(args.write_role_sql)
     sql_path.write_text(sql)
