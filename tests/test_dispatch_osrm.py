@@ -10,6 +10,9 @@ class FakeConnection:
         if "SELECT DISTINCT driver_id" in query:
             return []
         assert "driver_is_online IS TRUE" in query
+        assert "JOIN driver_locations l ON l.driver_id=u.id" in query
+        assert "l.received_at >= now() - interval '120 seconds'" in query
+        assert "l.received_at <= now()" in query
         return [
             {"id": 1, "telegram_id": 1001, "rating": 5.0, "locale": "zh"},
             {"id": 2, "telegram_id": 1002, "rating": 5.0, "locale": "en"},
