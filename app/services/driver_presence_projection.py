@@ -50,14 +50,24 @@ return 1
 # Only remove stale Redis entries whose heartbeat has not advanced past the
 # reconciliation cutoff.
 _REMOVE_STALE_DRIVER = """
-local heartbeat = redis.call('ZSCORE', KEYS[1], ARGV[1])
-if not heartbeat or tonumber(heartbeat) <= tonumber(ARGV[2]) then
-    redis.call('ZREM', KEYS[1], ARGV[1])
-    redis.call('ZREM', KEYS[2], ARGV[1])
-    redis.call('ZREM', KEYS[3], ARGV[1])
-    return 1
+local cutoff = tonumber(ARGV[1])
+local removed = 0
+for index = 2, #ARGV do
+    local member = ARGV[index]
+    local heartbeat = redis.call('ZSCORE', KEYS[1], member)
+    if not heartbeat or tonumber(heartbeat) <= cutoff then
+        local existed = heartbeat
+            or redis.call('ZSCORE', KEYS[2], member)
+            or redis.call('ZSCORE', KEYS[3], member)
+        if existed then
+            redis.call('ZREM', KEYS[1], member)
+            redis.call('ZREM', KEYS[2], member)
+            redis.call('ZREM', KEYS[3], member)
+            removed = removed + 1
+        end
+    end
 end
-return 0
+return removed
 """
 
 FRESH_DRIVERS_QUERY = """
@@ -141,17 +151,34 @@ async def reconcile_driver_presence(redis_client, connection, *, now=None) -> di
         fresh_ids.add(member)
         repaired += int(applied == 1)
 
-    # Iterate both indexes: a partial Redis write or old deployment may leave
-    # GEO members without heartbeat scores, or heartbeat members without GEO.
-    indexed = set(await redis_client.zrange("driver:heartbeat", 0, -1))
-    indexed.update(await redis_client.zrange("driver:online", 0, -1))
+    # Scan both indexes in bounded batches. A full ZRANGE would materialize
+    # every driver ID in each app worker's memory on every reconciliation pass.
+    # ZSCAN may return duplicates; the Lua cleanup is idempotent and counts a
+    # member only when one of its Redis projections still exists.
     stale_removed = 0
-    for member in indexed - fresh_ids:
-        stale_removed += int(await redis_client.eval(
-            _REMOVE_STALE_DRIVER, 3,
-            "driver:heartbeat", "driver:online", "driver:location:version",
-            member, scan_epoch,
-        ) == 1)
+    for index_key in ("driver:heartbeat", "driver:online"):
+        cursor = 0
+        while True:
+            cursor, entries = await redis_client.zscan(
+                index_key, cursor=cursor, count=500
+            )
+            members = entries.keys() if isinstance(entries, dict) else (
+                member for member, _score in entries
+            )
+            stale_batch = []
+            for member in members:
+                if isinstance(member, bytes):
+                    member = member.decode("utf-8", errors="strict")
+                if member not in fresh_ids:
+                    stale_batch.append(member)
+            if stale_batch:
+                stale_removed += int(await redis_client.eval(
+                    _REMOVE_STALE_DRIVER, 3,
+                    "driver:heartbeat", "driver:online", "driver:location:version",
+                    scan_epoch, *stale_batch,
+                ))
+            if cursor == 0:
+                break
 
     return {
         "database_fresh": len(fresh_ids),
