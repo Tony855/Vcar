@@ -125,7 +125,7 @@ jobs:
             echo "Runtime role unexpectedly has DELETE privilege on wallet ledger" >&2
             exit 1
           fi
-          test "$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT bool_and(NOT has_table_privilege(current_user, format('public.%I', table_name), 'DELETE')) FROM unnest(ARRAY['orders','order_events','order_event_outbox','order_settlements']) AS table_name")" = "t"
+          test "$(docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT bool_and(NOT has_table_privilege(current_user, format('public.%I', table_name), 'DELETE')) FROM unnest(ARRAY['orders','order_events','order_event_outbox','order_settlements']) AS t(table_name)")" = "t"
           for table in orders order_events order_event_outbox order_settlements; do
             if docker run --rm --network host postgis/postgis:16-3.7 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DELETE FROM public.$table WHERE false"; then
               echo "Runtime role unexpectedly has DELETE privilege on $table" >&2
