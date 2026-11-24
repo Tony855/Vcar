@@ -772,6 +772,83 @@ async def test_driver_can_cancel_and_non_finite_fees_are_rejected(database_pool)
 
 
 @pytest.mark.asyncio
+async def test_cancellation_fee_is_audit_only_and_does_not_move_wallet_funds(database_pool):
+    """Cancellation records its fee but must not debit or credit either wallet."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "cancel-fee-audit-passenger")
+        driver_id = await _create_user(connection, "cancel-fee-audit-driver")
+        wallet_rows = await connection.fetch(
+            """
+            INSERT INTO wallet_accounts (user_id, currency, balance_minor)
+            VALUES ($1, 'USD', 10000), ($2, 'USD', 25000)
+            RETURNING id, user_id
+            """,
+            passenger_id,
+            driver_id,
+        )
+    wallet_ids = [row["id"] for row in wallet_rows]
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        assert await OrderRepository.cancel_with_fee(
+            order["id"], passenger_id, "PASSENGER", Decimal("1.25")
+        ) is True
+
+        async with database_pool.acquire() as connection:
+            balances = await connection.fetch(
+                """
+                SELECT user_id, balance_minor FROM wallet_accounts
+                WHERE id = ANY($1)
+                ORDER BY user_id
+                """,
+                wallet_ids,
+            )
+            order_ledger_rows = await connection.fetchval(
+                "SELECT COUNT(*) FROM wallet_transactions WHERE order_id=$1",
+                order["id"],
+            )
+            row = await connection.fetchrow(
+                "SELECT status, cancel_fee FROM orders WHERE id=$1",
+                order["id"],
+            )
+            fee_event = await connection.fetchrow(
+                """
+                SELECT metadata FROM order_events
+                WHERE order_id=$1 AND to_status='CANCELLED'
+                ORDER BY id DESC LIMIT 1
+                """,
+                order["id"],
+            )
+
+        assert {row["user_id"]: row["balance_minor"] for row in balances} == {
+            passenger_id: 10000,
+            driver_id: 25000,
+        }
+        assert order_ledger_rows == 0
+        assert row["status"] == "CANCELLED"
+        assert row["cancel_fee"] == Decimal("1.25")
+        metadata = fee_event["metadata"]
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+        assert metadata["cancel_fee"] == "1.25"
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute(
+                "DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)",
+                wallet_ids,
+            )
+            await connection.execute(
+                "DELETE FROM wallet_accounts WHERE id = ANY($1)", wallet_ids
+            )
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
+
+
+@pytest.mark.asyncio
 async def test_concurrent_order_cancellation_emits_exactly_one_event(database_pool):
     async with database_pool.acquire() as connection:
         passenger_id = await _create_user(connection, "cancel-race-passenger")
