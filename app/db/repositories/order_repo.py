@@ -112,24 +112,64 @@ class OrderRepository:
             return result == "UPDATE 1"
 
     @classmethod
-    async def create(cls, cid, plng, plat, dlng, dlat, dist, price):
+    async def create(
+        cls, cid, plng, plat, dlng, dlat, dist, price,
+        *, idempotency_key=None, request_fingerprint=None,
+    ):
+        if idempotency_key is not None:
+            if (
+                not isinstance(idempotency_key, str)
+                or not idempotency_key.strip()
+                or len(idempotency_key) > 128
+                or not isinstance(request_fingerprint, str)
+                or len(request_fingerprint) != 64
+                or any(char not in "0123456789abcdef" for char in request_fingerprint)
+            ):
+                raise ValueError("invalid booking idempotency data")
+            idempotency_key = idempotency_key.strip()
+
         async with db.pool.acquire() as connection:
             async with connection.transaction():
                 row = await connection.fetchrow(
                     """
                     INSERT INTO orders
                         (customer_id, pickup_lng, pickup_lat, dropoff_lng, dropoff_lat,
-                         distance_km, price_estimate, status)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, 'DISPATCHING')
+                         distance_km, price_estimate, status, idempotency_key, request_fingerprint)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 'DISPATCHING', $8, $9)
+                    ON CONFLICT (customer_id, idempotency_key)
+                        WHERE idempotency_key IS NOT NULL
+                    DO NOTHING
                     RETURNING id
                     """,
                     cid, plng, plat, dlng, dlat, dist, price,
+                    idempotency_key, request_fingerprint,
                 )
+                if row is None:
+                    existing = await connection.fetchrow(
+                        """
+                        SELECT id, request_fingerprint FROM orders
+                        WHERE customer_id=$1 AND idempotency_key=$2
+                        FOR UPDATE
+                        """,
+                        cid, idempotency_key,
+                    )
+                    if existing is None:
+                        raise RuntimeError("idempotent booking conflict could not be resolved")
+                    if existing["request_fingerprint"] != request_fingerprint:
+                        raise IdempotencyConflict(
+                            "Idempotency-Key was already used with a different booking request"
+                        )
+                    return {"id": existing["id"], "replayed": True}
+
                 await cls._append_event(
                     connection, row["id"], None, "DISPATCHING",
                     actor_user_id=cid, actor_role="PASSENGER",
                 )
-            return dict(row)
+            return {"id": row["id"], "replayed": False}
+
+
+class IdempotencyConflict(ValueError):
+    """An idempotency key was reused for a different logical request."""
 
     @staticmethod
     async def get(oid):
