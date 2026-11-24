@@ -1732,3 +1732,112 @@ async def test_concurrent_passenger_and_driver_cancellation_commit_one_fee_and_e
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_conflicting_settlement_allocations_post_exactly_one_batch(database_pool):
+    """A settlement idempotency key cannot be raced with a different allocation."""
+    from app.modules.payments.ledger import IdempotencyConflict
+    from app.modules.payments.settlement import post_explicit_allocation
+
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "settlement-conflict-passenger")
+        driver_id = await _create_user(connection, "settlement-conflict-driver")
+        platform_id = await _create_user(connection, "settlement-conflict-platform")
+        wallet_rows = await connection.fetch(
+            """
+            INSERT INTO wallet_accounts (user_id, currency, balance_minor)
+            VALUES ($1, 'USD', 0), ($2, 'USD', 0), ($3, 'USD', 0)
+            RETURNING id
+            """,
+            passenger_id, driver_id, platform_id,
+        )
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    settlement_id = None
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+        for new_status, old_status in (
+            ("ARRIVED", "ACCEPTED"),
+            ("IN_PROGRESS", "ARRIVED"),
+            ("COMPLETED", "IN_PROGRESS"),
+        ):
+            assert await OrderRepository.update_status(
+                order["id"], new_status, old_status,
+                actor_user_id=driver_id, actor_role="DRIVER",
+            ) is True
+
+        prepared = await OrderSettlement.prepare(
+            order_id=order["id"], currency="USD",
+            policy_version="integration-conflict-v1",
+            idempotency_key=f"settlement-conflict-{uuid.uuid4()}",
+            components={"gross_fare_minor": 500},
+        )
+        settlement_id = prepared.settlement_id
+
+        allocations = [
+            [
+                {"user_id": passenger_id, "amount_minor": -500, "kind": "TEST_FARE"},
+                {"user_id": driver_id, "amount_minor": 400, "kind": "TEST_DRIVER"},
+                {"user_id": platform_id, "amount_minor": 100, "kind": "TEST_PLATFORM"},
+            ],
+            [
+                {"user_id": passenger_id, "amount_minor": -500, "kind": "TEST_FARE"},
+                {"user_id": driver_id, "amount_minor": 350, "kind": "TEST_DRIVER"},
+                {"user_id": platform_id, "amount_minor": 150, "kind": "TEST_PLATFORM"},
+            ],
+        ]
+        outcomes = await asyncio.gather(
+            *[
+                post_explicit_allocation(settlement_id=settlement_id, legs=legs)
+                for legs in allocations
+            ],
+            return_exceptions=True,
+        )
+        successes = [item for item in outcomes if not isinstance(item, Exception)]
+        conflicts = [item for item in outcomes if isinstance(item, IdempotencyConflict)]
+        assert len(successes) == 1
+        assert len(conflicts) == 1
+        assert successes[0].status == "POSTED"
+
+        async with database_pool.acquire() as connection:
+            snapshot_status = await connection.fetchval(
+                "SELECT status FROM order_settlements WHERE id=$1", settlement_id
+            )
+            ledger_rows = await connection.fetch(
+                """
+                SELECT wallet_id, amount_minor, kind, idempotency_key
+                FROM wallet_transactions
+                WHERE metadata->>'_settlement_id'=$1
+                ORDER BY metadata->>'_batch_index'
+                """,
+                str(settlement_id),
+            )
+        assert snapshot_status == "POSTED"
+        assert len(ledger_rows) == 3
+        assert sum(row["amount_minor"] for row in ledger_rows) == 0
+        assert [row["amount_minor"] for row in ledger_rows] in (
+            [-500, 400, 100], [-500, 350, 150]
+        )
+        assert len({row["idempotency_key"] for row in ledger_rows}) == 3
+    finally:
+        async with database_pool.acquire() as connection:
+            if settlement_id is not None:
+                await connection.execute(
+                    "DELETE FROM order_settlements WHERE id=$1", settlement_id
+                )
+            await connection.execute(
+                "DELETE FROM wallet_transactions WHERE wallet_id = ANY($1)",
+                [row["id"] for row in wallet_rows],
+            )
+            await connection.execute(
+                "DELETE FROM wallet_accounts WHERE id = ANY($1)",
+                [row["id"] for row in wallet_rows],
+            )
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)",
+                [passenger_id, driver_id, platform_id],
+            )
