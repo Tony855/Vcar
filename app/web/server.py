@@ -4,7 +4,6 @@ import math
 import os
 import secrets
 import sys
-from datetime import datetime, timezone
 import aiohttp
 from fastapi import FastAPI, Depends, HTTPException, Response, Query, Header
 from fastapi.responses import HTMLResponse, FileResponse
@@ -19,6 +18,7 @@ sys.path.append(BASE_DIR)
 from app.core.config import settings
 from app.db.core import db
 from app.services.driver_presence import is_driver_online
+from app.modules.locations.fleet import fetch_fleet_snapshot
 from app.services.driver_presence_projection import PRESENCE_RECONCILIATION_STATE
 from app.services.order_event_outbox import run_order_event_outbox_worker
 from app.services.driver_presence_projection import run_driver_presence_reconciliation_worker
@@ -341,25 +341,9 @@ app.mount("/admin", StaticFiles(directory=static_dir, html=True), name="admin")
 
 @app.get("/api/admin/fleet", dependencies=[Depends(verify_token)])
 async def get_live_fleet():
-    async with db.pool.acquire() as c:
-        rows = await c.fetch(
-            """
-            SELECT u.id, u.telegram_id, u.first_name, u.phone, u.plate_number,
-                   u.rating, ST_Y(l.position::geometry) AS latitude,
-                   ST_X(l.position::geometry) AS longitude,
-                   l.accuracy_m, l.heading_deg, l.speed_mps,
-                   l.recorded_at, l.received_at
-            FROM users u
-            LEFT JOIN driver_locations l ON l.driver_id=u.id
-            WHERE u.driver_status='APPROVED'
-            ORDER BY l.received_at DESC NULLS LAST
-            """
-        )
-    return [
-        {**dict(row), "online": bool(row["received_at"] and
-          (datetime.now(timezone.utc) - row["received_at"]).total_seconds() <= 120)}
-        for row in rows
-    ]
+    async with db.pool.acquire() as connection:
+        return await fetch_fleet_snapshot(connection)
+
 
 
 @app.get("/metrics")
