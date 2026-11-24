@@ -1627,3 +1627,49 @@ async def test_offline_transition_rechecks_active_trip_after_waiting_for_driver_
             await connection.execute(
                 "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
             )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_passenger_booking_idempotency_creates_one_order(database_pool):
+    from app.db.repositories.order_repo import IdempotencyConflict
+
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "booking-idempotency-passenger")
+
+    key = f"passenger-booking-{uuid.uuid4()}"
+    fingerprint = "a" * 64
+    outcomes = await asyncio.gather(
+        OrderRepository.create(
+            passenger_id, 104.92, 11.55, 104.95, 11.57, 6.25, 4.75,
+            idempotency_key=key, request_fingerprint=fingerprint,
+        ),
+        OrderRepository.create(
+            passenger_id, 104.92, 11.55, 104.95, 11.57, 6.25, 4.75,
+            idempotency_key=key, request_fingerprint=fingerprint,
+        ),
+    )
+    order_ids = {item["id"] for item in outcomes}
+    assert len(order_ids) == 1
+    assert sorted(item["replayed"] for item in outcomes) == [False, True]
+    order_id = outcomes[0]["id"]
+
+    async with database_pool.acquire() as connection:
+        order_count = await connection.fetchval(
+            "SELECT COUNT(*) FROM orders WHERE customer_id=$1 AND idempotency_key=$2",
+            passenger_id, key,
+        )
+        event_count = await connection.fetchval(
+            "SELECT COUNT(*) FROM order_events WHERE order_id=$1", order_id
+        )
+    assert order_count == 1
+    assert event_count == 1
+
+    with pytest.raises(IdempotencyConflict):
+        await OrderRepository.create(
+            passenger_id, 104.93, 11.55, 104.95, 11.57, 6.25, 4.75,
+            idempotency_key=key, request_fingerprint="b" * 64,
+        )
+
+    async with database_pool.acquire() as connection:
+        await connection.execute("DELETE FROM orders WHERE id=$1", order_id)
+        await connection.execute("DELETE FROM users WHERE id=$1", passenger_id)
