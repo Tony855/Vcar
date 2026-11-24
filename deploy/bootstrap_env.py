@@ -143,6 +143,13 @@ BEGIN
     END LOOP;
 END
 $order_audit$;
+DO $order_event_history$
+BEGIN
+    IF to_regclass('public.order_events') IS NOT NULL THEN
+        REVOKE UPDATE, DELETE ON TABLE public.order_events FROM vcar_app;
+    END IF;
+END
+$order_event_history$;
 """
     sql_path = Path(args.write_role_sql)
     sql_path.write_text(sql)
