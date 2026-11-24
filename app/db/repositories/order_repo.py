@@ -5,6 +5,10 @@ from app.db.core import db
 from app.modules.orders.state_machine import validate_transition, InvalidOrderTransition
 
 
+class IdempotencyConflict(ValueError):
+    """An idempotency key was reused for a different logical request."""
+
+
 class OrderRepository:
     @staticmethod
     async def _append_event(
@@ -167,9 +171,6 @@ class OrderRepository:
                 )
             return {"id": row["id"], "replayed": False}
 
-
-class IdempotencyConflict(ValueError):
-    """An idempotency key was reused for a different logical request."""
 
     @staticmethod
     async def get(oid):
