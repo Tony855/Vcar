@@ -1673,3 +1673,62 @@ async def test_concurrent_passenger_booking_idempotency_creates_one_order(databa
     async with database_pool.acquire() as connection:
         await connection.execute("DELETE FROM orders WHERE id=$1", order_id)
         await connection.execute("DELETE FROM users WHERE id=$1", passenger_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_passenger_and_driver_cancellation_commit_one_fee_and_event(database_pool):
+    """Only one participant may win cancellation and its fee snapshot must be durable."""
+    async with database_pool.acquire() as connection:
+        passenger_id = await _create_user(connection, "cancel-passenger")
+        driver_id = await _create_user(connection, "cancel-driver")
+
+    order = await OrderRepository.create(
+        passenger_id, 104.9, 11.5, 104.95, 11.55, 5.0, 3.5
+    )
+    try:
+        assert await OrderRepository.accept(order["id"], driver_id) is True
+
+        outcomes = await asyncio.gather(
+            OrderRepository.cancel_with_fee(
+                order["id"], passenger_id, "PASSENGER", fee=Decimal("2.50")
+            ),
+            OrderRepository.cancel_with_fee(
+                order["id"], driver_id, "DRIVER", fee=Decimal("1.75")
+            ),
+        )
+        assert sorted(outcomes) == [False, True]
+
+        async with database_pool.acquire() as connection:
+            row = await connection.fetchrow(
+                "SELECT status, cancel_by, cancel_fee FROM orders WHERE id=$1",
+                order["id"],
+            )
+            events = await connection.fetch(
+                "SELECT from_status, to_status, actor_role, metadata "
+                "FROM order_events WHERE order_id=$1 ORDER BY id",
+                order["id"],
+            )
+            outbox = await connection.fetchval(
+                "SELECT count(*) FROM order_event_outbox WHERE order_id=$1",
+                order["id"],
+            )
+
+        assert row["status"] == "CANCELLED"
+        assert row["cancel_by"] in {"PASSENGER", "DRIVER"}
+        assert row["cancel_fee"] in {Decimal("2.50"), Decimal("1.75")}
+        assert [event["to_status"] for event in events] == [
+            "DISPATCHING", "ACCEPTED", "CANCELLED"
+        ]
+        assert events[-1]["from_status"] == "ACCEPTED"
+        assert events[-1]["actor_role"] == row["cancel_by"]
+        metadata = events[-1]["metadata"]
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+        assert metadata["cancel_fee"] == format(row["cancel_fee"], "f")
+        assert outbox == 3
+    finally:
+        async with database_pool.acquire() as connection:
+            await connection.execute("DELETE FROM orders WHERE id=$1", order["id"])
+            await connection.execute(
+                "DELETE FROM users WHERE id = ANY($1)", [passenger_id, driver_id]
+            )
