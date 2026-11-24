@@ -15,6 +15,7 @@ def row(telegram_id, received_at, **extra):
         "latitude": 11.5564,
         "longitude": 104.9282,
         "received_at": received_at,
+        "driver_is_online": extra.pop("driver_is_online", True),
         **extra,
     }
 
@@ -26,6 +27,14 @@ def test_fleet_snapshot_marks_recent_driver_online():
     )
     assert snapshot[0]["online"] is True
 
+
+
+def test_fleet_snapshot_marks_recent_gps_offline_when_durable_state_is_offline():
+    snapshot = build_fleet_snapshot(
+        [row(1001, NOW - timedelta(seconds=5), driver_is_online=False)],
+        now=NOW,
+    )
+    assert snapshot[0]["online"] is False
 
 def test_fleet_snapshot_marks_stale_driver_offline():
     snapshot = build_fleet_snapshot(
@@ -60,6 +69,7 @@ async def test_fetch_fleet_snapshot_reads_durable_approved_fleet():
     class Connection:
         async def fetch(self, query):
             assert "driver_status='APPROVED'" in query
+            assert "driver_is_online" in query
             return [row(1001, NOW)]
 
     snapshot = await fetch_fleet_snapshot(Connection(), now=NOW)
