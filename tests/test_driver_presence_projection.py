@@ -227,17 +227,21 @@ async def test_real_redis_reconciliation_repairs_500_drivers_and_prunes_orphans(
         driver_row(base_id + index, now, age=5, recorded_age=6)
         for index in range(500)
     ]
-    stale_id = f"stale-{uuid.uuid4().hex}"
+    stale_ids = [
+        f"stale-{uuid.uuid4().hex}-{index}" for index in range(1205)
+    ]
     racing_id = f"racing-{uuid.uuid4().hex}"
     try:
-        await redis.geoadd("driver:online", (104.9, 11.5, stale_id))
-        await redis.geoadd("driver:online", (104.9, 11.5, racing_id))
+        async with redis.pipeline(transaction=False) as pipe:
+            for member in stale_ids + [racing_id]:
+                pipe.geoadd("driver:online", (104.9, 11.5, member))
+            await pipe.execute()
         await redis.zadd("driver:heartbeat", {
-            stale_id: now.timestamp() - 600,
+            **{member: now.timestamp() - 600 for member in stale_ids},
             racing_id: now.timestamp() + 1,
         })
         await redis.zadd("driver:location:version", {
-            stale_id: now.timestamp() - 600,
+            **{member: now.timestamp() - 600 for member in stale_ids},
             racing_id: now.timestamp() - 5,
         })
 
@@ -246,11 +250,12 @@ async def test_real_redis_reconciliation_repairs_500_drivers_and_prunes_orphans(
         assert result == {
             "database_fresh": 500,
             "repaired": 500,
-            "stale_removed": 1,
+            "stale_removed": 1205,
         }
         assert await redis.zcard("driver:heartbeat") == 501
         assert await redis.zcard("driver:online") == 501
-        assert await redis.zscore("driver:heartbeat", stale_id) is None
+        assert await redis.zscore("driver:heartbeat", stale_ids[0]) is None
+        assert await redis.zscore("driver:heartbeat", stale_ids[-1]) is None
         assert await redis.zscore("driver:heartbeat", racing_id) == now.timestamp() + 1
         assert await redis.zscore("driver:heartbeat", str(base_id + 499)) == pytest.approx(
             (now - timedelta(seconds=5)).timestamp()
@@ -259,7 +264,10 @@ async def test_real_redis_reconciliation_repairs_500_drivers_and_prunes_orphans(
             (now - timedelta(seconds=6)).timestamp()
         )
     finally:
-        members = [str(base_id + index) for index in range(500)] + [stale_id, racing_id]
+        members = (
+            [str(base_id + index) for index in range(500)]
+            + stale_ids + [racing_id]
+        )
         await redis.zrem("driver:heartbeat", *members)
         await redis.zrem("driver:location:version", *members)
         await redis.zrem("driver:online", *members)
