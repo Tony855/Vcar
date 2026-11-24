@@ -614,3 +614,74 @@ async def test_overlapping_balanced_batches_lock_wallets_in_stable_order(databas
                 wallet_ids,
             )
             await conn.execute("DELETE FROM users WHERE id=ANY($1::bigint[])", user_ids)
+
+
+@pytest.mark.asyncio
+async def test_wallet_batch_reconciles_account_balances_to_ledger_entries(database_pool):
+    """A posted balanced batch must reconcile each wallet and net to zero."""
+    async with database_pool.acquire() as conn:
+        user_ids = []
+        wallet_ids = []
+        for initial in (4200, 300):
+            telegram_id = int(uuid.uuid4().int % 8_000_000_000) + 1
+            user_id = await conn.fetchval(
+                "INSERT INTO users (telegram_id, first_name) VALUES ($1, 'wallet-reconcile') RETURNING id",
+                telegram_id,
+            )
+            wallet_id = await conn.fetchval(
+                "INSERT INTO wallet_accounts (user_id, currency, balance_minor) VALUES ($1, 'USD', $2) RETURNING id",
+                user_id, initial,
+            )
+            user_ids.append(user_id)
+            wallet_ids.append(wallet_id)
+
+    key = f"wallet-reconcile-{uuid.uuid4()}"
+    legs = [
+        {"user_id": user_ids[0], "amount_minor": -900, "kind": "RECONCILE_OUT"},
+        {"user_id": user_ids[1], "amount_minor": 900, "kind": "RECONCILE_IN"},
+    ]
+    try:
+        result = await WalletLedger.post_balanced_batch(
+            currency="USD", legs=legs, idempotency_key=key
+        )
+        assert result.replayed is False
+
+        async with database_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT w.id, w.balance_minor,
+                       COALESCE(SUM(t.amount_minor), 0)::bigint AS ledger_total
+                FROM wallet_accounts w
+                LEFT JOIN wallet_transactions t ON t.wallet_id=w.id
+                WHERE w.id=ANY($1::bigint[])
+                GROUP BY w.id, w.balance_minor
+                ORDER BY w.id
+                """,
+                wallet_ids,
+            )
+            batch_total = await conn.fetchval(
+                """
+                SELECT COALESCE(SUM(amount_minor), 0)::bigint
+                FROM wallet_transactions
+                WHERE idempotency_key=ANY($1::text[])
+                """,
+                [f"{key}:0", f"{key}:1"],
+            )
+
+        assert [row["balance_minor"] for row in rows] == [3300, 1200]
+        assert [row["ledger_total"] for row in rows] == [ -900, 900]
+        assert batch_total == 0
+    finally:
+        async with database_pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM wallet_transactions WHERE wallet_id=ANY($1::bigint[])",
+                wallet_ids,
+            )
+            await conn.execute(
+                "DELETE FROM wallet_accounts WHERE id=ANY($1::bigint[])",
+                wallet_ids,
+            )
+            await conn.execute(
+                "DELETE FROM users WHERE id=ANY($1::bigint[])",
+                user_ids,
+            )
