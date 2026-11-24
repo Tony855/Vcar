@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 FLEET_SNAPSHOT_QUERY = """
     SELECT u.id, u.telegram_id, u.first_name, u.phone, u.plate_number,
-           u.rating, ST_Y(l.position::geometry) AS latitude,
+           u.rating, u.driver_is_online, ST_Y(l.position::geometry) AS latitude,
            ST_X(l.position::geometry) AS longitude,
            l.accuracy_m, l.heading_deg, l.speed_mps,
            l.recorded_at, l.received_at
@@ -31,14 +31,16 @@ def build_fleet_snapshot(rows, *, now: datetime | None = None) -> list[dict]:
     for row in rows:
         driver = dict(row)
         received_at = driver.get("received_at")
-        online = False
+        online = bool(driver.get("driver_is_online"))
         if (
             isinstance(received_at, datetime)
             and received_at.tzinfo is not None
             and received_at.utcoffset() is not None
         ):
             age_seconds = (current - received_at).total_seconds()
-            online = 0 <= age_seconds <= 120
+            online = online and 0 <= age_seconds <= 120
+        else:
+            online = False
         driver["online"] = online
         result.append(driver)
     return result
