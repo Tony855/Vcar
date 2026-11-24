@@ -122,8 +122,8 @@ from fastapi.responses import HTMLResponse
 
 # ================= 数据模型 =================
 class LoginData(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
 
 class PriceUpdate(BaseModel):
     base_fare: float
